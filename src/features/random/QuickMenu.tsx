@@ -9,15 +9,24 @@ interface QuickMenuProps {
   entry: Entry;
   onClose: () => void;
   onToggleStar: () => void;
+  onViewLinks?: () => void;
+  onEditTags?: () => void;
 }
 
-export function QuickMenu({ entry, onClose, onToggleStar }: QuickMenuProps) {
+export function QuickMenu({
+  entry,
+  onClose,
+  onToggleStar,
+  onViewLinks,
+  onEditTags,
+}: QuickMenuProps) {
   const menuItems = [
-    { icon: '🏷️', label: '编辑标签', action: () => {} },
+    { icon: '🏷️', label: '编辑标签', action: onEditTags },
     { icon: entry.isStarred ? '⭐' : '☆', label: entry.isStarred ? '取消星标' : '星标', action: onToggleStar },
     { icon: '📋', label: '详情', action: () => {} },
     { icon: '📎', label: '添加到组', action: () => {} },
-    { icon: '🔗', label: '查看连线', action: () => {} },
+    { icon: '🔗', label: '查看连线', action: onViewLinks },
+    { icon: '💬', label: 'AI 对话', action: () => {} },
   ];
 
   return (
@@ -34,7 +43,7 @@ export function QuickMenu({ entry, onClose, onToggleStar }: QuickMenuProps) {
               key={index}
               className="menu-item"
               onClick={() => {
-                item.action();
+                item.action?.();
                 onClose();
               }}
             >

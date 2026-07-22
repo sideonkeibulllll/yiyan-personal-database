@@ -10,6 +10,9 @@ const HomePage = lazy(() => import('@/features/input/HomePage').then(m => ({ def
 const RandomPage = lazy(() => import('@/features/random/RandomPage').then(m => ({ default: m.RandomPage })));
 const SearchPage = lazy(() => import('@/features/search/SearchPage').then(m => ({ default: m.SearchPage })));
 const SettingsPage = lazy(() => import('@/features/settings/SettingsPage').then(m => ({ default: m.SettingsPage })));
+const TagManagePage = lazy(() => import('@/features/tags/TagManagePage').then(m => ({ default: m.TagManagePage })));
+const LinkPage = lazy(() => import('@/features/links/LinkPage').then(m => ({ default: m.LinkPage })));
+const ExportPage = lazy(() => import('@/features/settings/ExportPage').then(m => ({ default: m.ExportPage })));
 
 const router = createHashRouter([
   {
@@ -41,6 +44,30 @@ const router = createHashRouter([
     element: (
       <Suspense fallback={<Loading />}>
         <SettingsPage />
+      </Suspense>
+    ),
+  },
+  {
+    path: '/tags',
+    element: (
+      <Suspense fallback={<Loading />}>
+        <TagManagePage />
+      </Suspense>
+    ),
+  },
+  {
+    path: '/links/:entryId',
+    element: (
+      <Suspense fallback={<Loading />}>
+        <LinkPage />
+      </Suspense>
+    ),
+  },
+  {
+    path: '/export',
+    element: (
+      <Suspense fallback={<Loading />}>
+        <ExportPage />
       </Suspense>
     ),
   },

@@ -1,14 +1,19 @@
 /**
- * 设置页面 (Phase 1 基础版本)
+ * 设置页面
+ * AI 配置 + 数据管理 + 标签管理 + 关于
  */
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useSettingsStore } from '@/stores/settingsStore';
+import { useEntryStore } from '@/stores/entryStore';
 import { BottomNav } from '@/components/BottomNav';
 import './SettingsPage.css';
 
 export function SettingsPage() {
+  const navigate = useNavigate();
   const settings = useSettingsStore(state => state.settings);
   const updateAIConfig = useSettingsStore(state => state.updateAIConfig);
+  const entries = useEntryStore(state => state.entries);
   const [showAIConfig, setShowAIConfig] = useState(false);
 
   return (
@@ -124,17 +129,50 @@ export function SettingsPage() {
           )}
         </section>
 
-        {/* 数据管理 */}
+        {/* 标签管理 */}
         <section className="settings-section">
-          <div className="settings-item glass">
+          <button
+            className="settings-item glass"
+            onClick={() => navigate('/tags')}
+          >
             <div className="item-left">
-              <span className="item-icon">💾</span>
+              <span className="item-icon">🏷️</span>
               <div>
-                <span className="item-title">数据管理</span>
-                <span className="item-desc">导出与备份</span>
+                <span className="item-title">标签管理</span>
+                <span className="item-desc">合并、重命名、删除标签</span>
               </div>
             </div>
             <span className="item-arrow">▶</span>
+          </button>
+        </section>
+
+        {/* 数据导出 */}
+        <section className="settings-section">
+          <button
+            className="settings-item glass"
+            onClick={() => navigate('/export')}
+          >
+            <div className="item-left">
+              <span className="item-icon">💾</span>
+              <div>
+                <span className="item-title">数据导出</span>
+                <span className="item-desc">{entries.length} 条记录可导出</span>
+              </div>
+            </div>
+            <span className="item-arrow">▶</span>
+          </button>
+        </section>
+
+        {/* 数据本地化 */}
+        <section className="settings-section">
+          <div className="settings-item glass">
+            <div className="item-left">
+              <span className="item-icon">📱</span>
+              <div>
+                <span className="item-title">数据存储</span>
+                <span className="item-desc">本地 SQLite 数据库</span>
+              </div>
+            </div>
           </div>
         </section>
 

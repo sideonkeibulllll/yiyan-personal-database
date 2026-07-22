@@ -175,3 +175,139 @@
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+
+/* === 筛选按钮 === */
+.filter-btn {
+  position: absolute;
+  right: var(--space-5);
+  top: var(--space-6);
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--color-bg-elevated);
+  color: var(--color-text-secondary);
+  font-size: var(--text-base);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.filter-btn:active {
+  transform: scale(0.9);
+}
+
+/* === 活跃筛选标签 === */
+.active-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: 0 var(--space-5);
+}
+
+.filter-badge {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  color: var(--color-accent-secondary);
+  background: var(--color-accent-subtle);
+  border: 1px solid var(--color-border-accent);
+}
+
+.filter-badge button {
+  color: var(--color-accent-secondary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+
+.filter-badge button:hover {
+  opacity: 1;
+}
+
+/* === 筛选面板 === */
+.filter-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 300;
+  animation: fadeIn var(--duration-fast) var(--ease-out);
+}
+
+.filter-panel {
+  width: 100%;
+  max-width: 400px;
+  max-height: 80vh;
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  padding: var(--space-5);
+  padding-bottom: calc(var(--space-5) + var(--safe-bottom));
+  animation: slideUp var(--duration-normal) var(--ease-out);
+  overflow-y: auto;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-5);
+}
+
+.panel-header h3 {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.panel-header button {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--color-bg-elevated);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.filter-section {
+  margin-bottom: var(--space-5);
+}
+
+.filter-label {
+  display: block;
+  font-size: var(--text-sm);
+  color: var(--color-text-tertiary);
+  margin-bottom: var(--space-3);
+}
+
+.star-filter {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.star-filter button {
+  flex: 1;
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-primary);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.star-filter button.active {
+  color: var(--color-accent-secondary);
+  background: var(--color-accent-subtle);
+  border-color: var(--color-border-accent);
+}

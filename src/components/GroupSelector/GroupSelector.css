@@ -1,0 +1,165 @@
+.group-selector {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  max-height: 60vh;
+  overflow: hidden;
+}
+
+.selector-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.selector-title {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.selector-close {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--color-bg-elevated);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.selector-close:active {
+  transform: scale(0.9);
+}
+
+/* === 组列表 === */
+.group-list {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  overflow-y: auto;
+  min-height: 60px;
+}
+
+.group-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-primary);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.group-item:active {
+  transform: scale(0.99);
+}
+
+.group-item.selected {
+  background: var(--color-accent-subtle);
+  border-color: var(--color-border-accent);
+}
+
+.group-icon {
+  font-size: var(--text-xl);
+}
+
+.group-name {
+  flex: 1;
+  font-size: var(--text-base);
+  color: var(--color-text-primary);
+  text-align: left;
+}
+
+.group-check {
+  color: var(--color-accent-secondary);
+  font-weight: 600;
+}
+
+.loading-text,
+.no-groups {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+  color: var(--color-text-disabled);
+  font-size: var(--text-sm);
+}
+
+/* === 创建组 === */
+.create-group {
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border-secondary);
+}
+
+.create-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.create-trigger:active {
+  transform: scale(0.98);
+}
+
+.create-trigger .btn-icon {
+  font-size: var(--text-lg);
+  color: var(--color-accent-primary);
+}
+
+.create-form {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border-radius: var(--radius-md);
+}
+
+.create-input {
+  flex: 1;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+  background: transparent;
+}
+
+.create-input::placeholder {
+  color: var(--color-text-disabled);
+}
+
+.create-confirm,
+.create-cancel {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.create-confirm {
+  background: var(--color-accent-primary);
+  color: white;
+}
+
+.create-confirm:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.create-cancel {
+  color: var(--color-text-tertiary);
+}

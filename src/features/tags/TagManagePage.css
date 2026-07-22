@@ -1,0 +1,247 @@
+.tag-manage-page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  padding-bottom: calc(80px + var(--safe-bottom));
+}
+
+.page-header {
+  display: flex;
+  align-items: center;
+  padding: var(--space-4) var(--space-5);
+  gap: var(--space-3);
+}
+
+.back-btn {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--color-bg-elevated);
+  color: var(--color-text-secondary);
+  font-size: var(--text-lg);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.back-btn:active {
+  transform: scale(0.9);
+}
+
+.page-title {
+  flex: 1;
+  font-size: var(--text-xl);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  text-align: center;
+}
+
+.header-spacer {
+  width: 36px;
+}
+
+.page-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 0 var(--space-5);
+  gap: var(--space-4);
+}
+
+/* === 搜索框 === */
+.search-wrapper {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+}
+
+.search-icon {
+  opacity: 0.6;
+}
+
+.search-input {
+  flex: 1;
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+}
+
+.search-input::placeholder {
+  color: var(--color-text-disabled);
+}
+
+/* === 标签列表 === */
+.tags-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  overflow-y: auto;
+}
+
+.tag-row {
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+}
+
+.tag-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-3);
+}
+
+.tag-name {
+  font-size: var(--text-base);
+  color: var(--color-text-primary);
+  font-weight: 500;
+}
+
+.tag-date {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+}
+
+.tag-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.action-btn {
+  flex: 1;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-elevated);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.action-btn:active {
+  transform: scale(0.98);
+}
+
+.action-btn.danger {
+  color: var(--color-error);
+}
+
+/* === 编辑表单 === */
+.edit-form {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.edit-input {
+  flex: 1;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+  background: var(--color-bg-elevated);
+  border-radius: var(--radius-sm);
+}
+
+.edit-input::placeholder {
+  color: var(--color-text-disabled);
+}
+
+.edit-confirm,
+.edit-cancel {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.edit-confirm {
+  background: var(--color-accent-primary);
+  color: white;
+}
+
+.edit-cancel {
+  color: var(--color-text-tertiary);
+}
+
+/* === 空状态 === */
+.empty-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-12) 0;
+}
+
+.empty-icon {
+  font-size: 48px;
+  opacity: 0.5;
+}
+
+.empty-text {
+  font-size: var(--text-sm);
+  color: var(--color-text-tertiary);
+}
+
+/* === 删除确认弹窗 === */
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 300;
+  animation: fadeIn var(--duration-fast) var(--ease-out);
+}
+
+.confirm-dialog {
+  width: 80%;
+  max-width: 320px;
+  padding: var(--space-6);
+  border-radius: var(--radius-lg);
+  animation: scaleIn var(--duration-normal) var(--ease-spring);
+}
+
+.confirm-title {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin-bottom: var(--space-3);
+}
+
+.confirm-text {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+  margin-bottom: var(--space-5);
+}
+
+.confirm-actions {
+  display: flex;
+  gap: var(--space-3);
+}
+
+.confirm-cancel,
+.confirm-delete {
+  flex: 1;
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.confirm-cancel {
+  color: var(--color-text-secondary);
+  background: var(--color-bg-elevated);
+}
+
+.confirm-delete {
+  color: white;
+  background: var(--color-error);
+}
