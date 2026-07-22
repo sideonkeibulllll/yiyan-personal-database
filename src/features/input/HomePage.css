@@ -177,6 +177,60 @@
   transform: scale(0.98);
 }
 
+/* === 标签选择器弹层 === */
+.home-tag-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 300;
+  animation: fadeIn var(--duration-fast) var(--ease-out);
+}
+
+.home-tag-panel {
+  width: 100%;
+  max-width: 600px;
+  max-height: 80vh;
+  overflow-y: auto;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  animation: slideUp var(--duration-normal) var(--ease-out);
+}
+
+.home-tag-actions {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-5) calc(var(--space-5) + var(--safe-bottom));
+  border-top: 1px solid var(--color-border-secondary);
+}
+
+.home-tag-btn {
+  flex: 1;
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  font-size: var(--text-base);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.home-tag-btn:active {
+  transform: scale(0.98);
+}
+
+.home-tag-cancel {
+  background: var(--color-bg-elevated);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border-primary);
+}
+
+.home-tag-confirm {
+  background: linear-gradient(135deg, var(--color-accent-primary), var(--color-accent-secondary));
+  color: white;
+  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.3);
+}
+
 /* === 轻提示 === */
 .toast {
   position: fixed;

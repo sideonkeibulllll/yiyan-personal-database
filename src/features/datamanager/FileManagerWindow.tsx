@@ -112,10 +112,7 @@ export function FileManagerWindow({
 
   const handleItemLongPress = (item: ListItem) => {
     if (item.type === 'file') {
-      if (!multiSelectMode) {
-        setMultiSelectMode(true);
-      }
-      onMultiSelectToggle(item.id);
+      // 长按只弹出菜单，不影响选中状态
       onLongPress(item.id);
     }
   };

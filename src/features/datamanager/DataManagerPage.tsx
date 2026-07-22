@@ -3,7 +3,7 @@
  * MT管理器风格双栏文件管理
  */
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { getDatabase } from '@/services/database';
 import { useEntryStore } from '@/stores/entryStore';
 import { useTagStore } from '@/stores/tagStore';
@@ -16,30 +16,11 @@ import './DataManagerPage.css';
 
 export function DataManagerPage() {
   const navigate = useNavigate();
-  const params = useParams<{ mode?: string }>();
 
-  // 确定初始模式
-  const initialMode: ManagerMode = (() => {
-    const m = params.mode;
-    if (m === 'tags' || m === 'groups' || m === 'data') return m;
-    return 'tags';
-  })();
-
-  // 两个窗口的状态
-  const [leftWindow, setLeftWindow] = useState<WindowState>(() => createInitialWindowState(initialMode));
-  const [rightWindow, setRightWindow] = useState<WindowState>(() => createInitialWindowState(initialMode));
+  // 两个窗口的状态 —— 各自独立
+  const [leftWindow, setLeftWindow] = useState<WindowState>(() => createInitialWindowState('tags'));
+  const [rightWindow, setRightWindow] = useState<WindowState>(() => createInitialWindowState('data'));
   const [activeWindow, setActiveWindow] = useState<'left' | 'right'>('left');
-
-  // 当 URL 参数变化时，同步模式
-  useEffect(() => {
-    const m = params.mode;
-    const mode: ManagerMode = (m === 'tags' || m === 'groups' || m === 'data') ? m : 'tags';
-    const currentMode = leftWindow.mode;
-    if (mode !== currentMode) {
-      setLeftWindow(createInitialWindowState(mode));
-      setRightWindow(createInitialWindowState(mode));
-    }
-  }, [params.mode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // UI 状态
   const [sideMenuOpen, setSideMenuOpen] = useState(false);
@@ -62,14 +43,11 @@ export function DataManagerPage() {
     setTimeout(() => setToast(null), 2000);
   }, []);
 
-  // 模式切换
+  // 模式切换 —— 只影响当前激活窗口
   const handleModeChange = useCallback((mode: ManagerMode) => {
-    const newLeft = createInitialWindowState(mode);
-    const newRight = createInitialWindowState(mode);
-    setLeftWindow(newLeft);
-    setRightWindow(newRight);
-    navigate(`/data-manager/${mode}`);
-  }, [navigate]);
+    const setter = activeWindow === 'left' ? setLeftWindow : setRightWindow;
+    setter(createInitialWindowState(mode));
+  }, [activeWindow]);
 
   // 路径导航
   const navigateTo = useCallback((side: 'left' | 'right', path: PathSegment[]) => {
@@ -220,7 +198,7 @@ export function DataManagerPage() {
     }
   }, [newName, activeWindow, leftWindow, rightWindow, showToast, loadTags]);
 
-  // 底部操作：窗口复制
+  // 底部操作：复制路径到另一窗口（保留原有功能）
   const handleSwap = useCallback(() => {
     const sourceWindow = activeWindow === 'left' ? leftWindow : rightWindow;
     const targetSetter = activeWindow === 'left' ? setRightWindow : setLeftWindow;
@@ -237,6 +215,98 @@ export function DataManagerPage() {
       };
     });
     showToast('已复制路径到另一窗口');
+  }, [activeWindow, leftWindow, rightWindow, showToast]);
+
+  // 底部操作：复制选中条目到另一窗口（跨窗口复制）
+  const handleCopyToOtherWindow = useCallback(async () => {
+    const sourceWindow = activeWindow === 'left' ? leftWindow : rightWindow;
+    const targetWindow = activeWindow === 'left' ? rightWindow : leftWindow;
+    const selectedIds = sourceWindow.selectedIds;
+
+    if (selectedIds.size === 0) {
+      showToast('请先选择条目');
+      return;
+    }
+
+    // 目标窗口必须在标签或组的某个文件夹下
+    if (targetWindow.mode === 'data') {
+      showToast('目标窗口不在标签或组路径下');
+      return;
+    }
+    if (targetWindow.path.length < 2) {
+      showToast('目标窗口需要在某个文件夹内');
+      return;
+    }
+
+    try {
+      const db = await getDatabase();
+      const targetFolderId = targetWindow.path[targetWindow.path.length - 1].id;
+
+      for (const entryId of selectedIds) {
+        if (targetWindow.mode === 'tags') {
+          await db.addTagToEntry(entryId, targetFolderId);
+        } else if (targetWindow.mode === 'groups') {
+          await db.updateEntry(entryId, { groupId: targetFolderId });
+        }
+      }
+
+      const action = targetWindow.mode === 'tags' ? '添加标签' : '修改分组';
+      showToast(`已${action} ${selectedIds.size} 条`);
+      setLeftWindow(prev => ({ ...prev }));
+      setRightWindow(prev => ({ ...prev }));
+      await useEntryStore.getState().loadEntries();
+    } catch (err) {
+      showToast('操作失败: ' + (err as Error).message);
+    }
+  }, [activeWindow, leftWindow, rightWindow, showToast]);
+
+  // 底部操作：移动选中条目到另一窗口（跨窗口移动）
+  const handleMoveToOtherWindow = useCallback(async () => {
+    const sourceWindow = activeWindow === 'left' ? leftWindow : rightWindow;
+    const targetWindow = activeWindow === 'left' ? rightWindow : leftWindow;
+    const selectedIds = sourceWindow.selectedIds;
+
+    if (selectedIds.size === 0) {
+      showToast('请先选择条目');
+      return;
+    }
+
+    if (targetWindow.mode === 'data') {
+      showToast('目标窗口不在标签或组路径下');
+      return;
+    }
+    if (targetWindow.path.length < 2) {
+      showToast('目标窗口需要在某个文件夹内');
+      return;
+    }
+
+    try {
+      const db = await getDatabase();
+      const targetFolderId = targetWindow.path[targetWindow.path.length - 1].id;
+      const sourceFolderId = sourceWindow.path.length >= 2 ? sourceWindow.path[sourceWindow.path.length - 1].id : null;
+
+      for (const entryId of selectedIds) {
+        // 移除当前窗口路径对应的属性
+        if (sourceWindow.mode === 'tags' && sourceFolderId) {
+          await db.removeTagFromEntry(entryId, sourceFolderId);
+        } else if (sourceWindow.mode === 'groups' && sourceFolderId) {
+          await db.updateEntry(entryId, { groupId: undefined });
+        }
+        // 添加目标窗口路径对应的属性
+        if (targetWindow.mode === 'tags') {
+          await db.addTagToEntry(entryId, targetFolderId);
+        } else if (targetWindow.mode === 'groups') {
+          await db.updateEntry(entryId, { groupId: targetFolderId });
+        }
+      }
+
+      showToast(`已移动 ${selectedIds.size} 条到另一窗口`);
+      setLeftWindow(prev => ({ ...prev }));
+      setRightWindow(prev => ({ ...prev }));
+      await useEntryStore.getState().loadEntries();
+    } catch (err) {
+      showToast('操作失败: ' + (err as Error).message);
+    }
   }, [activeWindow, leftWindow, rightWindow, showToast]);
 
   // 排序方式切换
@@ -328,28 +398,35 @@ export function DataManagerPage() {
   const handleCopyToOther = useCallback(async () => {
     const sourceWindow = activeWindow === 'left' ? leftWindow : rightWindow;
     const targetWindow = activeWindow === 'left' ? rightWindow : leftWindow;
-    const selectedIds = sourceWindow.selectedIds;
 
-    if (selectedIds.size === 0) {
+    // 确定要操作的条目 ID：优先使用选中的，否则使用长按的
+    const ids = sourceWindow.selectedIds.size > 0
+      ? sourceWindow.selectedIds
+      : (actionMenuEntryId ? new Set([actionMenuEntryId]) : new Set<string>());
+
+    if (ids.size === 0) {
       showToast('请先选择条目');
+      setShowActionMenu(false);
+      return;
+    }
+
+    // 目标窗口必须在标签或组的某个文件夹下
+    if (targetWindow.mode === 'data') {
+      showToast('目标窗口不在标签或组路径下');
+      setShowActionMenu(false);
+      return;
+    }
+    if (targetWindow.path.length < 2) {
+      showToast('目标窗口需要在某个文件夹内');
       setShowActionMenu(false);
       return;
     }
 
     try {
       const db = await getDatabase();
-      const targetPath = targetWindow.path;
+      const targetFolderId = targetWindow.path[targetWindow.path.length - 1].id;
 
-      // 目标必须是某个文件夹内
-      if (targetPath.length < 2) {
-        showToast('目标窗口需要在某个文件夹内');
-        setShowActionMenu(false);
-        return;
-      }
-
-      const targetFolderId = targetPath[targetPath.length - 1].id;
-
-      for (const entryId of selectedIds) {
+      for (const entryId of ids) {
         if (targetWindow.mode === 'tags') {
           await db.addTagToEntry(entryId, targetFolderId);
         } else if (targetWindow.mode === 'groups') {
@@ -357,8 +434,8 @@ export function DataManagerPage() {
         }
       }
 
-      showToast(`已复制 ${selectedIds.size} 条到另一窗口`);
-      // 刷新
+      const action = targetWindow.mode === 'tags' ? '添加标签' : '修改分组';
+      showToast(`已${action} ${ids.size} 条`);
       setLeftWindow(prev => ({ ...prev }));
       setRightWindow(prev => ({ ...prev }));
       await loadEntries();
@@ -368,16 +445,30 @@ export function DataManagerPage() {
 
     setShowActionMenu(false);
     setActionMenuEntryId(null);
-  }, [activeWindow, leftWindow, rightWindow, showToast, loadEntries]);
+  }, [activeWindow, leftWindow, rightWindow, actionMenuEntryId, showToast, loadEntries]);
 
   // 操作菜单：移动到另一窗口
   const handleMoveToOther = useCallback(async () => {
     const sourceWindow = activeWindow === 'left' ? leftWindow : rightWindow;
     const targetWindow = activeWindow === 'left' ? rightWindow : leftWindow;
-    const selectedIds = sourceWindow.selectedIds;
 
-    if (selectedIds.size === 0) {
+    const ids = sourceWindow.selectedIds.size > 0
+      ? sourceWindow.selectedIds
+      : (actionMenuEntryId ? new Set([actionMenuEntryId]) : new Set<string>());
+
+    if (ids.size === 0) {
       showToast('请先选择条目');
+      setShowActionMenu(false);
+      return;
+    }
+
+    if (targetWindow.mode === 'data') {
+      showToast('目标窗口不在标签或组路径下');
+      setShowActionMenu(false);
+      return;
+    }
+    if (targetWindow.path.length < 2) {
+      showToast('目标窗口需要在某个文件夹内');
       setShowActionMenu(false);
       return;
     }
@@ -387,19 +478,15 @@ export function DataManagerPage() {
       const sourcePath = sourceWindow.path;
       const targetPath = targetWindow.path;
 
-      if (targetPath.length < 2) {
-        showToast('目标窗口需要在某个文件夹内');
-        setShowActionMenu(false);
-        return;
-      }
-
       const targetFolderId = targetPath[targetPath.length - 1].id;
       const sourceFolderId = sourcePath.length >= 2 ? sourcePath[sourcePath.length - 1].id : null;
 
-      for (const entryId of selectedIds) {
+      for (const entryId of ids) {
         if (sourceWindow.mode === 'tags' && sourceFolderId) {
-          // 移除旧标签
           await db.removeTagFromEntry(entryId, sourceFolderId);
+        }
+        if (sourceWindow.mode === 'groups' && sourceFolderId) {
+          await db.updateEntry(entryId, { groupId: undefined });
         }
         if (targetWindow.mode === 'tags') {
           await db.addTagToEntry(entryId, targetFolderId);
@@ -408,7 +495,7 @@ export function DataManagerPage() {
         }
       }
 
-      showToast(`已移动 ${selectedIds.size} 条到另一窗口`);
+      showToast(`已移动 ${ids.size} 条到另一窗口`);
       setLeftWindow(prev => ({ ...prev }));
       setRightWindow(prev => ({ ...prev }));
       await loadEntries();
@@ -418,14 +505,17 @@ export function DataManagerPage() {
 
     setShowActionMenu(false);
     setActionMenuEntryId(null);
-  }, [activeWindow, leftWindow, rightWindow, showToast, loadEntries]);
+  }, [activeWindow, leftWindow, rightWindow, actionMenuEntryId, showToast, loadEntries]);
 
   // 操作菜单：删除属性
   const handleDeleteProperty = useCallback(async () => {
     const sourceWindow = activeWindow === 'left' ? leftWindow : rightWindow;
-    const selectedIds = sourceWindow.selectedIds;
 
-    if (selectedIds.size === 0) {
+    const ids = sourceWindow.selectedIds.size > 0
+      ? sourceWindow.selectedIds
+      : (actionMenuEntryId ? new Set([actionMenuEntryId]) : new Set<string>());
+
+    if (ids.size === 0) {
       showToast('请先选择条目');
       setShowActionMenu(false);
       return;
@@ -438,34 +528,34 @@ export function DataManagerPage() {
 
       if (sourceWindow.mode === 'data') {
         // 数据模式：真正删除条目
-        if (!confirm(`确定删除 ${selectedIds.size} 条条目？此操作不可恢复！`)) {
+        if (!confirm(`确定删除 ${ids.size} 条条目？此操作不可恢复！`)) {
           setShowActionMenu(false);
           return;
         }
-        for (const entryId of selectedIds) {
+        for (const entryId of ids) {
           await db.deleteEntry(entryId);
         }
-        showToast(`已删除 ${selectedIds.size} 条条目`);
+        showToast(`已删除 ${ids.size} 条条目`);
       } else if (sourceWindow.mode === 'tags' && sourceFolderId) {
         // 标签模式：移除标签
-        if (!confirm(`确定从 ${selectedIds.size} 条条目移除此标签？`)) {
+        if (!confirm(`确定从 ${ids.size} 条条目移除此标签？`)) {
           setShowActionMenu(false);
           return;
         }
-        for (const entryId of selectedIds) {
+        for (const entryId of ids) {
           await db.removeTagFromEntry(entryId, sourceFolderId);
         }
-        showToast(`已移除 ${selectedIds.size} 条条目的标签`);
+        showToast(`已移除 ${ids.size} 条条目的标签`);
       } else if (sourceWindow.mode === 'groups' && sourceFolderId) {
         // 组模式：清除 groupId
-        if (!confirm(`确定从 ${selectedIds.size} 条条目移除组归属？`)) {
+        if (!confirm(`确定从 ${ids.size} 条条目移除组归属？`)) {
           setShowActionMenu(false);
           return;
         }
-        for (const entryId of selectedIds) {
+        for (const entryId of ids) {
           await db.updateEntry(entryId, { groupId: undefined });
         }
-        showToast(`已移除 ${selectedIds.size} 条条目的组归属`);
+        showToast(`已移除 ${ids.size} 条条目的组归属`);
       }
 
       setLeftWindow(prev => ({ ...prev }));
@@ -477,7 +567,15 @@ export function DataManagerPage() {
 
     setShowActionMenu(false);
     setActionMenuEntryId(null);
-  }, [activeWindow, leftWindow, rightWindow, showToast, loadEntries]);
+  }, [activeWindow, leftWindow, rightWindow, actionMenuEntryId, showToast, loadEntries]);
+
+  // 操作菜单：编辑条目
+  const handleEditEntry = useCallback(() => {
+    if (!actionMenuEntryId) return;
+    setShowActionMenu(false);
+    navigate(`/entry/${actionMenuEntryId}/edit`);
+    setActionMenuEntryId(null);
+  }, [actionMenuEntryId, navigate]);
 
   // 操作菜单：查看详情
   const handleViewDetail = useCallback(async () => {
@@ -642,6 +740,20 @@ export function DataManagerPage() {
         </button>
         <button
           className="dm-footer-btn"
+          onClick={handleCopyToOtherWindow}
+          title="复制条目到另一窗口"
+        >
+          ⧉
+        </button>
+        <button
+          className="dm-footer-btn"
+          onClick={handleMoveToOtherWindow}
+          title="移动条目到另一窗口"
+        >
+          ✂
+        </button>
+        <button
+          className="dm-footer-btn"
           disabled={!canGoUp}
           onClick={handleUp}
           title="返回上级"
@@ -656,6 +768,7 @@ export function DataManagerPage() {
         currentMode={currentWindow.mode}
         onModeChange={handleModeChange}
         onClose={() => setSideMenuOpen(false)}
+        onExit={() => navigate('/')}
       />
 
       {/* 新建对话框 */}
@@ -696,6 +809,9 @@ export function DataManagerPage() {
           <div className="dm-action-menu glass">
             <button className="dm-action-item" onClick={handleCopyContent}>
               <span>📋</span> 复制内容
+            </button>
+            <button className="dm-action-item" onClick={handleEditEntry}>
+              <span>✏️</span> 编辑
             </button>
             <button className="dm-action-item" onClick={handleCopyToOther}>
               <span>📑</span> 复制到另一窗口

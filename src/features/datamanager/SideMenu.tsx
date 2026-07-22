@@ -9,6 +9,7 @@ interface SideMenuProps {
   currentMode: ManagerMode;
   onModeChange: (mode: ManagerMode) => void;
   onClose: () => void;
+  onExit: () => void;
 }
 
 const menuItems: { mode: ManagerMode; icon: string; label: string; desc: string }[] = [
@@ -17,7 +18,7 @@ const menuItems: { mode: ManagerMode; icon: string; label: string; desc: string 
   { mode: 'data', icon: '💾', label: '数据模式', desc: '浏览所有条目' },
 ];
 
-export function SideMenu({ open, currentMode, onModeChange, onClose }: SideMenuProps) {
+export function SideMenu({ open, currentMode, onModeChange, onClose, onExit }: SideMenuProps) {
   return (
     <>
       {open && <div className="dm-overlay" onClick={onClose} />}
@@ -46,6 +47,10 @@ export function SideMenu({ open, currentMode, onModeChange, onClose }: SideMenuP
           ))}
         </nav>
         <div className="dm-side-menu-footer">
+          <button className="dm-side-menu-exit" onClick={() => { onExit(); onClose(); }}>
+            <span className="dm-side-menu-exit-icon">⏏</span>
+            <span>退出</span>
+          </button>
           <span className="dm-side-menu-version">v1.0</span>
         </div>
       </aside>

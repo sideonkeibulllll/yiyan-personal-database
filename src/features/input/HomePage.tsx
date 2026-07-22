@@ -6,6 +6,8 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Clipboard } from '@capacitor/clipboard';
 import { useEntryStore } from '@/stores/entryStore';
+import { useTagStore } from '@/stores/tagStore';
+import { TagSelector } from '@/components/TagSelector/TagSelector';
 import { BottomNav } from '@/components/BottomNav';
 import './HomePage.css';
 
@@ -16,10 +18,16 @@ export function HomePage() {
   const [mode, setMode] = useState<InputMode>('input');
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
+  const [lastEntryId, setLastEntryId] = useState<string | null>(null);
+  const [showTagSelector, setShowTagSelector] = useState(false);
+  const [pendingTagIds, setPendingTagIds] = useState<string[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const modeTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const navigate = useNavigate();
   const addEntry = useEntryStore(state => state.addEntry);
+  const addTagToEntry = useTagStore(state => state.addTagToEntry);
+  const removeTagFromEntry = useTagStore(state => state.removeTagFromEntry);
+  const getTagsByEntryId = useTagStore(state => state.getTagsByEntryId);
 
   // 自动聚焦
   useEffect(() => {
@@ -54,7 +62,8 @@ export function HomePage() {
   const handleSend = useCallback(async () => {
     if (!content.trim()) return;
 
-    await addEntry(content.trim());
+    const entry = await addEntry(content.trim());
+    setLastEntryId(entry.id);
     setContent('');
     showToastMessage('已入库');
 
@@ -79,24 +88,65 @@ export function HomePage() {
   }, [handleSend]);
 
   // 选择添加标签
-  const handleAddTag = useCallback(() => {
+  const handleAddTag = useCallback(async () => {
     if (modeTimerRef.current) {
       clearTimeout(modeTimerRef.current);
     }
-    // TODO: 打开标签选择栏
-    showToastMessage('标签功能开发中...');
+    if (!lastEntryId) {
+      showToastMessage('无法获取条目ID');
+      setMode('input');
+      return;
+    }
+    // 加载当前条目已有的标签
+    const existingTags = await getTagsByEntryId(lastEntryId);
+    setPendingTagIds(existingTags.map(t => t.id));
+    setShowTagSelector(true);
     setMode('input');
-  }, [showToastMessage]);
+  }, [lastEntryId, getTagsByEntryId, showToastMessage]);
+
+  // 确认保存标签
+  const handleConfirmTags = useCallback(async () => {
+    if (!lastEntryId) return;
+    try {
+      const existingTags = await getTagsByEntryId(lastEntryId);
+      const currentTagIds = new Set(existingTags.map(t => t.id));
+      const newTagIds = new Set(pendingTagIds);
+
+      // 添加新标签
+      for (const tagId of pendingTagIds) {
+        if (!currentTagIds.has(tagId)) {
+          await addTagToEntry(lastEntryId, tagId);
+        }
+      }
+
+      // 移除旧标签
+      for (const tagId of currentTagIds) {
+        if (!newTagIds.has(tagId)) {
+          await removeTagFromEntry(lastEntryId, tagId);
+        }
+      }
+
+      setShowTagSelector(false);
+      showToastMessage('标签已保存');
+    } catch (err) {
+      console.error('保存标签失败:', err);
+      showToastMessage('保存失败');
+    }
+  }, [lastEntryId, pendingTagIds, getTagsByEntryId, addTagToEntry, removeTagFromEntry, showToastMessage]);
 
   // 选择添加信息
   const handleAddInfo = useCallback(() => {
     if (modeTimerRef.current) {
       clearTimeout(modeTimerRef.current);
     }
-    // TODO: 打开信息附加面板
-    showToastMessage('信息附加功能开发中...');
+    if (!lastEntryId) {
+      showToastMessage('无法获取条目ID');
+      setMode('input');
+      return;
+    }
     setMode('input');
-  }, [showToastMessage]);
+    navigate(`/entry/${lastEntryId}/edit`);
+  }, [lastEntryId, navigate, showToastMessage]);
 
   return (
     <div className="home-page">
@@ -164,6 +214,33 @@ export function HomePage() {
           </button>
         </div>
       </main>
+
+      {/* 标签选择器弹层 */}
+      {showTagSelector && (
+        <div className="home-tag-overlay" onClick={() => setShowTagSelector(false)}>
+          <div className="home-tag-panel glass" onClick={e => e.stopPropagation()}>
+            <TagSelector
+              selectedTagIds={pendingTagIds}
+              onSelectionChange={setPendingTagIds}
+              onClose={() => setShowTagSelector(false)}
+            />
+            <div className="home-tag-actions">
+              <button
+                className="home-tag-btn home-tag-cancel"
+                onClick={() => setShowTagSelector(false)}
+              >
+                取消
+              </button>
+              <button
+                className="home-tag-btn home-tag-confirm"
+                onClick={handleConfirmTags}
+              >
+                确定
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 轻提示 */}
       {showToast && (

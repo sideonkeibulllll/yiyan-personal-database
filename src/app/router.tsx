@@ -14,6 +14,7 @@ const TagManagePage = lazy(() => import('@/features/tags/TagManagePage').then(m 
 const LinkPage = lazy(() => import('@/features/links/LinkPage').then(m => ({ default: m.LinkPage })));
 const ExportPage = lazy(() => import('@/features/settings/ExportPage').then(m => ({ default: m.ExportPage })));
 const DataManagerPage = lazy(() => import('@/features/datamanager/DataManagerPage').then(m => ({ default: m.DataManagerPage })));
+const EntryEditPage = lazy(() => import('@/features/entry/EntryEditPage').then(m => ({ default: m.EntryEditPage })));
 
 const router = createHashRouter([
   {
@@ -85,6 +86,14 @@ const router = createHashRouter([
     element: (
       <Suspense fallback={<Loading />}>
         <DataManagerPage />
+      </Suspense>
+    ),
+  },
+  {
+    path: '/entry/:id/edit',
+    element: (
+      <Suspense fallback={<Loading />}>
+        <EntryEditPage />
       </Suspense>
     ),
   },
