@@ -12,6 +12,43 @@ import { GroupSelector } from '@/components/GroupSelector/GroupSelector';
 import type { Entry, Tag, Group } from '@/types';
 import './EntryEditPage.css';
 
+/* SVG Icon Components */
+const IconArrowLeft = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="m12 19-7-7 7-7" /><path d="M19 12H5" />
+  </svg>
+);
+
+const IconFolder = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
+  </svg>
+);
+
+const IconFileText = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" /><path d="M14 2v4a2 2 0 0 0 2 2h4" /><path d="M10 9H8" /><path d="M16 13H8" /><path d="M16 17H8" />
+  </svg>
+);
+
+const IconStar = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+  </svg>
+);
+
+const IconStarOutline = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+  </svg>
+);
+
+const IconChevronRight = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="m9 18 6-6-6-6" />
+  </svg>
+);
+
 export function EntryEditPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -39,11 +76,25 @@ export function EntryEditPage() {
 
   const loadTags = useTagStore(state => state.loadTags);
   const updateEntry = useEntryStore(state => state.updateEntry);
+  const loadEntries = useEntryStore(state => state.loadEntries);
 
   // 加载数据
   useEffect(() => {
     const loadData = async () => {
-      if (!id) return;
+      if (!id || id === 'new') {
+        // 新建模式：空表单
+        setLoading(false);
+        try {
+          const db = await getDatabase();
+          const tags_all = await db.getAllTags();
+          const groups = await db.getAllGroups();
+          setAllTags(tags_all);
+          setAllGroups(groups);
+        } catch (err) {
+          console.error('加载标签/组失败:', err);
+        }
+        return;
+      }
       try {
         const db = await getDatabase();
         const e = await db.getEntryById(id);
@@ -80,10 +131,36 @@ export function EntryEditPage() {
 
   // 保存
   const handleSave = useCallback(async () => {
-    if (!entry || !id) return;
+    if (!content.trim()) return;
     setSaving(true);
     try {
       const db = await getDatabase();
+
+      if (id === 'new' || !id) {
+        // 新建模式
+        const newEntry = await db.createEntry({
+          content: content.trim(),
+          source: source.trim() || undefined,
+          supplement: supplement.trim() || undefined,
+          groupId,
+          isStarred,
+          copyCount: 0,
+          lastUsedAt: Date.now(),
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        } as any);
+
+        // 保存标签关联
+        for (const tagId of selectedTagIds) {
+          await db.addTagToEntry(newEntry.id, tagId);
+        }
+
+        await loadEntries();
+        navigate(-1);
+        return;
+      }
+
+      if (!entry) return;
 
       // 更新基本字段
       await updateEntry(id, {
@@ -117,7 +194,7 @@ export function EntryEditPage() {
       console.error('保存失败:', err);
       setSaving(false);
     }
-  }, [entry, id, content, source, supplement, groupId, isStarred, selectedTagIds, entryTags, updateEntry, navigate]);
+  }, [entry, id, content, source, supplement, groupId, isStarred, selectedTagIds, entryTags, updateEntry, navigate, loadEntries]);
 
   // 标签删除
   const handleRemoveTag = useCallback((tagId: string) => {
@@ -145,7 +222,8 @@ export function EntryEditPage() {
     );
   }
 
-  if (!entry) {
+  // 新建模式或条目不存在时都显示表单（新建模式下 entry 为 null）
+  if (!entry && id !== 'new') {
     return (
       <div className="entry-edit-page">
         <div className="entry-edit-loading">条目不存在</div>
@@ -158,9 +236,9 @@ export function EntryEditPage() {
       {/* 顶部栏 */}
       <header className="entry-edit-header">
         <button className="entry-edit-back" onClick={() => navigate(-1)}>
-          ←
+          <IconArrowLeft />
         </button>
-        <h1 className="entry-edit-title">编辑条目</h1>
+        <h1 className="entry-edit-title">{id === 'new' ? '新建条目' : '编辑条目'}</h1>
         <div className="entry-edit-header-spacer" />
       </header>
 
@@ -214,7 +292,9 @@ export function EntryEditPage() {
                   className="entry-edit-tag-remove"
                   onClick={() => handleRemoveTag(tagId)}
                 >
-                  ✕
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M18 6 6 18" /><path d="m6 6 12 12" />
+                  </svg>
                 </button>
               </span>
             ))}
@@ -234,9 +314,9 @@ export function EntryEditPage() {
             className="entry-edit-group-display glass"
             onClick={() => setShowGroupSelector(true)}
           >
-            <span className="entry-edit-group-icon">{groupId ? '📁' : '📝'}</span>
+            <span className="entry-edit-group-icon">{groupId ? <IconFolder /> : <IconFileText />}</span>
             <span className="entry-edit-group-name">{getGroupName()}</span>
-            <span className="entry-edit-group-arrow">›</span>
+            <span className="entry-edit-group-arrow"><IconChevronRight /></span>
           </button>
         </div>
 
@@ -247,7 +327,7 @@ export function EntryEditPage() {
             className={`entry-edit-star-toggle ${isStarred ? 'active' : ''}`}
             onClick={() => setIsStarred(!isStarred)}
           >
-            <span className="entry-edit-star-icon">{isStarred ? '⭐' : '☆'}</span>
+            <span className="entry-edit-star-icon">{isStarred ? <IconStar /> : <IconStarOutline />}</span>
             <span className="entry-edit-star-text">
               {isStarred ? '已星标' : '未星标'}
             </span>
@@ -262,7 +342,7 @@ export function EntryEditPage() {
           onClick={handleSave}
           disabled={saving || !content.trim()}
         >
-          {saving ? '保存中...' : '保存'}
+          {saving ? '保存中...' : (id === 'new' ? '提交' : '保存')}
         </button>
       </footer>
 

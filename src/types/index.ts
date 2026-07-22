@@ -36,10 +36,16 @@ export interface Link {
   createdAt: number;
 }
 
+export interface RandomConfig {
+  /** 每屏随机卡片数 */
+  cardsPerPage: number;
+}
+
 export interface Settings {
   ai: AIConfig;
   context: ContextConfig;
   push: PushConfig;
+  random: RandomConfig;
 }
 
 export interface AIConfig {
@@ -49,11 +55,23 @@ export interface AIConfig {
   isDeepSeek: boolean;
   deepSeekOptions: DeepSeekOptions;
   prompts: PromptConfig;
+  /** 智能标签功能配置 */
+  smartTag?: SmartTagOptions;
 }
 
 export interface DeepSeekOptions {
   temperature: number;
   maxTokens: number;
+}
+
+/**
+ * 智能标签功能配置
+ */
+export interface SmartTagOptions {
+  /** 用于标签建议的最近标签数量 */
+  recentTagCount: number;
+  /** 标签建议专用提示词（独立于 prompts.tagSuggestion）*/
+  tagSuggestPrompt: string;
 }
 
 export interface PromptConfig {
@@ -135,6 +153,23 @@ export const DEFAULT_SETTINGS: Settings = {
       maxTokens: 2000,
     },
     prompts: DEFAULT_PROMPTS,
+    smartTag: {
+      recentTagCount: 50,
+      tagSuggestPrompt: `你是一个标签建议助手。请分析以下文本内容，结合用户最近使用过的标签，推荐 3-5 个合适的标签。
+
+要求：
+1. 标签简洁，2-6 个字
+2. 优先复用最近使用过的标签
+3. 从内容主题、情感、用途三个维度考虑
+4. 避免过于宽泛的标签（如"其他"）
+5. 只返回标签列表，每行一个，不要解释
+
+用户最近使用过的标签：
+{recentTags}
+
+当前条目内容：
+{content}`,
+    },
   },
   context: {
     recentWindow: 20,
@@ -143,5 +178,8 @@ export const DEFAULT_SETTINGS: Settings = {
   push: {
     enabled: false,
     similarityThreshold: 0.7,
+  },
+  random: {
+    cardsPerPage: 7,
   },
 };

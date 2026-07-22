@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 数据管理器主页面
  * MT管理器风格双栏文件管理
  */
@@ -166,13 +166,18 @@ export function DataManagerPage() {
   const handleNew = useCallback(() => {
     const currentWindow = activeWindow === 'left' ? leftWindow : rightWindow;
     const isRoot = currentWindow.path.length === 1;
-    if (isRoot && (currentWindow.mode === 'tags' || currentWindow.mode === 'groups')) {
-      setShowNewDialog(true);
-      setNewName('');
+    if (isRoot) {
+      if (currentWindow.mode === 'data') {
+        // 数据模式：跳转到新建条目页面
+        navigate('/entry/new/edit');
+      } else if (currentWindow.mode === 'tags' || currentWindow.mode === 'groups') {
+        setShowNewDialog(true);
+        setNewName('');
+      }
     } else {
       showToast('只能在此模式的根路径下新建');
     }
-  }, [activeWindow, leftWindow, rightWindow, showToast]);
+  }, [activeWindow, leftWindow, rightWindow, showToast, navigate]);
 
   // 确认新建
   const confirmNew = useCallback(async () => {
@@ -190,8 +195,8 @@ export function DataManagerPage() {
       setShowNewDialog(false);
       setNewName('');
       // 刷新两个窗口
-      setLeftWindow(prev => ({ ...prev }));
-      setRightWindow(prev => ({ ...prev }));
+      setLeftWindow(prev => ({ ...prev, refreshKey: prev.refreshKey + 1 }));
+      setRightWindow(prev => ({ ...prev, refreshKey: prev.refreshKey + 1 }));
       await loadTags();
     } catch (err) {
       showToast('创建失败: ' + (err as Error).message);
@@ -252,8 +257,12 @@ export function DataManagerPage() {
 
       const action = targetWindow.mode === 'tags' ? '添加标签' : '修改分组';
       showToast(`已${action} ${selectedIds.size} 条`);
-      setLeftWindow(prev => ({ ...prev }));
-      setRightWindow(prev => ({ ...prev }));
+      // 只触发目标窗口刷新
+      if (activeWindow === 'left') {
+        setRightWindow(prev => ({ ...prev, refreshKey: prev.refreshKey + 1 }));
+      } else {
+        setLeftWindow(prev => ({ ...prev, refreshKey: prev.refreshKey + 1 }));
+      }
       await useEntryStore.getState().loadEntries();
     } catch (err) {
       showToast('操作失败: ' + (err as Error).message);
@@ -301,8 +310,9 @@ export function DataManagerPage() {
       }
 
       showToast(`已移动 ${selectedIds.size} 条到另一窗口`);
-      setLeftWindow(prev => ({ ...prev }));
-      setRightWindow(prev => ({ ...prev }));
+      // 触发两个窗口重新加载数据
+      setLeftWindow(prev => ({ ...prev, refreshKey: prev.refreshKey + 1, selectedIds: activeWindow === 'left' ? new Set() : prev.selectedIds }));
+      setRightWindow(prev => ({ ...prev, refreshKey: prev.refreshKey + 1, selectedIds: activeWindow === 'right' ? new Set() : prev.selectedIds }));
       await useEntryStore.getState().loadEntries();
     } catch (err) {
       showToast('操作失败: ' + (err as Error).message);
@@ -318,8 +328,8 @@ export function DataManagerPage() {
 
   // 刷新
   const handleRefresh = useCallback(() => {
-    setLeftWindow(prev => ({ ...prev }));
-    setRightWindow(prev => ({ ...prev }));
+    setLeftWindow(prev => ({ ...prev, refreshKey: prev.refreshKey + 1 }));
+    setRightWindow(prev => ({ ...prev, refreshKey: prev.refreshKey + 1 }));
     setShowMoreMenu(false);
     showToast('已刷新');
   }, [showToast]);
@@ -363,8 +373,8 @@ export function DataManagerPage() {
       // 刷新数据
       await loadEntries();
       await loadTags();
-      setLeftWindow(prev => ({ ...prev }));
-      setRightWindow(prev => ({ ...prev }));
+      setLeftWindow(prev => ({ ...prev, refreshKey: prev.refreshKey + 1 }));
+      setRightWindow(prev => ({ ...prev, refreshKey: prev.refreshKey + 1 }));
     } catch (err) {
       showToast('导入失败: ' + (err as Error).message);
     }
@@ -436,8 +446,11 @@ export function DataManagerPage() {
 
       const action = targetWindow.mode === 'tags' ? '添加标签' : '修改分组';
       showToast(`已${action} ${ids.size} 条`);
-      setLeftWindow(prev => ({ ...prev }));
-      setRightWindow(prev => ({ ...prev }));
+      if (activeWindow === 'left') {
+        setRightWindow(prev => ({ ...prev, refreshKey: prev.refreshKey + 1 }));
+      } else {
+        setLeftWindow(prev => ({ ...prev, refreshKey: prev.refreshKey + 1 }));
+      }
       await loadEntries();
     } catch (err) {
       showToast('操作失败: ' + (err as Error).message);
@@ -496,8 +509,8 @@ export function DataManagerPage() {
       }
 
       showToast(`已移动 ${ids.size} 条到另一窗口`);
-      setLeftWindow(prev => ({ ...prev }));
-      setRightWindow(prev => ({ ...prev }));
+      setLeftWindow(prev => ({ ...prev, refreshKey: prev.refreshKey + 1, selectedIds: prev.selectedIds }));
+      setRightWindow(prev => ({ ...prev, refreshKey: prev.refreshKey + 1, selectedIds: prev.selectedIds }));
       await loadEntries();
     } catch (err) {
       showToast('操作失败: ' + (err as Error).message);
@@ -558,8 +571,8 @@ export function DataManagerPage() {
         showToast(`已移除 ${ids.size} 条条目的组归属`);
       }
 
-      setLeftWindow(prev => ({ ...prev }));
-      setRightWindow(prev => ({ ...prev }));
+      setLeftWindow(prev => ({ ...prev, refreshKey: prev.refreshKey + 1 }));
+      setRightWindow(prev => ({ ...prev, refreshKey: prev.refreshKey + 1 }));
       await loadEntries();
     } catch (err) {
       showToast('操作失败: ' + (err as Error).message);
@@ -600,7 +613,7 @@ export function DataManagerPage() {
   const canGoBack = currentWindow.historyIndex > 0;
   const canGoForward = currentWindow.historyIndex < currentWindow.history.length - 1;
   const canGoUp = currentWindow.path.length > 1;
-  const canCreate = currentWindow.path.length === 1 && currentWindow.mode !== 'data';
+  const canCreate = currentWindow.path.length === 1;
 
   return (
     <div className="dm-page">

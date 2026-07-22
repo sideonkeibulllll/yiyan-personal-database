@@ -1,5 +1,5 @@
 /**
- * 数据编辑页面样式
+ * 数据编辑页面样式 - Golden Time warm dark design system
  */
 
 .entry-edit-page {
@@ -24,7 +24,6 @@
 }
 
 .entry-edit-back {
-  font-size: var(--text-xl);
   color: var(--color-text-secondary);
   cursor: pointer;
   padding: var(--space-2);
@@ -39,7 +38,7 @@
 }
 
 .entry-edit-back:active {
-  background: var(--color-bg-elevated);
+  background: rgba(203, 185, 159, 0.08);
   color: var(--color-text-primary);
 }
 
@@ -49,6 +48,7 @@
   font-weight: 600;
   color: var(--color-text-primary);
   text-align: center;
+  font-family: var(--font-serif);
 }
 
 .entry-edit-header-spacer {
@@ -94,7 +94,7 @@
   width: 100%;
   padding: var(--space-3) var(--space-4);
   border-radius: var(--radius-sm);
-  background: rgba(30, 30, 40, 0.6);
+  background: rgba(26, 23, 20, 0.6);
   border: 1px solid var(--color-border-primary);
   font-size: var(--text-base);
   color: var(--color-text-primary);
@@ -103,13 +103,14 @@
 
 .entry-edit-input:focus {
   border-color: var(--color-border-accent);
+  outline: none;
 }
 
 .entry-edit-textarea {
   width: 100%;
   padding: var(--space-3) var(--space-4);
   border-radius: var(--radius-sm);
-  background: rgba(30, 30, 40, 0.6);
+  background: rgba(26, 23, 20, 0.6);
   border: 1px solid var(--color-border-primary);
   font-size: var(--text-base);
   color: var(--color-text-primary);
@@ -122,6 +123,7 @@
 
 .entry-edit-textarea:focus {
   border-color: var(--color-border-accent);
+  outline: none;
 }
 
 /* === 标签区域 === */
@@ -150,21 +152,21 @@
 }
 
 .entry-edit-tag-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-size: var(--text-xs);
   color: var(--color-text-tertiary);
   cursor: pointer;
   width: 18px;
   height: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   border-radius: var(--radius-xs);
   transition: all var(--duration-fast);
 }
 
 .entry-edit-tag-remove:active {
   color: var(--color-error);
-  background: rgba(248, 113, 113, 0.1);
+  background: rgba(239, 68, 68, 0.1);
 }
 
 .entry-edit-tag-add {
@@ -172,7 +174,7 @@
   align-items: center;
   gap: var(--space-1);
   padding: var(--space-1) var(--space-3);
-  background: var(--color-bg-elevated);
+  background: rgba(203, 185, 159, 0.05);
   border: 1px dashed var(--color-border-primary);
   border-radius: var(--radius-xs);
   font-size: var(--text-sm);
@@ -194,7 +196,7 @@
   width: 100%;
   padding: var(--space-3) var(--space-4);
   border-radius: var(--radius-sm);
-  background: rgba(30, 30, 40, 0.6);
+  background: rgba(26, 23, 20, 0.6);
   border: 1px solid var(--color-border-primary);
   cursor: pointer;
   transition: border-color var(--duration-fast);
@@ -205,7 +207,9 @@
 }
 
 .entry-edit-group-icon {
-  font-size: var(--text-base);
+  display: flex;
+  align-items: center;
+  color: var(--color-accent-primary);
   flex-shrink: 0;
 }
 
@@ -217,7 +221,8 @@
 }
 
 .entry-edit-group-arrow {
-  font-size: var(--text-lg);
+  display: flex;
+  align-items: center;
   color: var(--color-text-tertiary);
   flex-shrink: 0;
 }
@@ -229,7 +234,7 @@
   gap: var(--space-3);
   padding: var(--space-3) var(--space-4);
   border-radius: var(--radius-sm);
-  background: var(--color-bg-elevated);
+  background: rgba(26, 23, 20, 0.6);
   border: 1px solid var(--color-border-primary);
   cursor: pointer;
   transition: all var(--duration-fast);
@@ -239,12 +244,13 @@
 
 .entry-edit-star-toggle.active {
   background: var(--color-star-glow);
-  border-color: rgba(251, 191, 36, 0.3);
+  border-color: rgba(247, 155, 69, 0.3);
   color: var(--color-star);
 }
 
 .entry-edit-star-icon {
-  font-size: var(--text-lg);
+  display: flex;
+  align-items: center;
 }
 
 .entry-edit-star-text {
@@ -264,8 +270,8 @@
   width: 100%;
   padding: var(--space-3) var(--space-4);
   border-radius: var(--radius-sm);
-  background: var(--color-accent-primary);
-  color: white;
+  background: var(--color-copper-primary);
+  color: var(--color-text-primary);
   font-size: var(--text-base);
   font-weight: 600;
   cursor: pointer;
@@ -286,7 +292,7 @@
 .entry-edit-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(6, 2, 1, 0.7);
   z-index: 200;
   display: flex;
   align-items: flex-end;

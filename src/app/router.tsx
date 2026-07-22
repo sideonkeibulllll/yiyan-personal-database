@@ -15,6 +15,7 @@ const LinkPage = lazy(() => import('@/features/links/LinkPage').then(m => ({ def
 const ExportPage = lazy(() => import('@/features/settings/ExportPage').then(m => ({ default: m.ExportPage })));
 const DataManagerPage = lazy(() => import('@/features/datamanager/DataManagerPage').then(m => ({ default: m.DataManagerPage })));
 const EntryEditPage = lazy(() => import('@/features/entry/EntryEditPage').then(m => ({ default: m.EntryEditPage })));
+const ChatPage = lazy(() => import('@/features/chat/ChatPage').then(m => ({ default: m.ChatPage })));
 
 const router = createHashRouter([
   {
@@ -94,6 +95,22 @@ const router = createHashRouter([
     element: (
       <Suspense fallback={<Loading />}>
         <EntryEditPage />
+      </Suspense>
+    ),
+  },
+  {
+    path: '/chat',
+    element: (
+      <Suspense fallback={<Loading />}>
+        <ChatPage />
+      </Suspense>
+    ),
+  },
+  {
+    path: '/chat/:sessionId',
+    element: (
+      <Suspense fallback={<Loading />}>
+        <ChatPage />
       </Suspense>
     ),
   },

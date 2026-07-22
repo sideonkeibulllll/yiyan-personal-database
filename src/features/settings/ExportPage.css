@@ -18,16 +18,17 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
-  background: var(--color-bg-elevated);
+  border-radius: var(--radius-sm);
+  background: rgba(26, 23, 20, 0.6);
+  border: 1px solid var(--color-border-primary);
   color: var(--color-text-secondary);
-  font-size: var(--text-lg);
   cursor: pointer;
   transition: all var(--duration-fast) var(--ease-out);
 }
 
 .back-btn:active {
   transform: scale(0.9);
+  border-color: var(--color-border-accent);
 }
 
 .page-title {
@@ -36,6 +37,7 @@
   font-weight: 600;
   color: var(--color-text-primary);
   text-align: center;
+  font-family: var(--font-serif);
 }
 
 .header-spacer {
@@ -78,6 +80,7 @@
   border-radius: var(--radius-md);
   cursor: pointer;
   transition: all var(--duration-fast) var(--ease-out);
+  border: 1px solid var(--color-border-primary);
 }
 
 .format-btn.selected {
@@ -85,8 +88,16 @@
   border-color: var(--color-border-accent);
 }
 
+.format-btn.selected .format-icon {
+  color: var(--color-accent-primary);
+}
+
 .format-icon {
-  font-size: var(--text-2xl);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-tertiary);
+  flex-shrink: 0;
 }
 
 .format-info {
@@ -115,10 +126,10 @@
 
 .scope-btn {
   padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   font-size: var(--text-sm);
   color: var(--color-text-secondary);
-  background: var(--color-bg-elevated);
+  background: rgba(26, 23, 20, 0.6);
   border: 1px solid var(--color-border-primary);
   cursor: pointer;
   transition: all var(--duration-fast) var(--ease-out);
@@ -126,9 +137,19 @@
 }
 
 .scope-btn.selected {
-  color: var(--color-accent-secondary);
+  color: var(--color-accent-primary);
   background: var(--color-accent-subtle);
   border-color: var(--color-border-accent);
+}
+
+.scope-btn-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.scope-btn-icon svg {
+  flex-shrink: 0;
 }
 
 /* === 标签选择 === */
@@ -164,7 +185,7 @@
 .checkbox-label input[type="checkbox"] {
   width: 18px;
   height: 18px;
-  accent-color: var(--color-accent-primary);
+  accent-color: var(--color-copper-primary);
   cursor: pointer;
 }
 
@@ -175,8 +196,8 @@
   border-radius: var(--radius-md);
   font-size: var(--text-base);
   font-weight: 500;
-  color: white;
-  background: linear-gradient(135deg, var(--color-accent-primary), var(--color-accent-secondary));
+  color: var(--color-text-primary);
+  background: linear-gradient(135deg, var(--color-copper-primary), var(--color-accent-primary));
   cursor: pointer;
   transition: all var(--duration-fast) var(--ease-out);
 }

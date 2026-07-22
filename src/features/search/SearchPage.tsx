@@ -9,6 +9,38 @@ import { BottomNav } from '@/components/BottomNav';
 import type { Entry } from '@/types';
 import './SearchPage.css';
 
+/** SVG icons (stroke-based, viewBox="0 0 24 24", strokeWidth="1.5") */
+const SearchIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+  </svg>
+);
+
+const StarFilledIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+  </svg>
+);
+
+const StarOutlineIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+  </svg>
+);
+
+const CloseIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
+  </svg>
+);
+
+const LightbulbIcon = () => (
+  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/>
+    <path d="M9 18h6"/><path d="M10 22h4"/>
+  </svg>
+);
+
 export function SearchPage() {
   const [keyword, setKeyword] = useState('');
   const [results, setResults] = useState<Entry[]>([]);
@@ -88,14 +120,10 @@ export function SearchPage() {
 
   return (
     <div className="search-page">
-      <header className="page-header">
-        <h1 className="page-title">搜索</h1>
-      </header>
-
       <main className="page-content">
         {/* 搜索框 */}
         <div className="search-input-wrapper glass">
-          <span className="search-icon">🔍</span>
+          <span className="search-icon"><SearchIcon /></span>
           <input
             ref={inputRef}
             type="text"
@@ -105,7 +133,7 @@ export function SearchPage() {
             onChange={e => setKeyword(e.target.value)}
           />
           {keyword && (
-            <button className="clear-btn" onClick={() => setKeyword('')}>✕</button>
+            <button className="clear-btn" onClick={() => setKeyword('')}><CloseIcon /></button>
           )}
         </div>
 
@@ -115,7 +143,7 @@ export function SearchPage() {
             className={`filter-chip ${filterStarred !== undefined ? 'active' : ''}`}
             onClick={toggleStarFilter}
           >
-            <span>{filterStarred === false ? '☆' : '⭐'}</span>
+            <span>{filterStarred === false ? <StarOutlineIcon /> : <StarFilledIcon />}</span>
             <span>{filterStarred === false ? '未星标' : filterStarred ? '已星标' : '全部'}</span>
           </button>
 
@@ -147,7 +175,7 @@ export function SearchPage() {
                   {entry.content}
                 </div>
                 <div className="result-meta">
-                  {entry.isStarred && <span className="meta-icon">⭐</span>}
+                  {entry.isStarred && <span className="meta-icon"><StarFilledIcon /></span>}
                   {entry.tags && entry.tags.length > 0 && (
                     <span className="meta-tags-count">{entry.tags.length} 标签</span>
                   )}
@@ -159,12 +187,12 @@ export function SearchPage() {
             ))
           ) : keyword || selectedTagIds.length > 0 || filterStarred !== undefined ? (
             <div className="empty-results">
-              <span className="empty-icon">🔍</span>
+              <span className="empty-icon"><SearchIcon /></span>
               <p className="empty-text">没有找到相关内容</p>
             </div>
           ) : (
             <div className="search-hint">
-              <span className="hint-icon">💡</span>
+              <span className="hint-icon"><LightbulbIcon /></span>
               <p>输入关键词开始搜索</p>
               <p className="hint-sub">点击结果即可复制</p>
             </div>

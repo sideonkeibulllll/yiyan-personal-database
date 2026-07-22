@@ -14,6 +14,7 @@ interface SettingsStore {
   updateAIConfig: (config: Partial<Settings['ai']>) => void;
   updateContextConfig: (config: Partial<Settings['context']>) => void;
   updatePushConfig: (config: Partial<Settings['push']>) => void;
+  updateRandomConfig: (config: Partial<Settings['random']>) => void;
   resetSettings: () => void;
 }
 
@@ -102,6 +103,16 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     const settings = {
       ...get().settings,
       push: { ...get().settings.push, ...config },
+    };
+    saveToLocalStorage(settings);
+    saveToDatabase(settings);
+    set({ settings });
+  },
+
+  updateRandomConfig: (config) => {
+    const settings = {
+      ...get().settings,
+      random: { ...get().settings.random, ...config },
     };
     saveToLocalStorage(settings);
     saveToDatabase(settings);

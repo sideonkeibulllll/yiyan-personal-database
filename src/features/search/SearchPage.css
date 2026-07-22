@@ -13,6 +13,7 @@
   font-size: var(--text-xl);
   font-weight: 600;
   color: var(--color-text-primary);
+  font-family: var(--font-serif);
 }
 
 .page-content {
@@ -29,7 +30,7 @@
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   transition: border-color var(--duration-fast) var(--ease-out);
 }
 
@@ -38,14 +39,21 @@
 }
 
 .search-icon {
-  font-size: var(--text-lg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
   opacity: 0.6;
+  color: var(--color-accent-primary);
 }
 
 .search-input {
   flex: 1;
   font-size: var(--text-base);
   color: var(--color-text-primary);
+  background: none;
+  border: none;
+  outline: none;
+  font-family: var(--font-serif);
 }
 
 .search-input::placeholder {
@@ -61,8 +69,12 @@
   border-radius: 50%;
   background: var(--color-bg-elevated);
   color: var(--color-text-tertiary);
-  font-size: var(--text-xs);
   cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.clear-btn:active {
+  transform: scale(0.9);
 }
 
 /* === 筛选栏 === */
@@ -94,7 +106,7 @@
 }
 
 .filter-chip.active {
-  color: var(--color-accent-secondary);
+  color: var(--color-accent-primary);
   background: var(--color-accent-subtle);
   border-color: var(--color-border-accent);
 }
@@ -124,6 +136,7 @@
   border-radius: var(--radius-md);
   cursor: pointer;
   transition: all var(--duration-fast) var(--ease-out);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
 .result-item:active {
@@ -133,13 +146,14 @@
 
 .result-content {
   font-size: var(--text-base);
-  line-height: 1.6;
+  line-height: 1.8;
   color: var(--color-text-primary);
   display: -webkit-box;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
   margin-bottom: var(--space-2);
+  font-family: var(--font-serif);
 }
 
 .result-meta {
@@ -151,11 +165,13 @@
 }
 
 .meta-icon {
-  font-size: var(--text-sm);
+  display: flex;
+  align-items: center;
+  color: var(--color-star-primary);
 }
 
 .meta-tags-count {
-  color: var(--color-accent-tertiary);
+  color: var(--color-accent-primary);
 }
 
 .meta-time {
@@ -176,8 +192,11 @@
 
 .empty-icon,
 .hint-icon {
-  font-size: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   opacity: 0.5;
+  color: var(--color-text-tertiary);
 }
 
 .empty-text,
@@ -203,4 +222,5 @@
   color: var(--color-text-primary);
   animation: slideUp var(--duration-normal) var(--ease-out);
   z-index: 200;
+  box-shadow: 0 4px 20px rgba(203, 185, 159, 0.15);
 }

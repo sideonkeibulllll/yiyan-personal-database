@@ -13,12 +13,60 @@ import './HomePage.css';
 
 type InputMode = 'input' | 'tag' | 'info';
 
+/** Clipboard SVG icon */
+const ClipboardIcon = (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+    <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
+  </svg>
+);
+
+/** Send SVG icon */
+const SendIcon = (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="22" y1="2" x2="11" y2="13" />
+    <polygon points="22 2 15 22 11 13 2 9 22 2" />
+  </svg>
+);
+
+/** Tag SVG icon */
+const TagIcon = (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
+    <line x1="7" y1="7" x2="7.01" y2="7" />
+  </svg>
+);
+
+/** Paperclip/Attachment SVG icon */
+const PaperclipIcon = (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+  </svg>
+);
+
+/** Stacked cards SVG icon */
+const CardsIcon = (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="2" y="6" width="16" height="14" rx="2" />
+    <rect x="6" y="4" width="16" height="14" rx="2" />
+  </svg>
+);
+
+/** Search SVG icon */
+const SearchIcon = (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="11" cy="11" r="8" />
+    <line x1="21" y1="21" x2="16.65" y2="16.65" />
+  </svg>
+);
+
 export function HomePage() {
   const [content, setContent] = useState('');
   const [mode, setMode] = useState<InputMode>('input');
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [lastEntryId, setLastEntryId] = useState<string | null>(null);
+  const [lastEntryContent, setLastEntryContent] = useState<string | null>(null);
   const [showTagSelector, setShowTagSelector] = useState(false);
   const [pendingTagIds, setPendingTagIds] = useState<string[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -64,6 +112,7 @@ export function HomePage() {
 
     const entry = await addEntry(content.trim());
     setLastEntryId(entry.id);
+    setLastEntryContent(content.trim());
     setContent('');
     showToastMessage('已入库');
 
@@ -150,12 +199,8 @@ export function HomePage() {
 
   return (
     <div className="home-page">
-      <header className="page-header">
-        <h1 className="page-title text-gradient">记忆库</h1>
-        <p className="page-subtitle">随手扔进去，常翻常新</p>
-      </header>
-
       <main className="page-content">
+        <div className="center-area">
         {mode === 'input' ? (
           <div className="input-section">
             <div className="input-wrapper glass">
@@ -172,7 +217,7 @@ export function HomePage() {
 
             <div className="input-actions">
               <button className="action-btn secondary" onClick={readClipboard}>
-                <span className="btn-icon">📋</span>
+                <span className="btn-icon">{ClipboardIcon}</span>
                 <span>粘贴</span>
               </button>
               <button
@@ -180,7 +225,7 @@ export function HomePage() {
                 onClick={handleSend}
                 disabled={!content.trim()}
               >
-                <span className="btn-icon">✨</span>
+                <span className="btn-icon">{SendIcon}</span>
                 <span>发送</span>
               </button>
             </div>
@@ -190,26 +235,27 @@ export function HomePage() {
             <p className="mode-hint">为上一条添加信息？</p>
             <div className="mode-actions">
               <button className="mode-btn glass" onClick={handleAddTag}>
-                <span className="btn-icon">🏷️</span>
+                <span className="btn-icon">{TagIcon}</span>
                 <span>添加标签</span>
               </button>
               <button className="mode-btn glass" onClick={handleAddInfo}>
-                <span className="btn-icon">📎</span>
+                <span className="btn-icon">{PaperclipIcon}</span>
                 <span>添加信息</span>
               </button>
             </div>
             <p className="mode-timer">3秒后自动回退...</p>
           </div>
         )}
+        </div>
 
         {/* 快捷入口 */}
         <div className="quick-actions">
           <button className="quick-btn glass" onClick={() => navigate('/random')}>
-            <span className="btn-icon">🎴</span>
+            <span className="btn-icon">{CardsIcon}</span>
             <span>随机浏览</span>
           </button>
           <button className="quick-btn glass" onClick={() => navigate('/search')}>
-            <span className="btn-icon">🔍</span>
+            <span className="btn-icon">{SearchIcon}</span>
             <span>搜索</span>
           </button>
         </div>
@@ -223,6 +269,8 @@ export function HomePage() {
               selectedTagIds={pendingTagIds}
               onSelectionChange={setPendingTagIds}
               onClose={() => setShowTagSelector(false)}
+              entryId={lastEntryId ?? undefined}
+              entryContent={lastEntryContent ?? undefined}
             />
             <div className="home-tag-actions">
               <button

@@ -8,6 +8,25 @@ import { useTagStore } from '@/stores/tagStore';
 import { BottomNav } from '@/components/BottomNav';
 import './TagManagePage.css';
 
+/* SVG Icon Components */
+const IconArrowLeft = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="m12 19-7-7 7-7" /><path d="M19 12H5" />
+  </svg>
+);
+
+const IconSearch = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
+  </svg>
+);
+
+const IconTag = () => (
+  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z" /><circle cx="7.5" cy="7.5" r=".5" fill="currentColor" />
+  </svg>
+);
+
 export function TagManagePage() {
   const navigate = useNavigate();
   const tags = useTagStore(state => state.tags);
@@ -54,7 +73,7 @@ export function TagManagePage() {
   return (
     <div className="tag-manage-page">
       <header className="page-header">
-        <button className="back-btn" onClick={() => navigate(-1)}>←</button>
+        <button className="back-btn" onClick={() => navigate(-1)}><IconArrowLeft /></button>
         <h1 className="page-title">标签管理</h1>
         <div className="header-spacer" />
       </header>
@@ -62,7 +81,7 @@ export function TagManagePage() {
       <main className="page-content">
         {/* 搜索框 */}
         <div className="search-wrapper glass">
-          <span className="search-icon">🔍</span>
+          <span className="search-icon"><IconSearch /></span>
           <input
             type="text"
             className="search-input"
@@ -121,7 +140,7 @@ export function TagManagePage() {
             ))
           ) : (
             <div className="empty-state">
-              <span className="empty-icon">🏷️</span>
+              <span className="empty-icon"><IconTag /></span>
               <p className="empty-text">
                 {searchKeyword ? '没有找到匹配的标签' : '还没有创建标签'}
               </p>

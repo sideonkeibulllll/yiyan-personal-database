@@ -18,16 +18,17 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
-  background: var(--color-bg-elevated);
+  border-radius: var(--radius-sm);
+  background: rgba(26, 23, 20, 0.6);
+  border: 1px solid var(--color-border-primary);
   color: var(--color-text-secondary);
-  font-size: var(--text-lg);
   cursor: pointer;
   transition: all var(--duration-fast) var(--ease-out);
 }
 
 .back-btn:active {
   transform: scale(0.9);
+  border-color: var(--color-border-accent);
 }
 
 .page-title {
@@ -36,6 +37,7 @@
   font-weight: 600;
   color: var(--color-text-primary);
   text-align: center;
+  font-family: var(--font-serif);
 }
 
 .header-spacer {
@@ -54,7 +56,7 @@
 .current-entry {
   padding: var(--space-4);
   border-radius: var(--radius-md);
-  border-left: 3px solid var(--color-accent-primary);
+  border-left: 3px solid var(--color-copper-primary);
 }
 
 .section-title {
@@ -106,7 +108,10 @@
 }
 
 .link-icon {
-  font-size: var(--text-sm);
+  display: flex;
+  align-items: center;
+  color: var(--color-accent-primary);
+  flex-shrink: 0;
 }
 
 .link-description span:last-child {
@@ -123,7 +128,9 @@
 }
 
 .meta-icon {
-  font-size: var(--text-sm);
+  display: flex;
+  align-items: center;
+  color: var(--color-star);
 }
 
 .meta-time {
@@ -142,7 +149,12 @@
 }
 
 .empty-icon {
-  font-size: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  color: var(--color-accent-primary);
   opacity: 0.5;
 }
 

@@ -35,6 +35,8 @@ export interface WindowState {
   selectedIds: Set<string>;
   /** 排序方式 */
   sortBy: SortBy;
+  /** 刷新计数器（变化时触发重新加载） */
+  refreshKey: number;
 }
 
 /** 列表项类型 */
@@ -68,6 +70,7 @@ export function createInitialWindowState(mode: ManagerMode): WindowState {
     historyIndex: 0,
     selectedIds: new Set(),
     sortBy: 'time',
+    refreshKey: 0,
   };
 }
 

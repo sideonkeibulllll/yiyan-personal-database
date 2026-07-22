@@ -9,6 +9,25 @@ import { BottomNav } from '@/components/BottomNav';
 import type { Entry, Link } from '@/types';
 import './LinkPage.css';
 
+/* SVG Icon Components */
+const IconArrowLeft = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="m12 19-7-7 7-7" /><path d="M19 12H5" />
+  </svg>
+);
+
+const IconLink = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+  </svg>
+);
+
+const IconStar = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+  </svg>
+);
+
 export function LinkPage() {
   const { entryId } = useParams<{ entryId: string }>();
   const navigate = useNavigate();
@@ -67,7 +86,7 @@ export function LinkPage() {
   return (
     <div className="link-page">
       <header className="page-header">
-        <button className="back-btn" onClick={() => navigate(-1)}>←</button>
+        <button className="back-btn" onClick={() => navigate(-1)}><IconArrowLeft /></button>
         <h1 className="page-title">连线</h1>
         <div className="header-spacer" />
       </header>
@@ -97,12 +116,12 @@ export function LinkPage() {
                 </div>
                 {link.description && (
                   <div className="link-description">
-                    <span className="link-icon">🔗</span>
+                    <span className="link-icon"><IconLink /></span>
                     <span>{link.description}</span>
                   </div>
                 )}
                 <div className="link-meta">
-                  {link.targetEntry.isStarred && <span className="meta-icon">⭐</span>}
+                  {link.targetEntry.isStarred && <span className="meta-icon"><IconStar /></span>}
                   <span className="meta-time">
                     {new Date(link.createdAt).toLocaleDateString('zh-CN')}
                   </span>
@@ -111,7 +130,7 @@ export function LinkPage() {
             ))
           ) : (
             <div className="empty-links">
-              <span className="empty-icon">🔗</span>
+              <span className="empty-icon"><IconLink /></span>
               <p className="empty-text">暂无连线</p>
               <p className="empty-hint">在随机浏览或搜索中可以为条目建立连线</p>
             </div>

@@ -10,6 +10,37 @@ import { exportAndDownload, type ExportOptions } from '@/utils/export';
 import { BottomNav } from '@/components/BottomNav';
 import './ExportPage.css';
 
+/* SVG Icon Components */
+const IconArrowLeft = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="m12 19-7-7 7-7" /><path d="M19 12H5" />
+  </svg>
+);
+
+const IconFile = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" /><path d="M14 2v4a2 2 0 0 0 2 2h4" />
+  </svg>
+);
+
+const IconFileText = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" /><path d="M14 2v4a2 2 0 0 0 2 2h4" /><path d="M10 9H8" /><path d="M16 13H8" /><path d="M16 17H8" />
+  </svg>
+);
+
+const IconStar = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+  </svg>
+);
+
+const IconTag = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z" /><circle cx="7.5" cy="7.5" r=".5" fill="currentColor" />
+  </svg>
+);
+
 export function ExportPage() {
   const navigate = useNavigate();
   const entries = useEntryStore(state => state.entries);
@@ -58,7 +89,7 @@ export function ExportPage() {
   return (
     <div className="export-page">
       <header className="page-header">
-        <button className="back-btn" onClick={() => navigate(-1)}>←</button>
+        <button className="back-btn" onClick={() => navigate(-1)}><IconArrowLeft /></button>
         <h1 className="page-title">数据导出</h1>
         <div className="header-spacer" />
       </header>
@@ -72,7 +103,7 @@ export function ExportPage() {
               className={`format-btn glass ${format === 'json' ? 'selected' : ''}`}
               onClick={() => setFormat('json')}
             >
-              <span className="format-icon">📄</span>
+              <span className="format-icon"><IconFile /></span>
               <div className="format-info">
                 <span className="format-name">JSON</span>
                 <span className="format-desc">结构化数据，适合备份</span>
@@ -82,7 +113,7 @@ export function ExportPage() {
               className={`format-btn glass ${format === 'markdown' ? 'selected' : ''}`}
               onClick={() => setFormat('markdown')}
             >
-              <span className="format-icon">📝</span>
+              <span className="format-icon"><IconFileText /></span>
               <div className="format-info">
                 <span className="format-name">Markdown</span>
                 <span className="format-desc">可读文档，适合阅读</span>
@@ -105,13 +136,13 @@ export function ExportPage() {
               className={`scope-btn ${scope === 'starred' ? 'selected' : ''}`}
               onClick={() => setScope('starred')}
             >
-              <span>⭐ 仅星标 ({entries.filter(e => e.isStarred).length})</span>
+              <span className="scope-btn-icon"><IconStar /> 仅星标 ({entries.filter(e => e.isStarred).length})</span>
             </button>
             <button
               className={`scope-btn ${scope === 'tag' ? 'selected' : ''}`}
               onClick={() => setScope('tag')}
             >
-              <span>🏷️ 按标签</span>
+              <span className="scope-btn-icon"><IconTag /> 按标签</span>
             </button>
           </div>
 

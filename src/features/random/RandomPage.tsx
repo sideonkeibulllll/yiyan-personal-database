@@ -2,10 +2,11 @@
  * 随机浏览页面
  * 卡片堆叠流式排列，自动填屏 + 分页刷新
  */
-import { useState, useEffect, useCallback, useRef, useLayoutEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useEntryStore } from '@/stores/entryStore';
 import { useTagStore } from '@/stores/tagStore';
+import { useSettingsStore } from '@/stores/settingsStore';
 import { weightedRandomSelect, filterEntries } from '@/services/random';
 import { BottomNav } from '@/components/BottomNav';
 import { QuickMenu } from './QuickMenu';
@@ -13,10 +14,47 @@ import { TagSelector } from '@/components/TagSelector';
 import type { Entry } from '@/types';
 import './RandomPage.css';
 
-/** 一次抽取的批次大小 */
-const BATCH_SIZE = 20;
 /** 卡片间距 (px) */
 const CARD_GAP = 12;
+
+/** SVG icons (stroke-based, viewBox="0 0 24 24", strokeWidth="1.5") */
+const FunnelIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M10 20H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6"/>
+    <path d="m3 3 9 9-3 3 9 9"/>
+  </svg>
+);
+
+const RefreshIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+  </svg>
+);
+
+const StarFilledIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+  </svg>
+);
+
+const StarOutlineIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+  </svg>
+);
+
+const CloseIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
+  </svg>
+);
+
+const InboxIcon = () => (
+  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/>
+    <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>
+  </svg>
+);
 
 export function RandomPage() {
   const navigate = useNavigate();
@@ -24,11 +62,11 @@ export function RandomPage() {
   const markAsUsed = useEntryStore(state => state.markAsUsed);
   const toggleStar = useEntryStore(state => state.toggleStar);
   const tags = useTagStore(state => state.tags);
+  const settings = useSettingsStore(state => state.settings);
+  const cardsPerPage = settings.random?.cardsPerPage ?? 7;
 
   // 当前展示的一批条目
   const [currentEntries, setCurrentEntries] = useState<Entry[]>([]);
-  // 实际展示的卡片数（测量后决定）
-  const [displayCount, setDisplayCount] = useState<number>(BATCH_SIZE);
   // 上次抽取的 id 列表，用于避免连续两屏重复
   const lastIdsRef = useRef<Set<string>>(new Set());
 
@@ -43,10 +81,6 @@ export function RandomPage() {
   const longPressTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const [pressedId, setPressedId] = useState<string | null>(null);
 
-  // 卡片容器引用（用于测量）
-  const cardsContainerRef = useRef<HTMLDivElement>(null);
-  const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map());
-
   // 筛选条件
   const [filterTagIds, setFilterTagIds] = useState<string[]>([]);
   const [filterStarred, setFilterStarred] = useState<boolean | undefined>(undefined);
@@ -60,7 +94,6 @@ export function RandomPage() {
 
     if (filtered.length === 0) {
       setCurrentEntries([]);
-      setDisplayCount(0);
       setIsLoading(false);
       return;
     }
@@ -68,13 +101,14 @@ export function RandomPage() {
     // 排除上一屏出现过的条目（如果过滤后仍足够多）
     const lastIds = lastIdsRef.current;
     let candidates = filtered;
-    if (filtered.length > lastIds.size + 1) {
+    if (filtered.length > lastIds.size + cardsPerPage) {
       candidates = filtered.filter(e => !lastIds.has(e.id));
     }
 
+    // Fisher-Yates 部分洗牌：只洗前 cardsPerPage 个位置
     const result: Entry[] = [];
     const usedIds = new Set<string>();
-    const pickCount = Math.min(BATCH_SIZE, candidates.length);
+    const pickCount = Math.min(cardsPerPage, candidates.length);
 
     for (let i = 0; i < pickCount; i++) {
       const remaining = candidates.filter(e => !usedIds.has(e.id));
@@ -86,8 +120,8 @@ export function RandomPage() {
     }
 
     // 如果排除后不够，从全量里补
-    if (result.length < BATCH_SIZE && filtered.length > result.length) {
-      for (let i = result.length; i < Math.min(BATCH_SIZE, filtered.length); i++) {
+    if (result.length < cardsPerPage && filtered.length > result.length) {
+      for (let i = result.length; i < Math.min(cardsPerPage, filtered.length); i++) {
         const remaining = filtered.filter(e => !usedIds.has(e.id));
         if (remaining.length === 0) break;
         const selected = weightedRandomSelect(remaining);
@@ -101,9 +135,8 @@ export function RandomPage() {
     lastIdsRef.current = new Set(result.map(e => e.id));
 
     setCurrentEntries(result);
-    setDisplayCount(result.length); // 初始全部渲染，测量后再裁剪
     setIsLoading(false);
-  }, [entries, filterTagIds, filterStarred]);
+  }, [entries, filterTagIds, filterStarred, cardsPerPage]);
 
   // 初始加载
   useEffect(() => {
@@ -114,39 +147,14 @@ export function RandomPage() {
     }
   }, [entries, getRandomEntries]);
 
-  // 测量卡片高度，计算能完整展示几张
-  useLayoutEffect(() => {
-    if (currentEntries.length === 0 || !cardsContainerRef.current) return;
-
-    const container = cardsContainerRef.current;
-    const availableHeight = container.clientHeight;
-
-    let cumulativeHeight = 0;
-    let count = 0;
-
-    for (let i = 0; i < currentEntries.length; i++) {
-      const entry = currentEntries[i];
-      const cardEl = cardRefs.current.get(entry.id);
-      if (!cardEl) continue;
-
-      const cardHeight = cardEl.offsetHeight;
-      // 累加卡片高度 + 间距（第一张不需要上方间距）
-      const heightToAdd = i === 0 ? cardHeight : cardHeight + CARD_GAP;
-
-      if (cumulativeHeight + heightToAdd > availableHeight && count > 0) {
-        break;
-      }
-      cumulativeHeight += heightToAdd;
-      count++;
-    }
-
-    if (count > 0 && count !== displayCount) {
-      setDisplayCount(count);
-    }
-  }, [currentEntries, displayCount]);
-
   // 复制内容
   const handleCopy = useCallback(async (entry: Entry) => {
+    // === 修复 2：记录复制时间戳到全局 ===
+    const COPY_KEY = '__yiyan_last_copy_at__';
+    const copyMap: Record<string, number> = (window as any)[COPY_KEY] || {};
+    copyMap[entry.id] = Date.now();
+    (window as any)[COPY_KEY] = copyMap;
+
     try {
       await navigator.clipboard.writeText(entry.content);
       markAsUsed(entry.id);
@@ -167,6 +175,12 @@ export function RandomPage() {
     const timer = setTimeout(() => {
       const entry = currentEntries.find(e => e.id === entryId);
       if (entry) {
+        // === 修复 2：记录长按菜单时间戳到全局 ===
+        const MENU_KEY = '__yiyan_last_menu_at__';
+        const menuMap: Record<string, number> = (window as any)[MENU_KEY] || {};
+        menuMap[entryId] = Date.now();
+        (window as any)[MENU_KEY] = menuMap;
+
         setMenuEntry(entry);
         setShowMenu(true);
       }
@@ -223,14 +237,13 @@ export function RandomPage() {
 
     if (filtered.length === 0) {
       setCurrentEntries([]);
-      setDisplayCount(0);
       setIsLoading(false);
       return;
     }
 
     const result: Entry[] = [];
     const usedIds = new Set<string>();
-    const pickCount = Math.min(BATCH_SIZE, filtered.length);
+    const pickCount = Math.min(cardsPerPage, filtered.length);
 
     for (let i = 0; i < pickCount; i++) {
       const remaining = filtered.filter(e => !usedIds.has(e.id));
@@ -243,9 +256,8 @@ export function RandomPage() {
 
     lastIdsRef.current = new Set(result.map(e => e.id));
     setCurrentEntries(result);
-    setDisplayCount(result.length);
     setIsLoading(false);
-  }, [entries]);
+  }, [entries, cardsPerPage]);
 
   // 清理长按计时器
   useEffect(() => {
@@ -266,24 +278,20 @@ export function RandomPage() {
     );
   }
 
-  const visibleEntries = currentEntries.slice(0, displayCount);
-
   return (
     <div className="random-page">
-      <header className="page-header">
-        <h1 className="page-title">随机浏览</h1>
-        <button className="filter-btn" onClick={() => setShowFilter(true)}>
-          <span>🔍</span>
-        </button>
-      </header>
+      {/* 筛选按钮 - 右上角浮动 */}
+      <button className="filter-btn" onClick={() => setShowFilter(true)}>
+        <FunnelIcon />
+      </button>
 
       {/* 筛选标签显示 */}
       {(filterTagIds.length > 0 || filterStarred !== undefined) && (
         <div className="active-filters">
           {filterStarred !== undefined && (
             <span className="filter-badge">
-              {filterStarred ? '⭐ 已星标' : '☆ 未星标'}
-              <button onClick={() => handleFilterChange(filterTagIds, undefined)}>✕</button>
+              {filterStarred ? <><StarFilledIcon /> 已星标</> : <><StarOutlineIcon /> 未星标</>}
+              <button onClick={() => handleFilterChange(filterTagIds, undefined)}><CloseIcon /></button>
             </span>
           )}
           {filterTagIds.map(tagId => {
@@ -291,7 +299,7 @@ export function RandomPage() {
             return tag ? (
               <span key={tagId} className="filter-badge">
                 #{tag.name}
-                <button onClick={() => handleFilterChange(filterTagIds.filter(id => id !== tagId), filterStarred)}>✕</button>
+                <button onClick={() => handleFilterChange(filterTagIds.filter(id => id !== tagId), filterStarred)}><CloseIcon /></button>
               </span>
             ) : null;
           })}
@@ -299,23 +307,14 @@ export function RandomPage() {
       )}
 
       <main className="page-content">
-        {visibleEntries.length > 0 ? (
+        {currentEntries.length > 0 ? (
           <>
-            <div
-              className="cards-stack"
-              ref={cardsContainerRef}
-            >
-              {/* 全部渲染用于测量，但超出部分隐藏 */}
-              {currentEntries.map((entry, index) => {
-                const isVisible = index < displayCount;
+            <div className="cards-stack">
+              {currentEntries.map((entry) => {
                 return (
                   <div
                     key={entry.id}
-                    ref={(el) => {
-                      if (el) cardRefs.current.set(entry.id, el);
-                      else cardRefs.current.delete(entry.id);
-                    }}
-                    className={`card-item ${pressedId === entry.id ? 'pressed' : ''} ${!isVisible ? 'card-hidden' : ''}`}
+                    className={`card-item ${pressedId === entry.id ? 'pressed' : ''}`}
                     onClick={() => handleCopy(entry)}
                     onMouseDown={() => handlePressStart(entry.id)}
                     onMouseUp={() => handlePressEnd(entry.id)}
@@ -330,7 +329,7 @@ export function RandomPage() {
 
                       <div className="card-meta">
                         {entry.isStarred && (
-                          <span className="meta-star">⭐</span>
+                          <span className="meta-star"><StarFilledIcon /></span>
                         )}
                         {entry.tags && entry.tags.length > 0 && (
                           <div className="meta-tags">
@@ -351,14 +350,14 @@ export function RandomPage() {
 
             <div className="card-actions">
               <button className="nav-btn glass" onClick={handleRefresh}>
-                <span>🔄</span>
+                <RefreshIcon />
                 <span>刷新下一屏</span>
               </button>
             </div>
           </>
         ) : (
           <div className="empty-state">
-            <span className="empty-icon">📭</span>
+            <span className="empty-icon"><InboxIcon /></span>
             <p className="empty-text">没有符合条件的记忆</p>
             <p className="empty-hint">尝试调整筛选条件</p>
           </div>
@@ -380,6 +379,9 @@ export function RandomPage() {
             setTagSelectorEntry(menuEntry);
             setShowTagSelector(true);
           }}
+          onAIChat={(entryId) => {
+            navigate(`/chat?entryId=${entryId}&from=/random`);
+          }}
         />
       )}
 
@@ -389,7 +391,7 @@ export function RandomPage() {
           <div className="filter-panel glass" onClick={e => e.stopPropagation()}>
             <div className="panel-header">
               <h3>筛选条件</h3>
-              <button onClick={() => setShowFilter(false)}>✕</button>
+              <button onClick={() => setShowFilter(false)}><CloseIcon /></button>
             </div>
 
             {/* 星标筛选 */}
@@ -406,13 +408,13 @@ export function RandomPage() {
                   className={filterStarred === true ? 'active' : ''}
                   onClick={() => handleFilterChange(filterTagIds, true)}
                 >
-                  ⭐ 已星标
+                  <StarFilledIcon /> 已星标
                 </button>
                 <button
                   className={filterStarred === false ? 'active' : ''}
                   onClick={() => handleFilterChange(filterTagIds, false)}
                 >
-                  ☆ 未星标
+                  <StarOutlineIcon /> 未星标
                 </button>
               </div>
             </div>

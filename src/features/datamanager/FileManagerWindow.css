@@ -18,7 +18,6 @@
   border-right: 1px solid var(--color-border-primary);
 }
 
-/* 路径栏 */
 .fm-window-path {
   display: flex;
   align-items: center;
@@ -60,18 +59,19 @@
   cursor: pointer;
   padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-xs);
-  background: rgba(248, 113, 113, 0.1);
+  background: rgba(239, 68, 68, 0.1);
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
-/* 内容区 */
 .fm-window-content {
   flex: 1;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }
 
-/* 加载/空状态 */
 .fm-loading,
 .fm-empty {
   display: flex;
@@ -83,14 +83,12 @@
   font-size: var(--text-sm);
 }
 
-/* 列表 */
 .fm-list {
   list-style: none;
   display: flex;
   flex-direction: column;
 }
 
-/* 列表项 */
 .fm-list-item {
   display: flex;
   align-items: center;
@@ -112,7 +110,7 @@
 }
 
 .fm-list-item.selected .fm-item-title {
-  color: var(--color-accent-secondary);
+  color: var(--color-accent-primary);
 }
 
 .fm-item-icon {
@@ -120,6 +118,14 @@
   flex-shrink: 0;
   width: 20px;
   text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-secondary);
+}
+
+.fm-list-item.selected .fm-item-icon {
+  color: var(--color-copper-primary);
 }
 
 .fm-item-info {
@@ -154,7 +160,7 @@
 }
 
 .fm-item-check {
-  color: var(--color-accent-primary);
+  color: var(--color-copper-primary);
   font-size: var(--text-base);
   flex-shrink: 0;
 }

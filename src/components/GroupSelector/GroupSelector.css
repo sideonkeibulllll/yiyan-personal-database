@@ -17,6 +17,7 @@
   font-size: var(--text-lg);
   font-weight: 600;
   color: var(--color-text-primary);
+  font-family: var(--font-serif);
 }
 
 .selector-close {
@@ -36,7 +37,6 @@
   transform: scale(0.9);
 }
 
-/* === 组列表 === */
 .group-list {
   flex: 1;
   display: flex;
@@ -51,7 +51,7 @@
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-4);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-border-primary);
   cursor: pointer;
@@ -68,7 +68,13 @@
 }
 
 .group-icon {
-  font-size: var(--text-xl);
+  display: flex;
+  align-items: center;
+  color: var(--color-text-secondary);
+}
+
+.group-item.selected .group-icon {
+  color: var(--color-copper-primary);
 }
 
 .group-name {
@@ -79,7 +85,7 @@
 }
 
 .group-check {
-  color: var(--color-accent-secondary);
+  color: var(--color-copper-primary);
   font-weight: 600;
 }
 
@@ -93,7 +99,6 @@
   font-size: var(--text-sm);
 }
 
-/* === 创建组 === */
 .create-group {
   padding-top: var(--space-2);
   border-top: 1px solid var(--color-border-secondary);
@@ -118,8 +123,9 @@
 }
 
 .create-trigger .btn-icon {
-  font-size: var(--text-lg);
-  color: var(--color-accent-primary);
+  display: flex;
+  align-items: center;
+  color: var(--color-copper-primary);
 }
 
 .create-form {
@@ -151,8 +157,8 @@
 }
 
 .create-confirm {
-  background: var(--color-accent-primary);
-  color: white;
+  background: var(--color-copper-primary);
+  color: var(--color-bg-primary);
 }
 
 .create-confirm:disabled {

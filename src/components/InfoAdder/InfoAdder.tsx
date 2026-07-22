@@ -13,13 +13,26 @@ interface InfoAdderProps {
   onSave: (updates: { source?: string; groupId?: string; supplement?: string }) => void;
 }
 
+/** X (close) icon */
+const XCloseSvg = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M18 6L6 18M6 6l12 12" />
+  </svg>
+);
+
+/** Folder icon */
+const FolderSvg = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+  </svg>
+);
+
 export function InfoAdder({ entry, onClose, onSave }: InfoAdderProps) {
   const [source, setSource] = useState(entry.source || '');
   const [supplement, setSupplement] = useState(entry.supplement || '');
   const [groupId, setGroupId] = useState(entry.groupId);
   const [presetSources, setPresetSources] = useState<string[]>([]);
 
-  // 加载预设来源（从设置中读取）
   useState(() => {
     try {
       const stored = localStorage.getItem('yiyan_preset_sources');
@@ -31,7 +44,6 @@ export function InfoAdder({ entry, onClose, onSave }: InfoAdderProps) {
     }
   });
 
-  // 保存
   const handleSave = useCallback(() => {
     onSave({
       source: source || undefined,
@@ -39,9 +51,8 @@ export function InfoAdder({ entry, onClose, onSave }: InfoAdderProps) {
       supplement: supplement || undefined,
     });
 
-    // 如果有新来源，添加到预设
     if (source && !presetSources.includes(source)) {
-      const newPresets = [...presetSources, source].slice(-10); // 最多保留10个
+      const newPresets = [...presetSources, source].slice(-10);
       setPresetSources(newPresets);
       localStorage.setItem('yiyan_preset_sources', JSON.stringify(newPresets));
     }
@@ -49,14 +60,12 @@ export function InfoAdder({ entry, onClose, onSave }: InfoAdderProps) {
 
   return (
     <div className="info-adder">
-      {/* 头部 */}
       <div className="adder-header">
         <h3 className="adder-title">添加信息</h3>
-        <button className="adder-close" onClick={onClose}>✕</button>
+        <button className="adder-close" onClick={onClose}><XCloseSvg /></button>
       </div>
 
       <div className="adder-content">
-        {/* 来源 */}
         <div className="form-section">
           <label className="form-label">来源</label>
           <input
@@ -66,7 +75,6 @@ export function InfoAdder({ entry, onClose, onSave }: InfoAdderProps) {
             value={source}
             onChange={e => setSource(e.target.value)}
           />
-          {/* 预设来源选择 */}
           {presetSources.length > 0 && (
             <div className="preset-sources">
               {presetSources.map((preset, index) => (
@@ -82,13 +90,11 @@ export function InfoAdder({ entry, onClose, onSave }: InfoAdderProps) {
           )}
         </div>
 
-        {/* 所属组选择 */}
         <div className="form-section">
           <label className="form-label">所属组</label>
           <GroupSelect value={groupId} onChange={setGroupId} />
         </div>
 
-        {/* 补充信息 */}
         <div className="form-section">
           <label className="form-label">补充信息</label>
           <textarea
@@ -101,7 +107,6 @@ export function InfoAdder({ entry, onClose, onSave }: InfoAdderProps) {
         </div>
       </div>
 
-      {/* 操作按钮 */}
       <div className="adder-actions">
         <button className="action-btn secondary" onClick={onClose}>
           取消
@@ -114,9 +119,6 @@ export function InfoAdder({ entry, onClose, onSave }: InfoAdderProps) {
   );
 }
 
-/**
- * 组选择子组件
- */
 function GroupSelect({ value, onChange }: { value?: string; onChange: (groupId?: string) => void }) {
   const [groups, setGroups] = useState<Array<{ id: string; name: string }>>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -154,7 +156,7 @@ function GroupSelect({ value, onChange }: { value?: string; onChange: (groupId?:
           className={`group-option ${value === group.id ? 'selected' : ''}`}
           onClick={() => onChange(group.id)}
         >
-          📁 {group.name}
+          <FolderSvg /> {group.name}
         </button>
       ))}
     </div>

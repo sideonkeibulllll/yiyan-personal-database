@@ -1,63 +1,74 @@
 /**
- * 暗色主题设计系统
- * 配色：黑/白/冷色系，优雅呼吸，轻盈舒适
- * 灵感：深夜星空 + 极简主义
+ * Golden Time 暗色主题设计系统
+ * 配色：深色基底 + 金色暖调 + 棕褐优雅
+ * 灵感：Golden Time 设计系统 — 复古文艺，温暖呼吸
  */
 
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,400&display=swap');
+
 :root {
-  /* === 主色调 - 深邃星空黑 === */
-  --color-bg-primary: #0a0a0f;
-  --color-bg-secondary: #111118;
-  --color-bg-tertiary: #18181f;
-  --color-bg-elevated: #1e1e28;
-  --color-bg-float: #252530;
+  /* === 主色调 - 深色基底（Golden Time Dark） === */
+  --color-bg-primary: #060201;
+  --color-bg-secondary: #0d0b08;
+  --color-bg-tertiary: #141110;
+  --color-bg-elevated: #1a1714;
+  --color-bg-float: #211e19;
 
-  /* === 冷色强调 - 星云蓝紫 === */
-  --color-accent-primary: #6366f1;
-  --color-accent-secondary: #818cf8;
-  --color-accent-tertiary: #a5b4fc;
-  --color-accent-glow: rgba(99, 102, 241, 0.15);
-  --color-accent-subtle: rgba(99, 102, 241, 0.08);
+  /* === 暖色强调 - 金色琥珀 === */
+  --color-accent-primary: #cbb99f;
+  --color-accent-secondary: #e3dfd6;
+  --color-accent-tertiary: #f2e1ca;
+  --color-accent-glow: rgba(203, 185, 159, 0.12);
+  --color-accent-subtle: rgba(203, 185, 159, 0.06);
 
-  /* === 冷色辅助 - 冰蓝青 === */
-  --color-cyan-primary: #22d3ee;
-  --color-cyan-secondary: #67e8f9;
-  --color-cyan-glow: rgba(34, 211, 238, 0.12);
+  /* === 暖色辅助 - 铜橙/赭红 === */
+  --color-copper-primary: #806a4d;
+  --color-copper-secondary: #9b8568;
+  --color-copper-glow: rgba(128, 106, 77, 0.15);
+  --color-ochre-primary: #e65c33;
+  --color-ochre-glow: rgba(230, 92, 51, 0.10);
 
-  /* === 文字层次 - 月光白 === */
-  --color-text-primary: #f1f1f4;
-  --color-text-secondary: #a1a1b5;
-  --color-text-tertiary: #6b6b80;
-  --color-text-disabled: #4a4a5c;
-  --color-text-inverse: #0a0a0f;
+  /* === 次要强调 - 深棕绿 === */
+  --color-secondary-primary: #605039;
+  --color-secondary-secondary: #8c7773;
+  --color-secondary-tertiary: #b39d80;
+  --color-secondary-glow: rgba(96, 80, 57, 0.15);
 
-  /* === 边框与分隔 - 微光灰 === */
-  --color-border-primary: rgba(255, 255, 255, 0.06);
-  --color-border-secondary: rgba(255, 255, 255, 0.04);
-  --color-border-accent: rgba(99, 102, 241, 0.3);
+  /* === 文字层次 - 暖白/米色 === */
+  --color-text-primary: #e3dfd6;
+  --color-text-secondary: #a89c8a;
+  --color-text-tertiary: #706556;
+  --color-text-disabled: #4a4438;
+  --color-text-inverse: #060201;
+
+  /* === 边框与分隔 - 深暖灰 === */
+  --color-border-primary: rgba(226, 221, 207, 0.07);
+  --color-border-secondary: rgba(226, 221, 207, 0.04);
+  --color-border-accent: rgba(203, 185, 159, 0.25);
 
   /* === 功能色 === */
-  --color-success: #34d399;
-  --color-warning: #fbbf24;
-  --color-error: #f87171;
-  --color-info: #60a5fa;
+  --color-success: #6daa68;
+  --color-warning: #f79b45;
+  --color-error: #ef4444;
+  --color-info: #7a9ec2;
 
   /* === 状态色 === */
-  --color-star: #fbbf24;
-  --color-star-glow: rgba(251, 191, 36, 0.2);
+  --color-star: #f79b45;
+  --color-star-glow: rgba(247, 155, 69, 0.2);
 
-  /* === 阴影 - 柔和扩散 === */
+  /* === 阴影 - 暖调扩散 === */
   --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);
   --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.5);
-  --shadow-glow: 0 0 20px rgba(99, 102, 241, 0.15);
+  --shadow-glow: 0 0 24px rgba(203, 185, 159, 0.08);
+  --shadow-gold: 0 0 20px rgba(247, 155, 69, 0.1);
 
-  /* === 圆角 - 直角优先，小元素保留微圆角 === */
-  --radius-xs: 2px;
-  --radius-sm: 2px;
-  --radius-md: 2px;
-  --radius-lg: 0;
-  --radius-xl: 0;
+  /* === 圆角 - 圆润柔和（Golden Time 风格） === */
+  --radius-xs: 8px;
+  --radius-sm: 12px;
+  --radius-md: 16px;
+  --radius-lg: 20px;
+  --radius-xl: 24px;
   --radius-full: 9999px;
 
   /* === 间距 - 呼吸感 === */
@@ -71,9 +82,10 @@
   --space-10: 40px;
   --space-12: 48px;
 
-  /* === 字体 === */
-  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  /* === 字体 - Fraunces 衬线体 === */
+  --font-sans: 'Fraunces', ui-serif, Georgia, 'PingFang SC', 'Microsoft YaHei', serif;
   --font-mono: 'SF Mono', 'Fira Code', 'JetBrains Mono', monospace;
+  --font-display: 'Fraunces', ui-serif, Georgia, serif;
 
   /* === 字号 === */
   --text-xs: 11px;
@@ -85,9 +97,9 @@
   --text-3xl: 30px;
 
   /* === 动效 === */
-  --duration-fast: 150ms;
-  --duration-normal: 250ms;
-  --duration-slow: 400ms;
+  --duration-fast: 200ms;
+  --duration-normal: 300ms;
+  --duration-slow: 450ms;
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -216,11 +228,21 @@ a {
   100% { background-position: 200% 0; }
 }
 
+@keyframes glowPulse {
+  0%, 100% { box-shadow: 0 0 12px rgba(203, 185, 159, 0.06); }
+  50% { box-shadow: 0 0 24px rgba(203, 185, 159, 0.12); }
+}
+
+@keyframes gentleFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+
 /* === 工具类 === */
 .glass {
-  background: rgba(30, 30, 40, 0.6);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  background: rgba(26, 23, 20, 0.75);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
   border: 1px solid var(--color-border-primary);
 }
 
@@ -229,8 +251,61 @@ a {
 }
 
 .text-gradient {
-  background: linear-gradient(135deg, var(--color-accent-secondary), var(--color-cyan-primary));
+  background: linear-gradient(135deg, var(--color-accent-tertiary), var(--color-star));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
+}
+
+/* === 图标按钮基础 === */
+.icon-btn {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-xs);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.icon-btn:active {
+  transform: scale(0.92);
+  color: var(--color-text-primary);
+  background: var(--color-bg-elevated);
+}
+
+.icon-btn svg {
+  width: 20px;
+  height: 20px;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  fill: none;
+}
+
+/* === 标签芯片基础 === */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-primary);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+  white-space: nowrap;
+}
+
+.chip:active {
+  transform: scale(0.96);
+}
+
+.chip.active {
+  color: var(--color-accent-primary);
+  background: var(--color-accent-subtle);
+  border-color: var(--color-border-accent);
 }

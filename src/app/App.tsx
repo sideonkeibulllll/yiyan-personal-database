@@ -9,6 +9,13 @@ import { useEntryStore } from '@/stores/entryStore';
 import { useTagStore } from '@/stores/tagStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 
+/** Triangle alert icon */
+const TriangleAlertSvg = () => (
+  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><path d="M12 9v4M12 17h.01" />
+  </svg>
+);
+
 export function App() {
   const [isReady, setIsReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -17,7 +24,6 @@ export function App() {
   const loadSettings = useSettingsStore(state => state.loadSettings);
 
   useEffect(() => {
-    // 初始化数据库并加载数据
     const init = async () => {
       try {
         await getDatabase();
@@ -26,7 +32,6 @@ export function App() {
       } catch (err) {
         console.error('初始化失败:', err);
         setError((err as Error).message);
-        // 即使出错也显示界面，避免白屏
         setIsReady(true);
       }
     };
@@ -48,20 +53,22 @@ export function App() {
         minHeight: '100dvh',
         padding: '20px',
         textAlign: 'center',
+        background: '#060201',
       }}>
-        <div style={{ fontSize: 48, marginBottom: 16 }}>⚠️</div>
-        <div style={{ fontSize: 16, color: '#f87171', marginBottom: 8 }}>数据库初始化失败</div>
-        <div style={{ fontSize: 13, color: '#6b6b80' }}>{error}</div>
+        <div style={{ marginBottom: 16, color: 'var(--color-error, #ef4444)' }}><TriangleAlertSvg /></div>
+        <div style={{ fontSize: 16, color: '#ef4444', marginBottom: 8, fontFamily: 'var(--font-serif, Fraunces, serif)' }}>数据库初始化失败</div>
+        <div style={{ fontSize: 13, color: '#706556' }}>{error}</div>
         <button
           onClick={() => window.location.reload()}
           style={{
             marginTop: 24,
             padding: '10px 24px',
             borderRadius: 12,
-            background: 'linear-gradient(135deg, #6366f1, #818cf8)',
-            color: 'white',
+            background: 'linear-gradient(135deg, #806a4d, #cbb99f)',
+            color: '#060201',
             border: 'none',
             fontSize: 14,
+            fontWeight: 500,
             cursor: 'pointer',
           }}
         >

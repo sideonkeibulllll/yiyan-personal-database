@@ -5,7 +5,6 @@
   overflow: hidden;
 }
 
-/* === 头部 === */
 .chat-header {
   display: flex;
   align-items: center;
@@ -22,6 +21,7 @@
   font-size: var(--text-lg);
   font-weight: 600;
   color: var(--color-text-primary);
+  font-family: var(--font-serif);
 }
 
 .header-subtitle {
@@ -47,12 +47,11 @@
   transform: scale(0.9);
 }
 
-/* === 条目预览 === */
 .entry-preview {
   margin: var(--space-4) var(--space-5);
   padding: var(--space-3) var(--space-4);
   border-radius: var(--radius-md);
-  border-left: 3px solid var(--color-accent-primary);
+  border-left: 3px solid var(--color-copper-primary);
 }
 
 .preview-text {
@@ -65,7 +64,6 @@
   overflow: hidden;
 }
 
-/* === 消息列表 === */
 .messages-container {
   flex: 1;
   display: flex;
@@ -85,7 +83,9 @@
 }
 
 .empty-icon {
-  font-size: 40px;
+  display: flex;
+  align-items: center;
+  color: var(--color-text-tertiary);
   opacity: 0.5;
 }
 
@@ -99,7 +99,6 @@
   color: var(--color-text-tertiary);
 }
 
-/* === 消息气泡 === */
 .message {
   display: flex;
   flex-direction: column;
@@ -125,8 +124,8 @@
 }
 
 .message.user .message-bubble {
-  background: linear-gradient(135deg, var(--color-accent-primary), var(--color-accent-secondary));
-  color: white;
+  background: linear-gradient(135deg, var(--color-copper-primary), var(--color-accent-primary));
+  color: var(--color-bg-primary);
   border-bottom-right-radius: var(--radius-xs);
 }
 
@@ -146,7 +145,6 @@
   text-align: right;
 }
 
-/* === Loading 动画 === */
 .message-bubble.loading {
   display: flex;
   gap: 4px;
@@ -157,7 +155,7 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--color-text-tertiary);
+  background: var(--color-copper-primary);
   animation: bounce 1.4s infinite ease-in-out;
 }
 
@@ -169,7 +167,6 @@
   40% { transform: scale(1); }
 }
 
-/* === 输入框 === */
 .chat-input-wrapper {
   display: flex;
   align-items: flex-end;
@@ -196,8 +193,8 @@
   padding: var(--space-2) var(--space-4);
   border-radius: var(--radius-md);
   font-size: var(--text-sm);
-  color: white;
-  background: linear-gradient(135deg, var(--color-accent-primary), var(--color-accent-secondary));
+  color: var(--color-bg-primary);
+  background: linear-gradient(135deg, var(--color-copper-primary), var(--color-accent-primary));
   cursor: pointer;
   transition: all var(--duration-fast) var(--ease-out);
 }

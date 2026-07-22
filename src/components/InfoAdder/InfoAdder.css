@@ -17,6 +17,7 @@
   font-size: var(--text-lg);
   font-weight: 600;
   color: var(--color-text-primary);
+  font-family: var(--font-serif);
 }
 
 .adder-close {
@@ -36,7 +37,6 @@
   transform: scale(0.9);
 }
 
-/* === 内容区域 === */
 .adder-content {
   flex: 1;
   display: flex;
@@ -61,7 +61,7 @@
 .form-input,
 .form-textarea {
   padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   font-size: var(--text-sm);
   color: var(--color-text-primary);
   transition: border-color var(--duration-fast) var(--ease-out);
@@ -83,7 +83,6 @@
   line-height: 1.6;
 }
 
-/* === 预设来源 === */
 .preset-sources {
   display: flex;
   flex-wrap: wrap;
@@ -107,7 +106,6 @@
   border-color: var(--color-border-accent);
 }
 
-/* === 组选择 === */
 .group-select {
   display: flex;
   flex-wrap: wrap;
@@ -137,7 +135,6 @@
   color: var(--color-text-disabled);
 }
 
-/* === 操作按钮 === */
 .adder-actions {
   display: flex;
   gap: var(--space-3);
@@ -165,6 +162,6 @@
 }
 
 .action-btn.primary {
-  color: white;
-  background: linear-gradient(135deg, var(--color-accent-primary), var(--color-accent-secondary));
+  color: var(--color-bg-primary);
+  background: linear-gradient(135deg, var(--color-copper-primary), var(--color-accent-primary));
 }

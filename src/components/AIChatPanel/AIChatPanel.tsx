@@ -21,6 +21,20 @@ interface Message {
   timestamp: number;
 }
 
+/** X (close) icon */
+const XCloseSvg = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M18 6L6 18M6 6l12 12" />
+  </svg>
+);
+
+/** Message circle icon */
+const MessageCircleSvg = () => (
+  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+  </svg>
+);
+
 export function AIChatPanel({ entry, onClose }: AIChatPanelProps) {
   const settings = useSettingsStore(state => state.settings);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -28,12 +42,10 @@ export function AIChatPanel({ entry, onClose }: AIChatPanelProps) {
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // 自动滚动到底部
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // 发送消息
   const handleSend = useCallback(async () => {
     if (!input.trim() || isLoading) return;
 
@@ -59,13 +71,11 @@ export function AIChatPanel({ entry, onClose }: AIChatPanelProps) {
     setIsLoading(true);
 
     try {
-      // 设置 AI 配置
       ai.setConfig({
         ...settings.ai,
         prompts: settings.ai.prompts,
       });
 
-      // 构建上下文
       const db = await getDatabase();
       const recentEntries = await db.getRecentEntries(settings.context.recentWindow);
       const recentContext = recentEntries
@@ -106,7 +116,6 @@ export function AIChatPanel({ entry, onClose }: AIChatPanelProps) {
     }
   }, [input, isLoading, settings, entry]);
 
-  // 处理键盘事件
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -116,25 +125,22 @@ export function AIChatPanel({ entry, onClose }: AIChatPanelProps) {
 
   return (
     <div className="ai-chat-panel">
-      {/* 头部 */}
       <div className="chat-header">
         <div className="header-info">
           <h3 className="header-title">AI 对话</h3>
           <p className="header-subtitle">围绕当前条目展开讨论</p>
         </div>
-        <button className="header-close" onClick={onClose}>✕</button>
+        <button className="header-close" onClick={onClose}><XCloseSvg /></button>
       </div>
 
-      {/* 当前条目预览 */}
       <div className="entry-preview glass">
         <p className="preview-text">{entry.content}</p>
       </div>
 
-      {/* 消息列表 */}
       <div className="messages-container">
         {messages.length === 0 ? (
           <div className="empty-chat">
-            <span className="empty-icon">💬</span>
+            <span className="empty-icon"><MessageCircleSvg /></span>
             <p className="empty-text">开始与 AI 对话</p>
             <p className="empty-hint">可以询问关于这条目的问题</p>
           </div>
@@ -170,7 +176,6 @@ export function AIChatPanel({ entry, onClose }: AIChatPanelProps) {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* 输入框 */}
       <div className="chat-input-wrapper glass">
         <textarea
           className="chat-input"

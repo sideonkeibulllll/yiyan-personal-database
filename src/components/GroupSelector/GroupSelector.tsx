@@ -13,13 +13,40 @@ interface GroupSelectorProps {
   onClose?: () => void;
 }
 
+/** X (close) icon */
+const XCloseSvg = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M18 6L6 18M6 6l12 12" />
+  </svg>
+);
+
+/** File text icon (for ungrouped) */
+const FileTextSvg = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><path d="M16 13H8M16 17H8M10 9H8" />
+  </svg>
+);
+
+/** Folder icon */
+const FolderSvg = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+  </svg>
+);
+
+/** Plus icon */
+const PlusSvg = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 5v14M5 12h14" />
+  </svg>
+);
+
 export function GroupSelector({ selectedGroupId, onSelect, onClose }: GroupSelectorProps) {
   const [groups, setGroups] = useState<Group[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [newGroupName, setNewGroupName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
 
-  // 加载组列表
   useState(() => {
     const loadGroups = async () => {
       try {
@@ -35,10 +62,8 @@ export function GroupSelector({ selectedGroupId, onSelect, onClose }: GroupSelec
     loadGroups();
   });
 
-  // 创建新组
   const handleCreateGroup = useCallback(async () => {
     if (!newGroupName.trim()) return;
-
     try {
       const db = await getDatabase();
       const group = await db.createGroup(newGroupName.trim());
@@ -53,26 +78,21 @@ export function GroupSelector({ selectedGroupId, onSelect, onClose }: GroupSelec
 
   return (
     <div className="group-selector">
-      {/* 头部 */}
       <div className="selector-header">
         <h3 className="selector-title">选择所属组</h3>
         {onClose && (
-          <button className="selector-close" onClick={onClose}>✕</button>
+          <button className="selector-close" onClick={onClose}><XCloseSvg /></button>
         )}
       </div>
-
-      {/* 组列表 */}
       <div className="group-list">
-        {/* 无组选项 */}
         <button
           className={`group-item ${!selectedGroupId ? 'selected' : ''}`}
           onClick={() => onSelect(undefined)}
         >
-          <span className="group-icon">📝</span>
+          <span className="group-icon"><FileTextSvg /></span>
           <span className="group-name">未分组</span>
-          {!selectedGroupId && <span className="group-check">✓</span>}
+          {!selectedGroupId && <span className="group-check">&#10003;</span>}
         </button>
-
         {isLoading ? (
           <div className="loading-text">加载中...</div>
         ) : groups.length > 0 ? (
@@ -82,9 +102,9 @@ export function GroupSelector({ selectedGroupId, onSelect, onClose }: GroupSelec
               className={`group-item ${selectedGroupId === group.id ? 'selected' : ''}`}
               onClick={() => onSelect(group.id)}
             >
-              <span className="group-icon">📁</span>
+              <span className="group-icon"><FolderSvg /></span>
               <span className="group-name">{group.name}</span>
-              {selectedGroupId === group.id && <span className="group-check">✓</span>}
+              {selectedGroupId === group.id && <span className="group-check">&#10003;</span>}
             </button>
           ))
         ) : (
@@ -93,8 +113,6 @@ export function GroupSelector({ selectedGroupId, onSelect, onClose }: GroupSelec
           </div>
         )}
       </div>
-
-      {/* 创建新组 */}
       <div className="create-group">
         {isCreating ? (
           <div className="create-form glass">
@@ -125,7 +143,7 @@ export function GroupSelector({ selectedGroupId, onSelect, onClose }: GroupSelec
           </div>
         ) : (
           <button className="create-trigger glass" onClick={() => setIsCreating(true)}>
-            <span className="btn-icon">+</span>
+            <span className="btn-icon"><PlusSvg /></span>
             <span>新建组</span>
           </button>
         )}

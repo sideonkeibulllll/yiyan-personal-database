@@ -42,3 +42,7 @@ yarn-error.log*
 # Temporary files
 tmp/
 temp/
+
+# Work logs / task notes (not for release)
+*_20260722.md
+*_20260723.md

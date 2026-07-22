@@ -17,6 +17,34 @@ interface FileManagerWindowProps {
   onLongPress: (id: string) => void;
 }
 
+/** Folder icon */
+const FolderSvg = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+  </svg>
+);
+
+/** Star icon */
+const StarSvg = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+  </svg>
+);
+
+/** File text icon */
+const FileTextSvg = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><path d="M16 13H8M16 17H8M10 9H8" />
+  </svg>
+);
+
+/** X (close) icon */
+const XSvg = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M18 6L6 18M6 6l12 12" />
+  </svg>
+);
+
 export function FileManagerWindow({
   side,
   state,
@@ -83,7 +111,7 @@ export function FileManagerWindow({
     } finally {
       setLoading(false);
     }
-  }, [state.path, state.mode, state.sortBy]);
+  }, [state.path, state.mode, state.sortBy, state.refreshKey]);
 
   useEffect(() => {
     loadItems();
@@ -106,7 +134,12 @@ export function FileManagerWindow({
       const event = new CustomEvent('dm-navigate', { detail: { side, path: newPath } });
       window.dispatchEvent(event);
     } else {
-      onSelect(item.id);
+      // === 修复 2：所有模式（数据/标签/组）下的 file 类型都支持多选切换 ===
+      onMultiSelectToggle(item.id);
+      // 进入多选模式
+      if (!multiSelectMode) {
+        setMultiSelectMode(true);
+      }
     }
   };
 
@@ -147,7 +180,7 @@ export function FileManagerWindow({
           </span>
         ))}
         {multiSelectMode && (
-          <button className="fm-multi-exit" onClick={handleExitMultiSelect}>✕ 退出多选</button>
+          <button className="fm-multi-exit" onClick={handleExitMultiSelect}><XSvg /> 退出多选</button>
         )}
       </div>
       <div className="fm-window-content">
@@ -172,14 +205,14 @@ export function FileManagerWindow({
                   onMouseLeave={cancelLongPress}
                 >
                   <span className="fm-item-icon">
-                    {item.type === 'folder' ? '📁' : item.isStarred ? '⭐' : '📄'}
+                    {item.type === 'folder' ? <FolderSvg /> : item.isStarred ? <StarSvg /> : <FileTextSvg />}
                   </span>
                   <div className="fm-item-info">
                     <span className="fm-item-title">{item.title}</span>
                     {item.subtitle && <span className="fm-item-subtitle">{item.subtitle}</span>}
                   </div>
                   {item.meta && <span className="fm-item-meta">{item.meta}</span>}
-                  {multiSelectMode && isSelected && <span className="fm-item-check">✓</span>}
+                  {multiSelectMode && isSelected && <span className="fm-item-check">&#10003;</span>}
                 </li>
               );
             })}

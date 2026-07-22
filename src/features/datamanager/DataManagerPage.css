@@ -27,6 +27,9 @@
   border-radius: var(--radius-xs);
   transition: all var(--duration-fast) var(--ease-out);
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .dm-header-btn:active {
@@ -95,8 +98,11 @@
   background: var(--color-bg-elevated);
 }
 
-.dm-more-item span:first-child {
-  font-size: var(--text-base);
+.dm-more-item svg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  color: var(--color-text-secondary);
 }
 
 /* === 排序子菜单 === */
@@ -129,7 +135,7 @@
 }
 
 .dm-sort-item.active {
-  color: var(--color-accent-secondary);
+  color: var(--color-accent-primary);
   font-weight: 500;
 }
 
@@ -177,7 +183,7 @@
 
 .dm-footer-btn:active:not(:disabled) {
   background: var(--color-accent-subtle);
-  color: var(--color-accent-secondary);
+  color: var(--color-copper-primary);
 }
 
 .dm-footer-btn:disabled {
@@ -213,6 +219,7 @@
   font-size: var(--text-lg);
   font-weight: 600;
   color: var(--color-text-primary);
+  font-family: var(--font-serif);
 }
 
 .dm-dialog-input {
@@ -249,13 +256,13 @@
 }
 
 .dm-dialog-btn.confirm {
-  color: white;
-  background: var(--color-accent-primary);
+  color: var(--color-bg-primary);
+  background: var(--color-copper-primary);
 }
 
 .dm-dialog-btn.confirm:active {
-  background: var(--color-accent-primary);
-  opacity: 0.8;
+  background: var(--color-accent-secondary);
+  opacity: 0.9;
 }
 
 /* === 条目操作菜单 === */
@@ -292,8 +299,14 @@
   color: var(--color-error);
 }
 
-.dm-action-item span:first-child {
-  font-size: var(--text-base);
+.dm-action-item svg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.dm-action-item.danger svg {
+  color: var(--color-error);
 }
 
 /* === 导入结果 === */
@@ -359,6 +372,7 @@
   z-index: 300;
   animation: slideUp var(--duration-fast) var(--ease-out);
   white-space: nowrap;
+  box-shadow: 0 0 20px rgba(203, 185, 159, 0.15), 0 0 60px rgba(203, 185, 159, 0.05);
 }
 
 /* === 遮罩 === */
