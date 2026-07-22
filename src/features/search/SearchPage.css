@@ -1,0 +1,206 @@
+.search-page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  padding-bottom: calc(80px + var(--safe-bottom));
+}
+
+.page-header {
+  padding: var(--space-6) var(--space-6) var(--space-4);
+}
+
+.page-title {
+  font-size: var(--text-xl);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.page-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 0 var(--space-5);
+  gap: var(--space-4);
+}
+
+/* === 搜索框 === */
+.search-input-wrapper {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-lg);
+  transition: border-color var(--duration-fast) var(--ease-out);
+}
+
+.search-input-wrapper:focus-within {
+  border-color: var(--color-border-accent);
+}
+
+.search-icon {
+  font-size: var(--text-lg);
+  opacity: 0.6;
+}
+
+.search-input {
+  flex: 1;
+  font-size: var(--text-base);
+  color: var(--color-text-primary);
+}
+
+.search-input::placeholder {
+  color: var(--color-text-disabled);
+}
+
+.clear-btn {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--color-bg-elevated);
+  color: var(--color-text-tertiary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+/* === 筛选栏 === */
+.filter-bar {
+  display: flex;
+  gap: var(--space-2);
+  overflow-x: auto;
+  padding-bottom: var(--space-2);
+  scrollbar-width: none;
+}
+
+.filter-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.filter-chip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-primary);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.filter-chip.active {
+  color: var(--color-accent-secondary);
+  background: var(--color-accent-subtle);
+  border-color: var(--color-border-accent);
+}
+
+/* === 搜索结果 === */
+.search-results {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  overflow-y: auto;
+}
+
+.search-loading {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-8);
+}
+
+.loading-spinner.small {
+  width: 24px;
+  height: 24px;
+}
+
+.result-item {
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.result-item:active {
+  transform: scale(0.99);
+  background: var(--color-bg-elevated);
+}
+
+.result-content {
+  font-size: var(--text-base);
+  line-height: 1.6;
+  color: var(--color-text-primary);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-bottom: var(--space-2);
+}
+
+.result-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+}
+
+.meta-icon {
+  font-size: var(--text-sm);
+}
+
+.meta-tags-count {
+  color: var(--color-accent-tertiary);
+}
+
+.meta-time {
+  margin-left: auto;
+}
+
+/* === 空状态 === */
+.empty-results,
+.search-hint {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-12) 0;
+}
+
+.empty-icon,
+.hint-icon {
+  font-size: 40px;
+  opacity: 0.5;
+}
+
+.empty-text,
+.hint-sub {
+  font-size: var(--text-sm);
+  color: var(--color-text-tertiary);
+}
+
+.search-hint p {
+  font-size: var(--text-base);
+  color: var(--color-text-secondary);
+}
+
+/* === 轻提示 === */
+.toast {
+  position: fixed;
+  bottom: calc(100px + var(--safe-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  padding: var(--space-3) var(--space-5);
+  border-radius: var(--radius-full);
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+  animation: slideUp var(--duration-normal) var(--ease-out);
+  z-index: 200;
+}
