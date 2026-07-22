@@ -8,6 +8,7 @@
 .page-header {
   padding: var(--space-6) var(--space-6) var(--space-4);
   text-align: center;
+  position: relative;
 }
 
 .page-title {
@@ -27,31 +28,48 @@
   display: flex;
   flex-direction: column;
   padding: 0 var(--space-5);
-  gap: var(--space-6);
+  gap: var(--space-4);
+  overflow: hidden;
+  min-height: 0;
 }
 
-/* === 卡片区域 === */
-.card-container {
+/* === 卡片堆叠区域 === */
+.cards-stack {
   flex: 1;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: transform var(--duration-fast) var(--ease-out);
+  flex-direction: column;
+  gap: 12px;
+  overflow: hidden;
+  position: relative;
 }
 
-.card-container.pressed {
+/* 单张卡片容器 */
+.card-item {
+  width: 100%;
+  cursor: pointer;
+  transition: transform var(--duration-fast) var(--ease-out);
+  flex-shrink: 0;
+}
+
+.card-item.pressed {
   transform: scale(0.98);
+}
+
+/* 测量阶段隐藏超出部分 */
+.card-hidden {
+  visibility: hidden;
+  position: absolute;
+  left: -9999px;
+  pointer-events: none;
 }
 
 .entry-card {
   width: 100%;
-  max-width: 400px;
-  padding: var(--space-8) var(--space-6);
-  border-radius: var(--radius-xl);
-  animation: scaleIn var(--duration-normal) var(--ease-spring);
+  padding: var(--space-5) var(--space-5);
+  border-radius: var(--radius-lg);
   position: relative;
   overflow: hidden;
+  animation: scaleIn var(--duration-normal) var(--ease-spring);
 }
 
 .entry-card::before {
@@ -65,18 +83,18 @@
 }
 
 .card-content {
-  font-size: var(--text-lg);
-  line-height: 1.8;
+  font-size: var(--text-base);
+  line-height: 1.7;
   color: var(--color-text-primary);
   white-space: pre-wrap;
   word-break: break-word;
-  margin-bottom: var(--space-6);
+  margin-bottom: var(--space-3);
 }
 
 .card-meta {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--space-2);
   flex-wrap: wrap;
 }
 
@@ -108,6 +126,8 @@
 .card-actions {
   display: flex;
   gap: var(--space-3);
+  flex-shrink: 0;
+  padding-bottom: var(--space-2);
 }
 
 .nav-btn {
@@ -116,7 +136,7 @@
   align-items: center;
   justify-content: center;
   gap: var(--space-2);
-  padding: var(--space-4);
+  padding: var(--space-3) var(--space-4);
   border-radius: var(--radius-md);
   font-size: var(--text-sm);
   color: var(--color-text-secondary);

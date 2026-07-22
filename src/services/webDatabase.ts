@@ -2,8 +2,19 @@
  * Web 平台数据库服务
  * 使用 localStorage 存储，便于开发和测试
  */
-import type { Entry, Tag, Group, Link } from '@/types';
+import type { Entry, Tag, Group, Link, Settings } from '@/types';
 import type { IDatabaseService } from './types';
+
+/** Simple content hash for deduplication */
+function simpleContentHash(content: string): string {
+  let hash = 0;
+  for (let i = 0; i < content.length; i++) {
+    const char = content.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  return Math.abs(hash).toString(36);
+}
 
 class WebDatabaseService implements IDatabaseService {
   private isInitialized = false;
@@ -208,6 +219,41 @@ class WebDatabaseService implements IDatabaseService {
     const groups = this.getGroupsFromStorage();
     const filtered = groups.filter(g => g.id !== groupId);
     this.saveGroupsToStorage(filtered);
+  }
+
+  async getEntriesByTagId(tagId: string): Promise<Entry[]> {
+    const entries = this.getEntriesFromStorage();
+    return entries.filter(e => e.tags?.some(t => t.id === tagId));
+  }
+
+  async getEntriesByGroupId(groupId: string): Promise<Entry[]> {
+    const entries = this.getEntriesFromStorage();
+    return entries.filter(e => e.groupId === groupId);
+  }
+
+  async getAllContentHashes(): Promise<Set<string>> {
+    const entries = this.getEntriesFromStorage();
+    const hashes = new Set<string>();
+    for (const entry of entries) {
+      const hash = simpleContentHash(entry.content);
+      hashes.add(hash);
+    }
+    return hashes;
+  }
+
+  // ==================== 设置操作 ====================
+
+  async getSettings(): Promise<Settings | null> {
+    try {
+      const data = localStorage.getItem('yiyan_settings');
+      return data ? JSON.parse(data) as Settings : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async saveSettings(settings: Settings): Promise<void> {
+    localStorage.setItem('yiyan_settings', JSON.stringify(settings));
   }
 
   // ==================== 存储工具 ====================

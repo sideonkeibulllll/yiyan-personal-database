@@ -13,6 +13,7 @@ const SettingsPage = lazy(() => import('@/features/settings/SettingsPage').then(
 const TagManagePage = lazy(() => import('@/features/tags/TagManagePage').then(m => ({ default: m.TagManagePage })));
 const LinkPage = lazy(() => import('@/features/links/LinkPage').then(m => ({ default: m.LinkPage })));
 const ExportPage = lazy(() => import('@/features/settings/ExportPage').then(m => ({ default: m.ExportPage })));
+const DataManagerPage = lazy(() => import('@/features/datamanager/DataManagerPage').then(m => ({ default: m.DataManagerPage })));
 
 const router = createHashRouter([
   {
@@ -68,6 +69,22 @@ const router = createHashRouter([
     element: (
       <Suspense fallback={<Loading />}>
         <ExportPage />
+      </Suspense>
+    ),
+  },
+  {
+    path: '/data-manager',
+    element: (
+      <Suspense fallback={<Loading />}>
+        <DataManagerPage />
+      </Suspense>
+    ),
+  },
+  {
+    path: '/data-manager/:mode',
+    element: (
+      <Suspense fallback={<Loading />}>
+        <DataManagerPage />
       </Suspense>
     ),
   },

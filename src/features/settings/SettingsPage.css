@@ -118,6 +118,22 @@
   color: var(--color-text-disabled);
 }
 
+select.form-input {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b6b80' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right var(--space-4) center;
+  background-size: 12px;
+  padding-right: var(--space-8);
+  cursor: pointer;
+}
+
+select.form-input option {
+  background: var(--color-bg-elevated);
+  color: var(--color-text-primary);
+}
+
 .form-checkbox {
   display: flex;
   align-items: center;

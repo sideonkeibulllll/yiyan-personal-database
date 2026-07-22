@@ -67,13 +67,24 @@ export function SettingsPage() {
 
               <div className="form-group">
                 <label className="form-label">模型</label>
-                <input
-                  type="text"
-                  className="form-input glass"
-                  value={settings.ai.model}
-                  onChange={e => updateAIConfig({ model: e.target.value })}
-                  placeholder="gpt-4o-mini"
-                />
+                {settings.ai.isDeepSeek ? (
+                  <select
+                    className="form-input glass"
+                    value={settings.ai.model}
+                    onChange={e => updateAIConfig({ model: e.target.value })}
+                  >
+                    <option value="deepseek-v4-flash">deepseek-v4-flash</option>
+                    <option value="deepseek-v4-pro">deepseek-v4-pro</option>
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    className="form-input glass"
+                    value={settings.ai.model}
+                    onChange={e => updateAIConfig({ model: e.target.value })}
+                    placeholder="gpt-4o-mini"
+                  />
+                )}
               </div>
 
               <div className="form-group">
@@ -81,7 +92,21 @@ export function SettingsPage() {
                   <input
                     type="checkbox"
                     checked={settings.ai.isDeepSeek}
-                    onChange={e => updateAIConfig({ isDeepSeek: e.target.checked })}
+                    onChange={e => {
+                      if (e.target.checked) {
+                        updateAIConfig({
+                          isDeepSeek: true,
+                          baseURL: 'https://api.deepseek.com',
+                          model: 'deepseek-v4-flash',
+                        });
+                      } else {
+                        updateAIConfig({
+                          isDeepSeek: false,
+                          baseURL: 'https://api.openai.com/v1',
+                          model: 'gpt-4o-mini',
+                        });
+                      }
+                    }}
                   />
                   <span>使用 DeepSeek 模型</span>
                 </label>
@@ -133,13 +158,30 @@ export function SettingsPage() {
         <section className="settings-section">
           <button
             className="settings-item glass"
-            onClick={() => navigate('/tags')}
+            onClick={() => navigate('/data-manager/tags')}
           >
             <div className="item-left">
               <span className="item-icon">🏷️</span>
               <div>
                 <span className="item-title">标签管理</span>
-                <span className="item-desc">合并、重命名、删除标签</span>
+                <span className="item-desc">标签式浏览、移动、删除</span>
+              </div>
+            </div>
+            <span className="item-arrow">▶</span>
+          </button>
+        </section>
+
+        {/* 组管理 */}
+        <section className="settings-section">
+          <button
+            className="settings-item glass"
+            onClick={() => navigate('/data-manager/groups')}
+          >
+            <div className="item-left">
+              <span className="item-icon">📁</span>
+              <div>
+                <span className="item-title">组数据</span>
+                <span className="item-desc">组式浏览、移动、删除</span>
               </div>
             </div>
             <span className="item-arrow">▶</span>
@@ -165,15 +207,19 @@ export function SettingsPage() {
 
         {/* 数据本地化 */}
         <section className="settings-section">
-          <div className="settings-item glass">
+          <button
+            className="settings-item glass"
+            onClick={() => navigate('/data-manager/data')}
+          >
             <div className="item-left">
               <span className="item-icon">📱</span>
               <div>
                 <span className="item-title">数据存储</span>
-                <span className="item-desc">本地 SQLite 数据库</span>
+                <span className="item-desc">本地数据库管理与导入</span>
               </div>
             </div>
-          </div>
+            <span className="item-arrow">▶</span>
+          </button>
         </section>
 
         {/* 关于 */}

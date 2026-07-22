@@ -7,19 +7,21 @@ import { Loading } from '@/components/Loading';
 import { getDatabase } from '@/services/database';
 import { useEntryStore } from '@/stores/entryStore';
 import { useTagStore } from '@/stores/tagStore';
+import { useSettingsStore } from '@/stores/settingsStore';
 
 export function App() {
   const [isReady, setIsReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const loadEntries = useEntryStore(state => state.loadEntries);
   const loadTags = useTagStore(state => state.loadTags);
+  const loadSettings = useSettingsStore(state => state.loadSettings);
 
   useEffect(() => {
     // 初始化数据库并加载数据
     const init = async () => {
       try {
         await getDatabase();
-        await Promise.all([loadEntries(), loadTags()]);
+        await Promise.all([loadEntries(), loadTags(), loadSettings()]);
         setIsReady(true);
       } catch (err) {
         console.error('初始化失败:', err);
@@ -30,7 +32,7 @@ export function App() {
     };
 
     init();
-  }, [loadEntries, loadTags]);
+  }, [loadEntries, loadTags, loadSettings]);
 
   if (!isReady) {
     return <Loading />;

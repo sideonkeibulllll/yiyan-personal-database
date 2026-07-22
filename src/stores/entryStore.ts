@@ -20,6 +20,7 @@ interface EntryStore {
   markAsUsed: (id: string) => Promise<void>;
   setCurrentEntry: (entry: Entry | null) => void;
   search: (keyword: string, options?: { tagIds?: string[]; isStarred?: boolean }) => Promise<Entry[]>;
+  importEntries: (jsonText: string) => Promise<{ imported: number; skipped: number; total: number; errors: string[] }>;
 }
 
 export const useEntryStore = create<EntryStore>((set, get) => ({
@@ -108,5 +109,13 @@ export const useEntryStore = create<EntryStore>((set, get) => ({
   search: async (keyword, options) => {
     const db = await getDatabase();
     return db.searchEntries(keyword, options);
+  },
+
+  importEntries: async (jsonText) => {
+    const { incrementalImport } = await import('@/utils/import');
+    const result = await incrementalImport(jsonText);
+    // 刷新本地缓存
+    await get().loadEntries();
+    return result;
   },
 }));

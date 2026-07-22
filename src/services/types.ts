@@ -1,7 +1,7 @@
 /**
  * 数据库服务接口
  */
-import type { Entry, Tag, Group, Link } from '@/types';
+import type { Entry, Tag, Group, Link, Settings } from '@/types';
 
 export interface IDatabaseService {
   init(): Promise<void>;
@@ -34,4 +34,13 @@ export interface IDatabaseService {
   getAllGroups(): Promise<Group[]>;
   updateGroup(groupId: string, updates: Partial<Group>): Promise<void>;
   deleteGroup(groupId: string): Promise<void>;
+
+  // 扩展查询
+  getEntriesByTagId(tagId: string): Promise<Entry[]>;
+  getEntriesByGroupId(groupId: string): Promise<Entry[]>;
+  getAllContentHashes(): Promise<Set<string>>;
+
+  // 设置操作
+  getSettings(): Promise<Settings | null>;
+  saveSettings(settings: Settings): Promise<void>;
 }

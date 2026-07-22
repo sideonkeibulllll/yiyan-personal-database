@@ -127,9 +127,9 @@ export const DEFAULT_PROMPTS: PromptConfig = {
 export const DEFAULT_SETTINGS: Settings = {
   ai: {
     apiKey: '',
-    model: 'gpt-4o-mini',
-    baseURL: 'https://api.openai.com/v1',
-    isDeepSeek: false,
+    model: 'deepseek-v4-flash',
+    baseURL: 'https://api.deepseek.com',
+    isDeepSeek: true,
     deepSeekOptions: {
       temperature: 0.7,
       maxTokens: 2000,

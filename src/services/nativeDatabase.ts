@@ -4,7 +4,7 @@
  */
 import { Capacitor } from '@capacitor/core';
 import { CapacitorSQLite, SQLiteConnection, SQLiteDBConnection } from '@capacitor-community/sqlite';
-import type { Entry, Tag, Group, Link } from '@/types';
+import type { Entry, Tag, Group, Link, Settings } from '@/types';
 import type { IDatabaseService } from './types';
 
 class NativeDatabaseService implements IDatabaseService {
@@ -82,6 +82,11 @@ class NativeDatabaseService implements IDatabaseService {
         name TEXT NOT NULL,
         sort_order INTEGER DEFAULT 0
       )`,
+      `CREATE TABLE IF NOT EXISTS settings (
+        id INTEGER PRIMARY KEY DEFAULT 1,
+        data TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      )`,
     ];
 
     for (const sql of schemas) {
@@ -128,6 +133,9 @@ class NativeDatabaseService implements IDatabaseService {
     const fields: string[] = [];
     const values: unknown[] = [];
     if (updates.content !== undefined) { fields.push('content = ?'); values.push(updates.content); }
+    if (updates.source !== undefined) { fields.push('source = ?'); values.push(updates.source); }
+    if (updates.groupId !== undefined) { fields.push('group_id = ?'); values.push(updates.groupId); }
+    if (updates.supplement !== undefined) { fields.push('supplement = ?'); values.push(updates.supplement); }
     if (updates.isStarred !== undefined) { fields.push('is_starred = ?'); values.push(updates.isStarred ? 1 : 0); }
     if (updates.lastUsedAt !== undefined) { fields.push('last_used_at = ?'); values.push(updates.lastUsedAt); }
     if (updates.copyCount !== undefined) { fields.push('copy_count = ?'); values.push(updates.copyCount); }
@@ -275,6 +283,78 @@ class NativeDatabaseService implements IDatabaseService {
   async deleteGroup(groupId: string): Promise<void> {
     if (!this.db) throw new Error('Database not initialized');
     await this.db.run('DELETE FROM groups WHERE id = ?', [groupId]);
+  }
+
+  async getEntriesByTagId(tagId: string): Promise<Entry[]> {
+    if (!this.db) throw new Error('Database not initialized');
+    const result = await this.db.query(
+      'SELECT DISTINCT e.* FROM entries e JOIN entry_tags et ON e.id = et.entry_id WHERE et.tag_id = ? ORDER BY e.created_at DESC',
+      [tagId]
+    );
+    const entries: Entry[] = [];
+    if (result.values) {
+      for (const row of result.values) {
+        const tags = await this.getTagsByEntryId(row.id as string);
+        entries.push(this.rowToEntry(row, tags));
+      }
+    }
+    return entries;
+  }
+
+  async getEntriesByGroupId(groupId: string): Promise<Entry[]> {
+    if (!this.db) throw new Error('Database not initialized');
+    const result = await this.db.query(
+      'SELECT * FROM entries WHERE group_id = ? ORDER BY created_at DESC',
+      [groupId]
+    );
+    const entries: Entry[] = [];
+    if (result.values) {
+      for (const row of result.values) {
+        const tags = await this.getTagsByEntryId(row.id as string);
+        entries.push(this.rowToEntry(row, tags));
+      }
+    }
+    return entries;
+  }
+
+  async getAllContentHashes(): Promise<Set<string>> {
+    if (!this.db) throw new Error('Database not initialized');
+    const result = await this.db.query('SELECT content FROM entries', []);
+    const hashes = new Set<string>();
+    if (result.values) {
+      for (const row of result.values) {
+        const content = row.content as string;
+        let hash = 0;
+        for (let i = 0; i < content.length; i++) {
+          const char = content.charCodeAt(i);
+          hash = ((hash << 5) - hash) + char;
+          hash = hash & hash;
+        }
+        hashes.add(Math.abs(hash).toString(36));
+      }
+    }
+    return hashes;
+  }
+
+  async getSettings(): Promise<Settings | null> {
+    if (!this.db) throw new Error('Database not initialized');
+    const result = await this.db.query('SELECT data FROM settings WHERE id = 1');
+    if (!result.values || result.values.length === 0) return null;
+    try {
+      return JSON.parse(result.values[0].data as string) as Settings;
+    } catch {
+      return null;
+    }
+  }
+
+  async saveSettings(settings: Settings): Promise<void> {
+    if (!this.db) throw new Error('Database not initialized');
+    const data = JSON.stringify(settings);
+    const now = Date.now();
+    await this.db.run(
+      'INSERT OR REPLACE INTO settings (id, data, updated_at) VALUES (1, ?, ?)',
+      [data, now]
+    );
   }
 
   private generateId(): string {
