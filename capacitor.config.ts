@@ -8,6 +8,11 @@ const config: CapacitorConfig = {
     androidScheme: 'https',
   },
   plugins: {
+    // 启用原生 HTTP（绕过 WebView 混合内容拦截 + 自签证书问题）
+    // 用于数据互通：手机作为发送方时 fetch http://192.168.x.x
+    CapacitorHttp: {
+      enabled: true,
+    },
     StatusBar: {
       style: 'DARK',
       backgroundColor: '#0a0a0f',

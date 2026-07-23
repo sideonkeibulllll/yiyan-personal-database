@@ -498,3 +498,63 @@ select.form-input option {
   background: var(--color-accent-primary);
   transition: width var(--duration-fast);
 }
+
+/* 危险/停止按钮 */
+.form-reset-btn.danger {
+  border-color: var(--color-error);
+  color: var(--color-error);
+}
+
+.form-reset-btn.danger:hover {
+  background: var(--color-error);
+  color: var(--color-text-on-accent);
+}
+
+/* ====== 接收数据弹窗 ====== */
+.sync-receive-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  backdrop-filter: blur(4px);
+}
+
+.sync-receive-dialog {
+  width: 90%;
+  max-width: 380px;
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.sync-receive-title {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin-bottom: var(--space-3);
+}
+
+.sync-receive-info {
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-elevated);
+  border-radius: 4px;
+  margin-bottom: var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.sync-receive-info strong {
+  color: var(--color-accent-primary);
+}
+
+.sync-receive-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}

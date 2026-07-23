@@ -2,7 +2,7 @@
  * 设置页面
  * AI 配置 + 数据管理器 + 数据导入 + 随机浏览配置
  */
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useEntryStore } from '@/stores/entryStore';
@@ -31,14 +31,23 @@ import {
   removeTrustedDevice,
   discoverDevices,
   createDeviceByIp,
+  handshakeAndCreateDevice,
   prepareZipForSend,
   sendZipToDevice,
   getLocalIp,
+  startLocalServer,
+  stopLocalServer,
+  setReceiveHandler,
 } from '@/services/syncService';
+import { isElectron } from '@/services/electronAdapter';
+import { restoreFromBase64Zip, saveReceivedZip } from '@/services/backupService';
+import { isHttpServerSupported } from '@/services/capacitorHttpServer';
 import type {
   DiscoveredDevice,
   TrustedDevice,
   TransferProgress,
+  SendRequest,
+  DeviceHandshake,
 } from '@/services/backupTypes';
 import './SettingsPage.css';
 
@@ -186,12 +195,34 @@ export function SettingsPage() {
   const [discovering, setDiscovering] = useState(false);
   const [manualIp, setManualIp] = useState('');
   const [manualPort, setManualPort] = useState('8443');
+  const [manualAdding, setManualAdding] = useState(false);
   const [syncBusy, setSyncBusy] = useState(false);
   const [transferProgress, setTransferProgress] = useState<TransferProgress | null>(null);
   const [syncMessage, setSyncMessage] = useState('');
   const [localIp, setLocalIp] = useState('');
   const [localIpLoading, setLocalIpLoading] = useState(false);
   const [localIpCopied, setLocalIpCopied] = useState(false);
+
+  // 接收服务状态（Electron 或 Android 原生可用）
+  const [serverRunning, setServerRunning] = useState(false);
+  const [serverPort, setServerPort] = useState<number | null>(null);
+  const [serverBusy, setServerBusy] = useState(false);
+  const [nativeServerSupported, setNativeServerSupported] = useState(false);
+
+  // 检测原生平台是否支持本地服务器
+  useEffect(() => {
+    if (!isElectron()) {
+      isHttpServerSupported().then(setNativeServerSupported);
+    }
+  }, []);
+
+  // 接收到数据时的弹窗
+  const [receiveDialog, setReceiveDialog] = useState<{
+    request: SendRequest;
+    fromName: string;
+    filename: string;
+    dataSize: number;
+  } | null>(null);
 
   // 处理文件选择 - 增量导入
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -371,15 +402,39 @@ export function SettingsPage() {
     }
   };
 
-  const handleManualAdd = () => {
+  const handleManualAdd = async () => {
     if (!manualIp) return;
     const port = parseInt(manualPort) || 8443;
-    const device = createDeviceByIp(manualIp, port);
-    setDiscoveredDevices(prev => {
-      if (prev.find(d => d.id === device.id)) return prev;
-      return [...prev, device];
-    });
-    setSyncMessage(`已添加设备: ${device.name}`);
+    setManualAdding(true);
+    setSyncMessage(`正在握手 ${manualIp}:${port}...`);
+    try {
+      const result = await handshakeAndCreateDevice(manualIp, port);
+      if (!result) {
+        setSyncMessage(
+          `❌ 无法连接到 ${manualIp}:${port}\n` +
+          `请确认：\n` +
+          `1. 对方已开启"接收服务"\n` +
+          `2. 双方在同一局域网\n` +
+          `3. IP 和端口正确\n` +
+          `4. 防火墙未拦截 ${port} 端口`
+        );
+        return;
+      }
+      const { device, handshake } = result;
+      setDiscoveredDevices(prev => {
+        if (prev.find(d => d.id === device.id)) return prev;
+        return [...prev, device];
+      });
+      setSyncMessage(
+        `✅ 已连接: ${handshake.name} ` +
+        `(${handshake.type === 'phone' ? '手机' : '电脑'}) ` +
+        `· v${handshake.appVersion}`
+      );
+    } catch (err) {
+      setSyncMessage(`握手失败: ${err instanceof Error ? err.message : '未知错误'}`);
+    } finally {
+      setManualAdding(false);
+    }
   };
 
   const handleSendToDevice = async (device: DiscoveredDevice, requestImport: boolean) => {
@@ -411,6 +466,123 @@ export function SettingsPage() {
     if (!confirm('确定移除该信任设备?')) return;
     removeTrustedDevice(deviceId);
     refreshTrustedDevices();
+  };
+
+  // ====== 接收服务（仅 Electron 可用）======
+
+  /**
+   * 启动本地服务端，让其他设备能发数据过来
+   * - Electron：Node.js HTTPS 服务
+   * - Android：capacitor-http-server 插件（Foreground Service）
+   * 按需启动，避免后台一直耗电
+   */
+  const handleStartServer = async () => {
+    setServerBusy(true);
+    setSyncMessage('正在启动接收服务...');
+    try {
+      const actualPort = await startLocalServer(8443);
+      setServerPort(actualPort);
+      setServerRunning(true);
+      setSyncMessage(`✅ 接收服务已启动 (端口 ${actualPort})\n对方可发送数据到 ${localIp || '本机IP'}:${actualPort}`);
+    } catch (err) {
+      setSyncMessage(`启动失败: ${err instanceof Error ? err.message : '未知错误'}`);
+    } finally {
+      setServerBusy(false);
+    }
+  };
+
+  const handleStopServer = async () => {
+    setServerBusy(true);
+    setSyncMessage('正在停止接收服务...');
+    try {
+      await stopLocalServer();
+      setServerRunning(false);
+      setServerPort(null);
+      setSyncMessage('接收服务已停止');
+    } catch (err) {
+      setSyncMessage(`停止失败: ${err instanceof Error ? err.message : '未知错误'}`);
+    } finally {
+      setServerBusy(false);
+    }
+  };
+
+  /**
+   * 注册接收处理器：当其他设备发数据过来时，弹出选择框
+   * 用户选择「导入 / 仅保存 / 拒绝」后返回结果给发送方
+   *
+   * 此 handler 在 Electron（HTTPS）和 Android（HTTP 插件）平台都生效，
+   * syncService 内部会根据平台路由到对应的服务实现
+   */
+  useEffect(() => {
+    setReceiveHandler(async (request: SendRequest, data: string) => {
+      const fromName = request.from?.name || '未知设备';
+      const fromType = request.from?.type === 'phone' ? '手机' : '电脑';
+      const dataSizeKB = Math.round((data.length * 0.75) / 1024); // base64 → 实际字节
+
+      // 弹出接收对话框，等待用户选择
+      return await new Promise<'import' | 'save_only' | 'reject'>((resolve) => {
+        setReceiveDialog({
+          request,
+          fromName: `${fromName} (${fromType})`,
+          filename: request.filename,
+          dataSize: dataSizeKB,
+        });
+
+        // 把 resolve 临时挂到 window 上，等用户点按钮时调用
+        (window as any).__pendingReceiveResolve = (action: 'import' | 'save_only' | 'reject') => {
+          (window as any).__pendingReceiveResolve = null;
+          setReceiveDialog(null);
+          resolve(action);
+        };
+      });
+    });
+
+    return () => {
+      setReceiveHandler(null);
+      // 清理可能挂起的 resolve
+      if ((window as any).__pendingReceiveResolve) {
+        (window as any).__pendingReceiveResolve('reject');
+      }
+    };
+  }, []);
+
+  /**
+   * 用户在接收弹窗中点击某个动作
+   */
+  const handleReceiveAction = async (action: 'import' | 'save_only' | 'reject') => {
+    const resolve = (window as any).__pendingReceiveResolve;
+    if (!resolve) return;
+
+    if (action === 'reject') {
+      resolve('reject');
+      return;
+    }
+
+    // import 或 save_only：先把数据保存到备份目录
+    if (receiveDialog?.request) {
+      try {
+        const path = await saveReceivedZip(
+          (receiveDialog.request as any).data,
+          receiveDialog.filename,
+        );
+        setSyncMessage(`已保存到: ${path}`);
+
+        if (action === 'import') {
+          // 增量导入到数据库
+          setSyncMessage('正在导入数据...');
+          const result = await restoreFromBase64Zip(
+            (receiveDialog.request as any).data,
+          );
+          setSyncMessage(
+            `✅ 导入完成: 条目 +${result.entriesImported}/${result.entriesSkipped} 跳过, ` +
+            `待办 +${result.todosImported}/${result.todosSkipped} 跳过`
+          );
+        }
+      } catch (err) {
+        setSyncMessage(`处理失败: ${err instanceof Error ? err.message : '未知错误'}`);
+      }
+    }
+    resolve(action);
   };
 
   return (
@@ -1110,6 +1282,44 @@ export function SettingsPage() {
 
           {showSyncPanel && (
             <div className="settings-detail glass">
+              {/* 接收服务（Electron 或 Android 原生） */}
+              {(isElectron() || nativeServerSupported) && (
+                <>
+                  <div className="settings-subsection-title">接收服务</div>
+                  <div className="form-group">
+                    {serverRunning ? (
+                      <button
+                        className="form-reset-btn danger"
+                        onClick={handleStopServer}
+                        disabled={serverBusy}
+                      >
+                        {serverBusy ? '停止中...' : '停止接收服务'}
+                      </button>
+                    ) : (
+                      <button
+                        className="form-reset-btn"
+                        onClick={handleStartServer}
+                        disabled={serverBusy}
+                      >
+                        {serverBusy ? '启动中...' : '启动接收服务'}
+                      </button>
+                    )}
+                  </div>
+                  {serverRunning && (
+                    <div className="form-hint">
+                      ✅ 接收服务运行中 · 监听 {localIp || '本机IP'}:{serverPort}
+                      <br />
+                      请告知发送方此 IP:端口
+                    </div>
+                  )}
+                  {!serverRunning && (
+                    <div className="form-hint">
+                      💡 按需开启，其他设备可向你发送数据。不开启时不耗电。
+                    </div>
+                  )}
+                </>
+              )}
+
               {/* 搜索设备 */}
               <div className="settings-subsection-title">发现设备</div>
               <div className="form-group sync-discover-row">
@@ -1151,7 +1361,7 @@ export function SettingsPage() {
                 )}
               </div>
 
-              {/* 手动输入 IP */}
+              {/* 手动输入 IP（先握手再添加） */}
               <div className="form-group sync-manual-row">
                 <input
                   type="text"
@@ -1159,6 +1369,7 @@ export function SettingsPage() {
                   placeholder="IP 地址"
                   value={manualIp}
                   onChange={e => setManualIp(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleManualAdd(); }}
                 />
                 <input
                   type="number"
@@ -1166,9 +1377,15 @@ export function SettingsPage() {
                   placeholder="端口"
                   value={manualPort}
                   onChange={e => setManualPort(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleManualAdd(); }}
                 />
-                <button className="form-reset-btn" onClick={handleManualAdd} disabled={!manualIp}>
-                  添加
+                <button
+                  className="form-reset-btn"
+                  onClick={handleManualAdd}
+                  disabled={!manualIp || manualAdding}
+                  title="握手验证后添加设备"
+                >
+                  {manualAdding ? '握手中...' : '连接'}
                 </button>
               </div>
 
@@ -1243,6 +1460,40 @@ export function SettingsPage() {
                       </button>
                     </div>
                   ))}
+                </div>
+              )}
+
+              {/* 接收数据弹窗 */}
+              {receiveDialog && (
+                <div className="sync-receive-dialog-overlay">
+                  <div className="sync-receive-dialog glass">
+                    <div className="sync-receive-title">收到数据</div>
+                    <div className="sync-receive-info">
+                      <div>来自: <strong>{receiveDialog.fromName}</strong></div>
+                      <div>文件: {receiveDialog.filename}</div>
+                      <div>大小: 约 {receiveDialog.dataSize} KB</div>
+                    </div>
+                    <div className="sync-receive-actions">
+                      <button
+                        className="form-reset-btn"
+                        onClick={() => handleReceiveAction('import')}
+                      >
+                        导入到数据库
+                      </button>
+                      <button
+                        className="form-reset-btn secondary"
+                        onClick={() => handleReceiveAction('save_only')}
+                      >
+                        仅保存副本
+                      </button>
+                      <button
+                        className="form-reset-btn cancel"
+                        onClick={() => handleReceiveAction('reject')}
+                      >
+                        拒绝
+                      </button>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>

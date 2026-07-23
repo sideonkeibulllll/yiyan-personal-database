@@ -1,7 +1,7 @@
 {
   "name": "yiyan-personal-database",
   "private": true,
-  "version": "1.6.1",
+  "version": "1.6.2",
   "type": "module",
   "main": "dist-electron/main/main.js",
   "scripts": {
@@ -17,6 +17,7 @@
     "electron:build": "npm run build && npm run electron:compile && npm run electron:pack-app && npx electron-builder --win --prepackaged release-electron/win-unpacked"
   },
   "dependencies": {
+    "@cantoo/capacitor-http-server": "^1.0.6",
     "@capacitor-community/sqlite": "^6.0.2",
     "@capacitor/android": "^6.1.2",
     "@capacitor/app": "^6.0.1",

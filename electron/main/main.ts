@@ -66,6 +66,20 @@ app.whenReady().then(async () => {
   registerIpcHandlers();
   registerReceiveResolver();
 
+  // 忽略局域网自签证书错误（仅用于数据互通的 HTTPS 通信）
+  // 仅对 192.168.x.x / 10.x.x.x / 172.16-31.x.x / localhost 生效
+  // 其他公网 HTTPS 仍按正常证书校验
+  app.on('certificate-error', (event, _webContents, url, _error, _certificate, callback) => {
+    const isLanOrLocal =
+      /^https:\/\/(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|localhost|127\.0\.0\.1)/.test(url);
+    if (isLanOrLocal) {
+      event.preventDefault();
+      callback(true);
+      return;
+    }
+    callback(false);
+  });
+
   // 创建窗口
   createWindow();
 
