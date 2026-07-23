@@ -7,6 +7,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useTodoStore } from '@/stores/todoStore';
 import { useTodoTagStore } from '@/stores/todoTagStore';
 import { BottomNav } from '@/components/BottomNav';
+import { getTodoDatabase } from '@/services/todoDatabase';
 import type { Todo } from '@/types';
 import './TodoEditPage.css';
 
@@ -35,7 +36,8 @@ export function TodoEditPage() {
   const [note, setNote] = useState('');
   const [startTime, setStartTime] = useState<number | undefined>(undefined);
   const [endTime, setEndTime] = useState<number | undefined>(undefined);
-  const [isToday, setIsToday] = useState(true);
+  // 今日处理默认不选中：避免新建/编辑时误打标
+  const [isToday, setIsToday] = useState(false);
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(!isNew);
   const [saving, setSaving] = useState(false);
@@ -45,7 +47,6 @@ export function TodoEditPage() {
 
   const updateTodo = useTodoStore(state => state.updateTodo);
   const addTodo = useTodoStore(state => state.addTodo);
-  const currentTodo = useTodoStore(state => state.currentTodo);
   const tags = useTodoTagStore(state => state.tags);
   const loadTags = useTodoTagStore(state => state.loadTags);
   const createTag = useTodoTagStore(state => state.createTag);
@@ -55,18 +56,39 @@ export function TodoEditPage() {
     loadTags();
   }, [loadTags]);
 
-  // 加载已有待办
+  // 加载已有待办：主动按 id 查库，避免依赖外部 currentTodo 未设置导致字段为空
   useEffect(() => {
-    if (!isNew && currentTodo?.id === id) {
-      setTitle(currentTodo.title);
-      setNote(currentTodo.note || '');
-      setStartTime(currentTodo.startTime);
-      setEndTime(currentTodo.endTime);
-      setIsToday(currentTodo.isToday);
-      setSelectedTagIds(currentTodo.tagIds || []);
+    if (isNew) {
+      setLoading(false);
+      return;
     }
-    setLoading(false);
-  }, [isNew, id, currentTodo]);
+    if (!id) {
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const db = await getTodoDatabase();
+        const todo = await db.getTodoById(id);
+        if (cancelled || !todo) {
+          if (!cancelled) setLoading(false);
+          return;
+        }
+        setTitle(todo.title);
+        setNote(todo.note || '');
+        setStartTime(todo.startTime);
+        setEndTime(todo.endTime);
+        setIsToday(todo.isToday);
+        setSelectedTagIds(todo.tagIds || []);
+      } catch (err) {
+        console.error('[TodoEditPage] load todo failed:', err);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isNew, id]);
 
   // 保存
   const handleSave = useCallback(async () => {

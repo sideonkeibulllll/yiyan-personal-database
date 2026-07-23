@@ -2,11 +2,13 @@
  * 待办日常页面
  * 日期选择器 + 当天待办列表 + 倒计时显示
  */
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { useTodoStore } from '@/stores/todoStore';
 import { useTodoTagStore } from '@/stores/todoTagStore';
 import { useSettingsStore } from '@/stores/settingsStore';
+import { getTodoDatabase } from '@/services/todoDatabase';
 import { BottomNav } from '@/components/BottomNav';
 import type { Todo } from '@/types';
 import './TodoPage.css';
@@ -31,19 +33,39 @@ function formatDate(date: Date): string {
   return `${y}-${m}-${d}`;
 }
 
-/** 获取接下来 7 天的日期 */
-function getUpcomingDates(): { date: Date; label: string; folderDate: string }[] {
-  const dates: { date: Date; label: string; folderDate: string }[] = [];
+/**
+ * 构建日期选择器选项：
+ * - 固定包含「今天」
+ * - 额外包含所有「有未完成待办」的日期
+ * - 最近 2 天命名为「昨天」/「前天」；未来 2 天命名为「明天」/「后天」
+ * - 按日期升序排序（过去的在前，今天居中，未来在后）
+ */
+function buildDateOptions(pendingFolderDates: string[]): { date: Date; label: string; folderDate: string }[] {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+  const todayFolder = formatDate(today);
 
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(today);
-    d.setDate(d.getDate() + i);
-    const label = i === 0 ? '今天' : i === 1 ? '明天' : i === 2 ? '后天' : `${d.getMonth() + 1}/${d.getDate()}`;
-    dates.push({ date: d, label, folderDate: formatDate(d) });
+  const allFolderDates = new Set<string>([todayFolder, ...pendingFolderDates]);
+
+  const options: { date: Date; label: string; folderDate: string }[] = [];
+  for (const folderDate of allFolderDates) {
+    const parts = folderDate.split('-').map(Number);
+    if (parts.length !== 3 || parts.some(isNaN)) continue;
+    const [y, m, d] = parts;
+    const date = new Date(y, m - 1, d);
+    date.setHours(0, 0, 0, 0);
+    const diffDays = Math.round((date.getTime() - today.getTime()) / 86400000);
+    let label: string;
+    if (diffDays === 0) label = '今天';
+    else if (diffDays === 1) label = '明天';
+    else if (diffDays === 2) label = '后天';
+    else if (diffDays === -1) label = '昨天';
+    else if (diffDays === -2) label = '前天';
+    else label = `${date.getMonth() + 1}/${date.getDate()}`;
+    options.push({ date, label, folderDate });
   }
-  return dates;
+  options.sort((a, b) => a.date.getTime() - b.date.getTime());
+  return options;
 }
 
 /** 格式化倒计时 */
@@ -76,9 +98,10 @@ export function TodoPage() {
     return formatDate(today);
   });
   const [now, setNow] = useState(Date.now());
-  const [showAddOptions, setShowAddOptions] = useState(false);
   const [lastCreatedId, setLastCreatedId] = useState<string | null>(null);
   const [showAddInfo, setShowAddInfo] = useState(false);
+  // 所有「未完成待办」对应的 folderDate 列表：用于动态生成日期选项
+  const [pendingFolderDates, setPendingFolderDates] = useState<string[]>([]);
 
   const todos = useTodoStore(state => state.todos);
   const loadTodosByDate = useTodoStore(state => state.loadTodosByDate);
@@ -88,13 +111,36 @@ export function TodoPage() {
   const isLoading = useTodoStore(state => state.isLoading);
   const settings = useSettingsStore(state => state.settings);
 
-  const upcomingDates = getUpcomingDates();
+  const dateOptions = useMemo(() => buildDateOptions(pendingFolderDates), [pendingFolderDates]);
   const timerRef = useRef<ReturnType<typeof setInterval>>();
 
-  // 加载待办
+  // 加载当前选中日期的待办
   useEffect(() => {
     loadTodosByDate(selectedDate);
   }, [selectedDate, loadTodosByDate]);
+
+  // 加载所有未完成待办的 folderDate，用于动态生成日期选项
+  // 依赖 selectedDate：切换日期或增删待办后回到本页时会刷新
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const db = await getTodoDatabase();
+        const all = await db.getAllTodos();
+        if (cancelled) return;
+        const dates = new Set<string>();
+        for (const t of all) {
+          if (t.status === 'pending' && t.folderDate) {
+            dates.add(t.folderDate);
+          }
+        }
+        setPendingFolderDates(Array.from(dates));
+      } catch (err) {
+        console.error('[TodoPage] load pending dates failed:', err);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedDate]);
 
   // 每秒更新倒计时
   useEffect(() => {
@@ -158,9 +204,9 @@ export function TodoPage() {
       onTouchEnd={handleTouchEnd}
     >
       <main className="page-content">
-        {/* 日期选择器 */}
+        {/* 日期选择器：今天 + 所有有未完成待办的日期 */}
         <div className="date-selector">
-          {upcomingDates.map(d => (
+          {dateOptions.map(d => (
             <button
               key={d.folderDate}
               className={`date-chip ${selectedDate === d.folderDate ? 'active' : ''}`}
@@ -236,6 +282,9 @@ interface TodoItemProps {
 
 function TodoItem({ todo, index, now, onToggleDone, onDelete, onEdit }: TodoItemProps) {
   const [showMenu, setShowMenu] = useState(false);
+  // 菜单 fixed 定位（相对视口）：右对齐到卡片右侧
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
+  const itemRef = useRef<HTMLDivElement>(null);
   const [swipeOffset, setSwipeOffset] = useState(0);
   const touchStartX = useRef(0);
   const touchStartY = useRef(0);
@@ -353,8 +402,38 @@ function TodoItem({ todo, index, now, onToggleDone, onDelete, onEdit }: TodoItem
     setShowMenu(false);
   }, [todo.id, todo.title, todo.startTime, todo.endTime]);
 
+  // 点击菜单外区域时关闭菜单
+  // Portal 模式下菜单在 body 下，不会被卡片 overflow 裁剪
+  useEffect(() => {
+    if (!showMenu) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
+      // 点击在菜单 portal 内：不处理（菜单内部已 stopPropagation）
+      if ((target as HTMLElement).closest('.todo-quick-menu.portal')) return;
+      // 点击在当前卡片内：不处理（卡片自己有 onClick 切换）
+      if (itemRef.current?.contains(target)) return;
+      setShowMenu(false);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showMenu]);
+
+  // 卡片点击：切换菜单，并计算菜单的 fixed 定位（右对齐到卡片右侧）
+  const handleCardClick = useCallback(() => {
+    if (isSwiping.current) return;
+    if (!showMenu) {
+      if (itemRef.current) {
+        const rect = itemRef.current.getBoundingClientRect();
+        // 菜单右上角对齐卡片右上角附近，向左下展开
+        setMenuPos({ top: rect.top + 12, right: window.innerWidth - rect.right + 12 });
+      }
+    }
+    setShowMenu(prev => !prev);
+  }, [showMenu]);
+
   return (
     <div
+      ref={itemRef}
       className={`todo-item ${isDone ? 'done' : ''} ${todo.isToday ? 'is-today' : ''}`}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
@@ -363,7 +442,7 @@ function TodoItem({ todo, index, now, onToggleDone, onDelete, onEdit }: TodoItem
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseLeave}
-      onClick={() => !isSwiping.current && setShowMenu(!showMenu)}
+      onClick={handleCardClick}
       onContextMenu={e => e.preventDefault()}
       style={{
         transform: `translateX(${swipeOffset}px)`,
@@ -399,16 +478,21 @@ function TodoItem({ todo, index, now, onToggleDone, onDelete, onEdit }: TodoItem
         <span>删除</span>
       </div>
 
-      {/* 点击菜单 */}
-      {showMenu && (
-        <div className="todo-quick-menu" onClick={e => e.stopPropagation()}>
+      {/* 点击菜单：用 Portal 渲染到 body，避免被卡片 overflow:hidden 裁剪 */}
+      {showMenu && menuPos && createPortal(
+        <div
+          className="todo-quick-menu portal"
+          style={{ top: `${menuPos.top}px`, right: `${menuPos.right}px` }}
+          onClick={e => e.stopPropagation()}
+        >
           <button onClick={handleCopy}>复制</button>
           <button onClick={handleAddToInput}>添加到录入</button>
           <button onClick={onToggleDone}>{isDone ? '重新激活' : '标记完成'}</button>
           <button onClick={onEdit}>编辑</button>
           <button onClick={() => { onDelete(); setShowMenu(false); }}>删除</button>
           <button onClick={() => setShowMenu(false)}>关闭</button>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
