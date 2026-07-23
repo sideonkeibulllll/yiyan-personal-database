@@ -50,6 +50,8 @@ export interface ListItem {
   subtitle?: string;
   meta?: string;
   isStarred?: boolean;
+  /** 附件数量（有附件时显示小按钮，点击进入浏览模式） */
+  attachmentCount?: number;
 }
 
 /** 导入结果 */

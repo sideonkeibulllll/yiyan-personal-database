@@ -38,6 +38,8 @@ import {
   startLocalServer,
   stopLocalServer,
   setReceiveHandler,
+  pullMissingOriginals,
+  getMissingOriginals,
 } from '@/services/syncService';
 import { isElectron } from '@/services/electronAdapter';
 import { restoreFromBase64Zip, saveReceivedZip } from '@/services/backupService';
@@ -440,9 +442,9 @@ export function SettingsPage() {
   const handleSendToDevice = async (device: DiscoveredDevice, requestImport: boolean) => {
     setSyncBusy(true);
     setTransferProgress(null);
-    setSyncMessage(`正在准备数据发送到 ${device.name}...`);
+    setSyncMessage(`正在准备数据发送到 ${device.name}（含增量原图）...`);
     try {
-      const { base64, filename, size } = await prepareZipForSend();
+      const { base64, filename, size } = await prepareZipForSend(device);
       setSyncMessage(`正在发送 ${filename} 到 ${device.name}...`);
       const resp = await sendZipToDevice(
         device, base64, filename, requestImport,
@@ -454,6 +456,24 @@ export function SettingsPage() {
         setSyncMessage(`${device.name} 已保存到副本目录`);
       } else {
         setSyncMessage(`${device.name} 拒绝了接收`);
+      }
+
+      // 发送成功且对方未拒绝时，顺便拉取待拉取队列里的原图
+      // 连接已通，省得另开连接；也符合「下次同步时拉取」的省电设计
+      if (resp.action !== 'reject') {
+        const pending = getMissingOriginals();
+        if (pending.length > 0) {
+          setSyncMessage(prev => `${prev}\n正在从 ${device.name} 拉取 ${pending.length} 张缺失原图...`);
+          try {
+            const { pulled, remaining } = await pullMissingOriginals(device);
+            setSyncMessage(prev =>
+              `${prev}\n原图拉取完成：成功 ${pulled} 张` +
+              (remaining > 0 ? `，队列剩余 ${remaining} 张（等下次连接其他设备）` : '，队列已清空')
+            );
+          } catch (err) {
+            setSyncMessage(prev => `${prev}\n原图拉取失败: ${err instanceof Error ? err.message : '未知错误'}`);
+          }
+        }
       }
     } catch (err) {
       setSyncMessage(`发送失败: ${err instanceof Error ? err.message : '未知错误'}`);
@@ -998,6 +1018,35 @@ export function SettingsPage() {
                   step="1"
                 />
                 <span className="form-hint">推荐 5-10 张，根据屏幕大小调整</span>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">图片附件展示模式</label>
+                <div className="form-radio-group">
+                  <label className={`form-radio-card ${(settings.random?.attachmentDisplayMode ?? 'inline') === 'inline' ? 'active' : ''}`}>
+                    <input
+                      type="radio"
+                      name="attachmentDisplayMode"
+                      value="inline"
+                      checked={(settings.random?.attachmentDisplayMode ?? 'inline') === 'inline'}
+                      onChange={() => updateRandomConfig({ attachmentDisplayMode: 'inline' })}
+                    />
+                    <span className="form-radio-title">原图直接展示</span>
+                    <span className="form-radio-desc">卡片文本下方纵向堆叠图片，点击可全屏放大</span>
+                  </label>
+                  <label className={`form-radio-card ${(settings.random?.attachmentDisplayMode ?? 'inline') === 'badge' ? 'active' : ''}`}>
+                    <input
+                      type="radio"
+                      name="attachmentDisplayMode"
+                      value="badge"
+                      checked={(settings.random?.attachmentDisplayMode ?? 'inline') === 'badge'}
+                      onChange={() => updateRandomConfig({ attachmentDisplayMode: 'badge' })}
+                    />
+                    <span className="form-radio-title">仅显示附件标识</span>
+                    <span className="form-radio-desc">卡片只显示附件数量徽标，点击弹出画廊查看</span>
+                  </label>
+                </div>
+                <span className="form-hint">控制随机卡片中图片附件的展示方式</span>
               </div>
             </div>
           )}

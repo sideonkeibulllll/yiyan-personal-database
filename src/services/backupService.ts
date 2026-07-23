@@ -118,14 +118,23 @@ async function deleteFile(path: string, directory: Directory): Promise<void> {
 /**
  * 创建完整备份 zip
  * 包含：database.db（JSON 形式导出所有数据）+ config + tags + groups + manifest
+ *
+ * 原图策略：本地备份不打包原图（原图文件就在本地文件系统，恢复数据库记录后 filePath 仍指向已有文件）；
+ *           同步发送时通过 includeOrigIds 指定要打包的原图（接收方没有的），实现增量。
+ *
+ * @param includeOrigIds 要打包原图的附件 id 集合（同步场景：接收方没有的 att id）
+ *                      缩略图和元数据始终全量打包；不传=不打包任何原图（本地备份场景）
  */
-export async function createBackup(type: BackupType = 'manual'): Promise<BackupManifest> {
+export async function createBackup(
+  type: BackupType = 'manual',
+  includeOrigIds?: Set<string>,
+): Promise<BackupManifest> {
   const ts = Date.now();
   const db = await getDatabase();
   const todoDb = await getTodoDatabase();
 
   // 收集所有数据
-  const [entries, tags, groups, settings, allTodos, allTodoTags, allTemplates] = await Promise.all([
+  const [entries, tags, groups, settings, allTodos, allTodoTags, allTemplates, allAttachments] = await Promise.all([
     db.getAllEntries(),
     db.getAllTags(),
     db.getAllGroups(),
@@ -133,6 +142,7 @@ export async function createBackup(type: BackupType = 'manual'): Promise<BackupM
     todoDb.getAllTodos(),
     todoDb.getAllTodoTags(),
     todoDb.getAllTemplates(),
+    db.getAllAttachments(),
   ]);
 
   // 收集所有条目的关联链接
@@ -165,7 +175,12 @@ export async function createBackup(type: BackupType = 'manual'): Promise<BackupM
   // 打包 zip
   const zip = new JSZip();
   zip.file('manifest.json', JSON.stringify(manifest, null, 2));
-  zip.file('entries.json', JSON.stringify(entries, null, 2));
+  // entries.json 中剥离 attachments（独立打到 attachments.json，避免冗余）
+  zip.file('entries.json', JSON.stringify(
+    entries.map(e => { const { attachments, ...rest } = e; return rest; }),
+    null,
+    2
+  ));
   zip.file('tags.json', JSON.stringify(tags, null, 2));
   zip.file('groups.json', JSON.stringify(groups, null, 2));
   zip.file('links.json', JSON.stringify(links, null, 2));
@@ -173,6 +188,36 @@ export async function createBackup(type: BackupType = 'manual'): Promise<BackupM
   zip.file('todos.json', JSON.stringify(allTodos, null, 2));
   zip.file('todoTags.json', JSON.stringify(allTodoTags, null, 2));
   zip.file('templates.json', JSON.stringify(templatesWithItems, null, 2));
+
+  // 附件元数据（全量）+ 缩略图（全量）+ 原图（增量：排除接收方已有的）
+  zip.file('attachments.json', JSON.stringify(allAttachments, null, 2));
+  for (const att of allAttachments) {
+    // 缩略图：全量打包（体积小，新设备需要）
+    try {
+      const thumbRes = await Filesystem.readFile({
+        path: att.thumbPath,
+        directory: Directory.Data,
+      });
+      zip.file(`attachments/${att.id}_thumb.jpg`, thumbRes.data, { base64: true });
+    } catch (err) {
+      // 缩略图读取失败（可能已被删除），跳过
+      console.warn(`[backup] 缩略图读取失败 att=${att.id}:`, err);
+    }
+
+    // 原图：仅打包 includeOrigIds 指定的（同步场景=接收方没有的 att id）
+    // 不传 includeOrigIds 时（本地备份）不打包任何原图，省空间
+    if (!includeOrigIds || !includeOrigIds.has(att.id)) continue;
+    try {
+      const origRes = await Filesystem.readFile({
+        path: att.filePath,
+        directory: Directory.Data,
+      });
+      zip.file(`attachments/${att.id}_orig.jpg`, origRes.data, { base64: true });
+    } catch (err) {
+      // 原图读取失败（按需拉取未完成/文件缺失），跳过
+      console.warn(`[backup] 原图读取失败 att=${att.id}:`, err);
+    }
+  }
 
   const zipBlob = await zip.generateAsync({ type: 'base64', compression: 'DEFLATE' });
   const filename = `${formatTimestamp(ts)}.zip`;
@@ -200,7 +245,7 @@ export async function exportToDownload(type: BackupType = 'manual'): Promise<Bac
   const db = await getDatabase();
   const todoDb = await getTodoDatabase();
 
-  const [entries, tags, groups, settings, allTodos, allTodoTags, allTemplates] = await Promise.all([
+  const [entries, tags, groups, settings, allTodos, allTodoTags, allTemplates, allAttachments] = await Promise.all([
     db.getAllEntries(),
     db.getAllTags(),
     db.getAllGroups(),
@@ -208,6 +253,7 @@ export async function exportToDownload(type: BackupType = 'manual'): Promise<Bac
     todoDb.getAllTodos(),
     todoDb.getAllTodoTags(),
     todoDb.getAllTemplates(),
+    db.getAllAttachments(),
   ]);
 
   const links = [];
@@ -237,7 +283,11 @@ export async function exportToDownload(type: BackupType = 'manual'): Promise<Bac
 
   const zip = new JSZip();
   zip.file('manifest.json', JSON.stringify(manifest, null, 2));
-  zip.file('entries.json', JSON.stringify(entries, null, 2));
+  zip.file('entries.json', JSON.stringify(
+    entries.map(e => { const { attachments, ...rest } = e; return rest; }),
+    null,
+    2
+  ));
   zip.file('tags.json', JSON.stringify(tags, null, 2));
   zip.file('groups.json', JSON.stringify(groups, null, 2));
   zip.file('links.json', JSON.stringify(links, null, 2));
@@ -245,6 +295,20 @@ export async function exportToDownload(type: BackupType = 'manual'): Promise<Bac
   zip.file('todos.json', JSON.stringify(allTodos, null, 2));
   zip.file('todoTags.json', JSON.stringify(allTodoTags, null, 2));
   zip.file('templates.json', JSON.stringify(templatesWithItems, null, 2));
+
+  // 附件元数据 + 缩略图（原图不打包，按需拉取）
+  zip.file('attachments.json', JSON.stringify(allAttachments, null, 2));
+  for (const att of allAttachments) {
+    try {
+      const thumbRes = await Filesystem.readFile({
+        path: att.thumbPath,
+        directory: Directory.Data,
+      });
+      zip.file(`attachments/${att.id}_thumb.jpg`, thumbRes.data, { base64: true });
+    } catch (err) {
+      console.warn(`[export] 缩略图读取失败 att=${att.id}:`, err);
+    }
+  }
 
   const zipBlob = await zip.generateAsync({ type: 'base64', compression: 'DEFLATE' });
   const filename = `${formatTimestamp(ts)}_${getDeviceId()}.zip`;
@@ -480,6 +544,8 @@ async function restoreFromZip(zip: JSZip, overwrite: boolean): Promise<RestoreRe
 
   // === 导入条目 ===
   const existingHashes = overwrite ? new Set<string>() : await db.getAllContentHashes();
+  // 旧 entryId -> 新 entryId 映射（供附件导入使用）
+  const entryIdMap = new Map<string, string>();
 
   if (entries) {
     for (const entry of entries) {
@@ -502,6 +568,9 @@ async function restoreFromZip(zip: JSZip, overwrite: boolean): Promise<RestoreRe
         updatedAt: now,
         copyCount: entry.copyCount ?? 0,
       });
+
+      // 记录映射（旧 id -> 新 id）
+      if (entry.id) entryIdMap.set(entry.id, newId);
 
       // 关联标签
       if (entry.tagIds && Array.isArray(entry.tagIds)) {
@@ -603,6 +672,117 @@ async function restoreFromZip(zip: JSZip, overwrite: boolean): Promise<RestoreRe
             time: tplItem.time,
             sortOrder: tplItem.sortOrder,
           } as any);
+        }
+      }
+    }
+  }
+
+  // === 导入附件（元数据 + 缩略图全量；原图从 zip 写入或补齐） ===
+  const attachmentsJson = await readJson<any[]>('attachments.json');
+  if (attachmentsJson && Array.isArray(attachmentsJson)) {
+    // 本地已有附件 id 集合 + attId -> 本地附件映射（用于补原图）
+    const existingAtts = await db.getAllAttachments();
+    const existingAttIds = new Set(existingAtts.map(a => a.id));
+    const existingAttMap = new Map(existingAtts.map(a => [a.id, a] as const));
+
+    for (const att of attachmentsJson) {
+      // 尝试从 zip 读取原图（本地备份 zip 不含原图，同步 zip 才有）
+      const origFile = zip.file(`attachments/${att.id}_orig.jpg`);
+
+      if (!existingAttIds.has(att.id)) {
+        // === 新附件：写缩略图 + 原图（如有）+ 写 DB ===
+        // 通过 entryId 映射找到新 entryId
+        // 覆盖式恢复下 entryIdMap 可能为空（旧 id 已不可考），此时跳过附件
+        const newEntryId = entryIdMap.get(att.entryId);
+        if (!newEntryId) continue;
+
+        const thumbFile = zip.file(`attachments/${att.id}_thumb.jpg`);
+        if (!thumbFile) continue;
+
+        let thumbBase64: string;
+        try {
+          thumbBase64 = await thumbFile.async('base64');
+        } catch {
+          continue;
+        }
+
+        // 用源附件 id 作为文件名，跨设备一致
+        const dir = `attachments/${newEntryId}`;
+        const thumbPath = `${dir}/${att.id}_thumb.jpg`;
+        const filePath = `${dir}/${att.id}_orig.jpg`;
+
+        // 写缩略图
+        try {
+          await Filesystem.writeFile({
+            path: thumbPath,
+            data: thumbBase64,
+            directory: Directory.Data,
+            recursive: true,
+          });
+        } catch (err) {
+          result.errors.push(`附件缩略图写入失败 att=${att.id}: ${String(err)}`);
+          continue;
+        }
+
+        // 写原图（如果 zip 里有）
+        if (origFile) {
+          try {
+            const origBase64 = await origFile.async('base64');
+            await Filesystem.writeFile({
+              path: filePath,
+              data: origBase64,
+              directory: Directory.Data,
+              recursive: true,
+            });
+          } catch (err) {
+            result.errors.push(`附件原图写入失败 att=${att.id}: ${String(err)}`);
+          }
+        }
+
+        // 写 DB（复用源附件 id，保证跨设备一致）
+        try {
+          await db.addAttachment({
+            id: att.id,
+            entryId: newEntryId,
+            filePath,
+            thumbPath,
+            mimeType: att.mimeType || 'image/jpeg',
+            sortOrder: att.sortOrder ?? 0,
+            createdAt: att.createdAt || Date.now(),
+          });
+          existingAttIds.add(att.id);
+        } catch (err) {
+          result.errors.push(`附件写入数据库失败 att=${att.id}: ${String(err)}`);
+        }
+      } else {
+        // === 已有附件：补原图（本地没有但 zip 有） ===
+        if (!origFile) continue;
+        const localAtt = existingAttMap.get(att.id);
+        if (!localAtt) continue;
+
+        // 检查本地是否已有原图（内联检查，避免依赖 syncService 造成循环引用）
+        let hasOrig = true;
+        try {
+          await Filesystem.readFile({
+            path: localAtt.filePath,
+            directory: Directory.Data,
+          });
+        } catch {
+          hasOrig = false;
+        }
+
+        if (!hasOrig) {
+          try {
+            const origBase64 = await origFile.async('base64');
+            await Filesystem.writeFile({
+              path: localAtt.filePath,
+              data: origBase64,
+              directory: Directory.Data,
+              recursive: true,
+            });
+          } catch (err) {
+            result.errors.push(`附件原图补齐失败 att=${att.id}: ${String(err)}`);
+          }
         }
       }
     }

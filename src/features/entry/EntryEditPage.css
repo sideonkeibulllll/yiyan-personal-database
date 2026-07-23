@@ -257,6 +257,84 @@
   font-weight: 500;
 }
 
+/* === 图片附件 === */
+.entry-edit-att-count {
+  margin-left: 4px;
+  color: var(--color-text-secondary);
+  font-weight: 400;
+}
+
+.entry-edit-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.entry-edit-att-item {
+  position: relative;
+  width: 80px;
+  height: 80px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--color-bg-secondary, #f5f5f5);
+}
+
+.entry-edit-att-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.entry-edit-att-delete {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  transition: background var(--duration-fast) var(--ease-out);
+}
+
+.entry-edit-att-delete:hover {
+  background: rgba(220, 38, 38, 0.85);
+}
+
+.entry-edit-att-add {
+  width: 80px;
+  height: 80px;
+  border: 1.5px dashed var(--color-border, #d9d9d9);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-secondary);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.entry-edit-att-add:hover:not(:disabled) {
+  border-color: var(--color-primary, #f76707);
+  color: var(--color-primary, #f76707);
+}
+
+.entry-edit-att-add:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* === 底部保存 === */
 .entry-edit-footer {
   flex-shrink: 0;

@@ -5,7 +5,7 @@
  */
 import { Capacitor } from '@capacitor/core';
 import { CapacitorSQLite, SQLiteConnection, SQLiteDBConnection } from '@capacitor-community/sqlite';
-import type { Entry, Tag, Group, Link, Settings } from '@/types';
+import type { Entry, Tag, Group, Link, Settings, Attachment } from '@/types';
 import type { IDatabaseService } from './types';
 
 class NativeDatabaseService implements IDatabaseService {
@@ -156,6 +156,17 @@ class NativeDatabaseService implements IDatabaseService {
         data TEXT NOT NULL,
         updated_at INTEGER NOT NULL
       )`,
+      `CREATE TABLE IF NOT EXISTS attachments (
+        id TEXT PRIMARY KEY,
+        entry_id TEXT NOT NULL,
+        file_path TEXT NOT NULL,
+        thumb_path TEXT NOT NULL,
+        mime_type TEXT,
+        sort_order INTEGER DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        FOREIGN KEY (entry_id) REFERENCES entries(id) ON DELETE CASCADE
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_attachments_entry ON attachments(entry_id)`,
     ];
 
     for (const sql of schemas) {
@@ -185,6 +196,7 @@ class NativeDatabaseService implements IDatabaseService {
         entries.push(this.rowToEntry(row, tags));
       }
     }
+    await this.fillAttachmentsForEntries(entries);
     return entries;
   }
 
@@ -194,7 +206,8 @@ class NativeDatabaseService implements IDatabaseService {
     if (!result.values || result.values.length === 0) return null;
     const row = result.values[0];
     const tags = await this.getTagsByEntryId(id);
-    return this.rowToEntry(row, tags);
+    const attachments = await this.getAttachmentsByEntryId(id);
+    return this.rowToEntry(row, tags, attachments);
   }
 
   async updateEntry(id: string, updates: Partial<Entry>): Promise<void> {
@@ -239,6 +252,7 @@ class NativeDatabaseService implements IDatabaseService {
         entries.push(this.rowToEntry(row, tags));
       }
     }
+    await this.fillAttachmentsForEntries(entries);
     return entries;
   }
 
@@ -252,6 +266,7 @@ class NativeDatabaseService implements IDatabaseService {
         entries.push(this.rowToEntry(row, tags));
       }
     }
+    await this.fillAttachmentsForEntries(entries);
     return entries;
   }
 
@@ -387,6 +402,7 @@ class NativeDatabaseService implements IDatabaseService {
         entries.push(this.rowToEntry(row, tags));
       }
     }
+    await this.fillAttachmentsForEntries(entries);
     return entries;
   }
 
@@ -403,6 +419,7 @@ class NativeDatabaseService implements IDatabaseService {
         entries.push(this.rowToEntry(row, tags));
       }
     }
+    await this.fillAttachmentsForEntries(entries);
     return entries;
   }
 
@@ -450,14 +467,104 @@ class NativeDatabaseService implements IDatabaseService {
     return `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 11)}`;
   }
 
-  private rowToEntry(row: Record<string, unknown>, tags: Tag[]): Entry {
+  private rowToEntry(row: Record<string, unknown>, tags: Tag[], attachments: Attachment[] = []): Entry {
     return {
       id: row.id as string, content: row.content as string,
       source: row.source as string | undefined, groupId: row.group_id as string | undefined,
       supplement: row.supplement as string | undefined, isStarred: Boolean(row.is_starred),
       createdAt: row.created_at as number, updatedAt: row.updated_at as number,
-      lastUsedAt: row.last_used_at as number | undefined, copyCount: row.copy_count as number, tags,
+      lastUsedAt: row.last_used_at as number | undefined, copyCount: row.copy_count as number,
+      tags, attachments,
     };
+  }
+
+  private rowToAttachment(row: Record<string, unknown>): Attachment {
+    return {
+      id: row.id as string,
+      entryId: row.entry_id as string,
+      filePath: row.file_path as string,
+      thumbPath: row.thumb_path as string,
+      mimeType: (row.mime_type as string) || 'image/jpeg',
+      sortOrder: (row.sort_order as number) ?? 0,
+      createdAt: row.created_at as number,
+    };
+  }
+
+  /** 批量为 entries 填充 attachments（避免 N+1 查询） */
+  private async fillAttachmentsForEntries(entries: Entry[]): Promise<void> {
+    if (!this.db || entries.length === 0) return;
+    const ids = entries.map(e => e.id);
+    const placeholders = ids.map(() => '?').join(',');
+    const result = await this.db.query(
+      `SELECT * FROM attachments WHERE entry_id IN (${placeholders}) ORDER BY sort_order ASC, created_at ASC`,
+      ids
+    );
+    const map = new Map<string, Attachment[]>();
+    if (result.values) {
+      for (const row of result.values) {
+        const att = this.rowToAttachment(row);
+        const list = map.get(att.entryId) || [];
+        list.push(att);
+        map.set(att.entryId, list);
+      }
+    }
+    for (const e of entries) {
+      e.attachments = map.get(e.id) || [];
+    }
+  }
+
+  // ==================== 图片附件操作 ====================
+
+  async addAttachment(attachment: Omit<Attachment, 'id'> & { id?: string }): Promise<Attachment> {
+    if (!this.db) throw new Error('Database not initialized');
+    const id = attachment.id || this.generateId();
+    const full: Attachment = { ...attachment, id };
+    await this.db.run(
+      `INSERT INTO attachments (id, entry_id, file_path, thumb_path, mime_type, sort_order, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [id, full.entryId, full.filePath, full.thumbPath, full.mimeType, full.sortOrder, full.createdAt]
+    );
+    return full;
+  }
+
+  async getAttachmentsByEntryId(entryId: string): Promise<Attachment[]> {
+    if (!this.db) throw new Error('Database not initialized');
+    const result = await this.db.query(
+      'SELECT * FROM attachments WHERE entry_id = ? ORDER BY sort_order ASC, created_at ASC',
+      [entryId]
+    );
+    if (!result.values) return [];
+    return result.values.map(row => this.rowToAttachment(row));
+  }
+
+  async getAllAttachments(): Promise<Attachment[]> {
+    if (!this.db) throw new Error('Database not initialized');
+    const result = await this.db.query('SELECT * FROM attachments ORDER BY created_at ASC', []);
+    if (!result.values) return [];
+    return result.values.map(row => this.rowToAttachment(row));
+  }
+
+  async deleteAttachment(attachmentId: string): Promise<void> {
+    if (!this.db) throw new Error('Database not initialized');
+    await this.db.run('DELETE FROM attachments WHERE id = ?', [attachmentId]);
+  }
+
+  async deleteAttachmentsByEntryId(entryId: string): Promise<void> {
+    if (!this.db) throw new Error('Database not initialized');
+    await this.db.run('DELETE FROM attachments WHERE entry_id = ?', [entryId]);
+  }
+
+  async updateAttachmentSort(attachmentIds: string[], sortOrder: number[]): Promise<void> {
+    if (!this.db) throw new Error('Database not initialized');
+    if (attachmentIds.length !== sortOrder.length) {
+      throw new Error('attachmentIds 和 sortOrder 长度不一致');
+    }
+    for (let i = 0; i < attachmentIds.length; i++) {
+      await this.db.run(
+        'UPDATE attachments SET sort_order = ? WHERE id = ?',
+        [sortOrder[i], attachmentIds[i]]
+      );
+    }
   }
 }
 

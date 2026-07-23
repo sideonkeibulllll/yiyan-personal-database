@@ -2,14 +2,19 @@
  * 首页 - 录入页面
  * 极简输入框 + 粘贴/发送按钮
  */
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Clipboard } from '@capacitor/clipboard';
+import { Capacitor } from '@capacitor/core';
 import { useEntryStore } from '@/stores/entryStore';
 import { useTagStore } from '@/stores/tagStore';
 import { useTodoStore } from '@/stores/todoStore';
+import type { Todo } from '@/types';
 import { TagSelector } from '@/components/TagSelector/TagSelector';
 import { BottomNav } from '@/components/BottomNav';
+import { getDatabase } from '@/services/database';
+import { pickImages, takePhoto, type SelectedImage } from '@/services/attachmentService';
+import { isElectron } from '@/services/electronAdapter';
 import './HomePage.css';
 
 type InputMode = 'input' | 'tag' | 'info';
@@ -37,6 +42,27 @@ function getTomorrowAtHour(hour: number): number {
   now.setDate(now.getDate() + 1);
   now.setHours(hour, 0, 0, 0);
   return now.getTime();
+}
+
+/** 格式化倒计时（天/时/分/秒，紧凑） */
+function formatCountdownCompact(ms: number): string {
+  if (ms <= 0) return '已结束';
+  const totalSeconds = Math.floor(ms / 1000);
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (days > 0) return `${days}天${hours}时${minutes}分`;
+  if (hours > 0) return `${hours}时${minutes}分${seconds}秒`;
+  if (minutes > 0) return `${minutes}分${seconds}秒`;
+  return `${seconds}秒`;
+}
+
+/** 格式化时间为 HH:MM */
+function formatTimeShort(ts?: number): string {
+  if (!ts) return '--:--';
+  const d = new Date(ts);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
 /** 将时间戳转为本地 datetime-local 格式 (不使用 ISO，避免时区问题) */
@@ -106,6 +132,30 @@ const SearchIcon = (
   </svg>
 );
 
+/** Image SVG icon (相册选图) */
+const ImageIcon = (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+    <circle cx="8.5" cy="8.5" r="1.5" />
+    <polyline points="21 15 16 10 5 21" />
+  </svg>
+);
+
+/** Camera SVG icon (拍照) */
+const CameraIcon = (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+    <circle cx="12" cy="13" r="4" />
+  </svg>
+);
+
+/** Close (×) SVG icon */
+const CloseSmIcon = (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M18 6 6 18M6 6l12 12" />
+  </svg>
+);
+
 export function HomePage() {
   const [content, setContent] = useState('');
   const [mode, setMode] = useState<InputMode>('input');
@@ -121,7 +171,23 @@ export function HomePage() {
   const [todoIsToday, setTodoIsToday] = useState(true);
   const [showTodoAdvanced, setShowTodoAdvanced] = useState(false);
   const [lastTodoId, setLastTodoId] = useState<string | null>(null);
-  const [todoReminder, setTodoReminder] = useState<string | null>(null); // 修复2：待办添加到录入的提醒条
+
+  // === 顶部待办卡片（pin + 自动补满） ===
+  // 2 个 slot：timed（有 startTime/endTime）、untimed（无时间）。各显示 1 条。
+  // pin 优先；pin 的待办过期（timed）或完成（untimed）后自动移除；空 slot 自动选取补满。
+  const [pinnedTimedId, setPinnedTimedId] = useState<string | null>(
+    () => localStorage.getItem('yiyan_input_pinned_timed'),
+  );
+  const [pinnedUntimedId, setPinnedUntimedId] = useState<string | null>(
+    () => localStorage.getItem('yiyan_input_pinned_untimed'),
+  );
+  const [allTodos, setAllTodos] = useState<Todo[]>([]);
+  const [now, setNow] = useState(Date.now());
+
+  // 录入时待保存的图片（待办模式不支持附件）
+  const [pendingImages, setPendingImages] = useState<SelectedImage[]>([]);
+  const [isPickingImage, setIsPickingImage] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const modeTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const navigate = useNavigate();
@@ -131,47 +197,127 @@ export function HomePage() {
   const getTagsByEntryId = useTagStore(state => state.getTagsByEntryId);
   const addTodo = useTodoStore(state => state.addTodo);
 
-  // 自动聚焦
-  useEffect(() => {
-    if (mode === 'input' && textareaRef.current) {
-      textareaRef.current.focus();
-    }
-  }, [mode]);
-
-  // 读取从待办页面传来的「添加到录入」内容（兼容两种方式：自定义事件 + sessionStorage）
-  useEffect(() => {
-    // 方式1：sessionStorage（页面刷新场景）
-    const pendingTodo = sessionStorage.getItem('__yiyan_todo_to_input__');
-    if (pendingTodo) {
-      setContent(pendingTodo);
-      sessionStorage.removeItem('__yiyan_todo_to_input__');
-      if (textareaRef.current) {
-        textareaRef.current.focus();
-      }
-    }
-    // 方式2：自定义事件（SPA 不刷新页面场景）
-    const handleAddToInput = (e: Event) => {
-      const detail = (e as CustomEvent<string>).detail;
-      if (detail) {
-        setContent(detail);
-        setTodoReminder(detail); // 修复2：显示提醒条
-        if (textareaRef.current) {
-          textareaRef.current.focus();
-        }
-      }
-    };
-    window.addEventListener('yiyan-add-to-input', handleAddToInput);
-    return () => {
-      window.removeEventListener('yiyan-add-to-input', handleAddToInput);
-    };
-  }, []);
-
-  // 显示轻提示
+  // 显示轻提示（提前定义，供后续 useEffect/回调使用）
   const showToastMessage = useCallback((message: string) => {
     setToastMessage(message);
     setShowToast(true);
     setTimeout(() => setShowToast(false), 2000);
   }, []);
+
+  // 自动聚焦（仅 PC 端；手机端进入时不主动吊起键盘，由用户点击输入框唤起）
+  useEffect(() => {
+    if (mode === 'input' && textareaRef.current && Capacitor.getPlatform() === 'web') {
+      textareaRef.current.focus();
+    }
+  }, [mode]);
+
+  // 监听待办页"添加到录入"事件 → pin 到对应 slot（不填输入框）
+  // pin 优先 + 自动补满：用户手动 pin 的占对应 slot（timed/untimed），其余 slot 自动选取补满
+  useEffect(() => {
+    const handleAddToInput = (e: Event) => {
+      const detail = (e as CustomEvent<{ todoId: string; title: string; startTime?: number; endTime?: number }>).detail;
+      if (!detail?.todoId) return;
+      const isTimed = !!(detail.startTime && detail.endTime);
+      if (isTimed) {
+        localStorage.setItem('yiyan_input_pinned_timed', detail.todoId);
+        setPinnedTimedId(detail.todoId);
+      } else {
+        localStorage.setItem('yiyan_input_pinned_untimed', detail.todoId);
+        setPinnedUntimedId(detail.todoId);
+      }
+      showToastMessage(`已置顶: ${detail.title}`);
+    };
+    window.addEventListener('yiyan-add-to-input', handleAddToInput);
+    return () => {
+      window.removeEventListener('yiyan-add-to-input', handleAddToInput);
+    };
+  }, [showToastMessage]);
+
+  // 加载所有待办 + 每秒 tick（倒计时 + 周期性 reload 同步完成/删除状态）
+  useEffect(() => {
+    let tick = 0;
+    const loadAll = async () => {
+      try {
+        const { getTodoDatabase } = await import('@/services/todoDatabase');
+        const db = await getTodoDatabase();
+        const todos = await db.getAllTodos();
+        setAllTodos(todos);
+      } catch (err) {
+        console.error('[HomePage] 加载待办失败:', err);
+      }
+    };
+    loadAll();
+    const timer = setInterval(() => {
+      setNow(Date.now());
+      tick++;
+      if (tick % 10 === 0) loadAll(); // 每 10 秒 reload 一次
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // pin 失效自动清理（timed：过期/完成/删除；untimed：完成/删除）
+  useEffect(() => {
+    if (!pinnedTimedId) return;
+    const t = allTodos.find(x => x.id === pinnedTimedId);
+    const invalid = !t || t.status !== 'pending' || t.deletedAt ||
+      !t.startTime || !t.endTime || t.endTime <= now;
+    if (invalid) {
+      localStorage.removeItem('yiyan_input_pinned_timed');
+      setPinnedTimedId(null);
+    }
+  }, [pinnedTimedId, allTodos, now]);
+
+  useEffect(() => {
+    if (!pinnedUntimedId) return;
+    const t = allTodos.find(x => x.id === pinnedUntimedId);
+    const invalid = !t || t.status !== 'pending' || t.deletedAt || t.startTime || t.endTime;
+    if (invalid) {
+      localStorage.removeItem('yiyan_input_pinned_untimed');
+      setPinnedUntimedId(null);
+    }
+  }, [pinnedUntimedId, allTodos]);
+
+  // === 顶部卡片选取算法 ===
+  // timed slot：pin 优先；失效则 auto 选取
+  //   优先级1：当前在 period 内（startTime <= now <= endTime）→ endTime 最早
+  //   优先级2：未来候选 → startTime 最早；若相同 → duration 最短
+  const timedCard = useMemo<Todo | null>(() => {
+    if (pinnedTimedId) {
+      const t = allTodos.find(x => x.id === pinnedTimedId);
+      if (t && t.status === 'pending' && !t.deletedAt && t.startTime && t.endTime && t.endTime > now) {
+        return t;
+      }
+    }
+    const candidates = allTodos.filter(x =>
+      x.status === 'pending' && !x.deletedAt &&
+      x.startTime && x.endTime && x.endTime > now,
+    );
+    if (candidates.length === 0) return null;
+    const inPeriod = candidates.filter(x => x.startTime! <= now && x.endTime! >= now);
+    if (inPeriod.length > 0) {
+      return inPeriod.reduce((a, b) => (a.endTime! < b.endTime! ? a : b));
+    }
+    const future = candidates.filter(x => x.startTime! > now);
+    if (future.length === 0) return null;
+    future.sort((a, b) => {
+      if (a.startTime !== b.startTime) return a.startTime! - b.startTime!;
+      return (a.endTime! - a.startTime!) - (b.endTime! - b.startTime!);
+    });
+    return future[0];
+  }, [pinnedTimedId, allTodos, now]);
+
+  // untimed slot：pin 优先；失效则 auto 选取（createdAt 最早的 pending 且无时间）
+  const untimedCard = useMemo<Todo | null>(() => {
+    if (pinnedUntimedId) {
+      const t = allTodos.find(x => x.id === pinnedUntimedId);
+      if (t && t.status === 'pending' && !t.deletedAt && !t.startTime && !t.endTime) return t;
+    }
+    const candidates = allTodos.filter(x =>
+      x.status === 'pending' && !x.deletedAt && !x.startTime && !x.endTime,
+    );
+    if (candidates.length === 0) return null;
+    return candidates.reduce((a, b) => (a.createdAt < b.createdAt ? a : b));
+  }, [pinnedUntimedId, allTodos]);
 
   // 读取剪贴板
   const readClipboard = useCallback(async () => {
@@ -238,7 +384,36 @@ export function HomePage() {
       setLastEntryId(entry.id);
       setLastEntryContent(content.trim());
       setContent('');
-      showToastMessage('已入库');
+
+      // 处理图片附件（待办模式不支持，这里 isTodoMode 必为 false）
+      let attachError = false;
+      if (pendingImages.length > 0) {
+        setIsUploading(true);
+        try {
+          const db = await getDatabase();
+          const { saveImageForEntry } = await import('@/services/attachmentService');
+          for (let i = 0; i < pendingImages.length; i++) {
+            const attData = await saveImageForEntry(entry.id, pendingImages[i]);
+            attData.sortOrder = i;
+            await db.addAttachment(attData);
+          }
+          // 刷新 store 以包含 attachments
+          await useEntryStore.getState().loadEntries();
+        } catch (attachErr) {
+          console.error('图片保存失败:', attachErr);
+          attachError = true;
+        } finally {
+          setIsUploading(false);
+        }
+      }
+
+      const hadImages = pendingImages.length > 0;
+      setPendingImages([]);
+      showToastMessage(
+        attachError ? '条目已入库，但部分图片保存失败'
+        : hadImages ? '已入库（含图片）'
+        : '已入库'
+      );
 
       // 切换到标签/信息选择模式
       setMode('tag');
@@ -264,7 +439,7 @@ export function HomePage() {
         getDatabase().catch(() => {/* 重试将在下次调用时生效 */});
       }
     }
-  }, [content, addEntry, showToastMessage, isTodoMode, todoStartTime, todoEndTime, todoIsToday, addTodo]);
+  }, [content, addEntry, showToastMessage, isTodoMode, todoStartTime, todoEndTime, todoIsToday, addTodo, pendingImages]);
 
   // 处理键盘事件
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -273,6 +448,46 @@ export function HomePage() {
       handleSend();
     }
   }, [handleSend]);
+
+  // 选择图片（相册）
+  const handlePickImages = useCallback(async () => {
+    setIsPickingImage(true);
+    try {
+      const imgs = await pickImages(9);
+      if (imgs.length > 0) {
+        setPendingImages(prev => [...prev, ...imgs]);
+      }
+    } catch (err) {
+      console.error('选图失败:', err);
+      showToastMessage('选图失败');
+    } finally {
+      setIsPickingImage(false);
+    }
+  }, [showToastMessage]);
+
+  // 拍照（仅 Android）
+  const handleTakePhoto = useCallback(async () => {
+    setIsPickingImage(true);
+    try {
+      const img = await takePhoto();
+      if (img) {
+        setPendingImages(prev => [...prev, img]);
+      }
+    } catch (err) {
+      console.error('拍照失败:', err);
+      showToastMessage('拍照失败');
+    } finally {
+      setIsPickingImage(false);
+    }
+  }, [showToastMessage]);
+
+  // 移除待上传图片
+  const removePendingImage = useCallback((idx: number) => {
+    setPendingImages(prev => prev.filter((_, i) => i !== idx));
+  }, []);
+
+  // 是否展示拍照按钮：仅 Android（Electron/Web 不显示）
+  const showCameraButton = !isElectron() && Capacitor.getPlatform() === 'android';
 
   // 选择添加标签
   const handleAddTag = useCallback(async () => {
@@ -362,30 +577,53 @@ export function HomePage() {
   return (
     <div className="home-page">
       <header className="home-page-header">
-        <h1 className="home-page-title">录入你的每一条知识</h1>
+        {/* 顶部 2 张待办卡片（纵向）：timed + untimed，替换原标题 */}
+        <div className="home-todo-cards">
+          {/* timed 卡片（有 startTime/endTime，带倒计时） */}
+          {timedCard ? (
+            <div
+              className={`home-todo-card timed phase-${now < (timedCard.startTime ?? 0) ? 'before' : now < (timedCard.endTime ?? Infinity) ? 'ongoing' : 'ended'}`}
+              onClick={() => navigate(`/todo/${timedCard.id}/edit`)}
+            >
+              <div className="home-todo-card-main">
+                <span className="home-todo-card-title">{timedCard.title}</span>
+                <span className="home-todo-card-time">{formatTimeShort(timedCard.startTime)} - {formatTimeShort(timedCard.endTime)}</span>
+              </div>
+              <span className="home-todo-card-countdown">
+                {now < (timedCard.startTime ?? 0)
+                  ? `${formatCountdownCompact((timedCard.startTime ?? 0) - now)} 后开始`
+                  : now < (timedCard.endTime ?? Infinity)
+                    ? `${formatCountdownCompact((timedCard.endTime ?? 0) - now)} 后结束`
+                    : '已结束'}
+              </span>
+            </div>
+          ) : (
+            <div className="home-todo-card empty"><span className="home-todo-card-placeholder">暂无定时待办</span></div>
+          )}
+
+          {/* untimed 卡片（无时间，待处理） */}
+          {untimedCard ? (
+            <div
+              className="home-todo-card untimed"
+              onClick={() => navigate(`/todo/${untimedCard.id}/edit`)}
+            >
+              <div className="home-todo-card-main">
+                <span className="home-todo-card-title">{untimedCard.title}</span>
+                <span className="home-todo-card-time">待处理</span>
+              </div>
+              <span className="home-todo-card-countdown">无截止</span>
+            </div>
+          ) : (
+            <div className="home-todo-card empty"><span className="home-todo-card-placeholder">暂无待办事项</span></div>
+          )}
+        </div>
       </header>
       <main className="page-content">
         <div className="center-area">
         {mode === 'input' ? (
           <div className="input-section">
-            {/* 修复2：待办添加到录入的提醒条 */}
-            {todoReminder && (
-              <div className="todo-reminder-bar glass">
-                <span className="reminder-icon">📋</span>
-                <span className="reminder-text">{todoReminder}</span>
-                <button
-                  className="reminder-close"
-                  onClick={() => setTodoReminder(null)}
-                  title="关闭提醒"
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M18 6 6 18M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-            )}
             <div className="input-wrapper glass">
-              <textarea
+            <textarea
                 ref={textareaRef}
                 className="content-input"
                 value={content}
@@ -395,6 +633,27 @@ export function HomePage() {
                 rows={4}
               />
             </div>
+
+            {/* 已选图片预览（仅普通录入模式） */}
+            {!isTodoMode && pendingImages.length > 0 && (
+              <div className="pending-images">
+                {pendingImages.map((img, idx) => (
+                  <div key={idx} className="pending-image-item">
+                    <img
+                      src={`data:${img.mimeType};base64,${img.base64}`}
+                      alt={`待上传 ${idx + 1}`}
+                    />
+                    <button
+                      className="pending-image-remove"
+                      onClick={() => removePendingImage(idx)}
+                      title="移除"
+                    >
+                      {CloseSmIcon}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* 待办模式切换 */}
             <label className="todo-mode-toggle">
@@ -489,13 +748,35 @@ export function HomePage() {
                 <span className="btn-icon">{ClipboardIcon}</span>
                 <span>粘贴</span>
               </button>
+              {!isTodoMode && (
+                <button
+                  className="action-btn secondary"
+                  onClick={handlePickImages}
+                  disabled={isPickingImage || isUploading}
+                  title="从相册选择图片"
+                >
+                  <span className="btn-icon">{ImageIcon}</span>
+                  <span>选图</span>
+                </button>
+              )}
+              {!isTodoMode && showCameraButton && (
+                <button
+                  className="action-btn secondary"
+                  onClick={handleTakePhoto}
+                  disabled={isPickingImage || isUploading}
+                  title="拍照"
+                >
+                  <span className="btn-icon">{CameraIcon}</span>
+                  <span>拍照</span>
+                </button>
+              )}
               <button
                 className="action-btn primary"
                 onClick={handleSend}
-                disabled={!content.trim()}
+                disabled={!content.trim() || isUploading}
               >
                 <span className="btn-icon">{SendIcon}</span>
-                <span>发送</span>
+                <span>{isUploading ? '上传中...' : '发送'}</span>
               </button>
             </div>
           </div>

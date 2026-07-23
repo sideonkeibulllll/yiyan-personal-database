@@ -338,13 +338,20 @@ function TodoItem({ todo, index, now, onToggleDone, onDelete, onEdit }: TodoItem
     } catch {}
   }, [todo.title]);
 
-  // 添加到录入主页面（不跳转，通过自定义事件通知主页展示）
+  // 添加到录入主页面（pin 到首页待办卡片顶部，不填输入框）
   const handleAddToInput = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
-    // 使用自定义事件通知主页（不刷新页面）
-    window.dispatchEvent(new CustomEvent('yiyan-add-to-input', { detail: todo.title }));
+    // 传完整 todo 信息：主页根据 startTime 有无 pin 到对应 slot（timed/untimed）
+    window.dispatchEvent(new CustomEvent('yiyan-add-to-input', {
+      detail: {
+        todoId: todo.id,
+        title: todo.title,
+        startTime: todo.startTime,
+        endTime: todo.endTime,
+      },
+    }));
     setShowMenu(false);
-  }, [todo.title]);
+  }, [todo.id, todo.title, todo.startTime, todo.endTime]);
 
   return (
     <div

@@ -6,6 +6,8 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import type { Entry } from '@/types';
 import type { WindowState, PathSegment, ListItem, SortBy } from './types';
 import { getDatabase } from '@/services/database';
+import { readThumbAsSrc } from '@/services/attachmentService';
+import { ImageViewer } from '@/components/ImageViewer/ImageViewer';
 import './FileManagerWindow.css';
 
 interface FileManagerWindowProps {
@@ -45,6 +47,13 @@ const XSvg = () => (
   </svg>
 );
 
+/** Paperclip icon（附件标识） */
+const PaperclipSvg = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+  </svg>
+);
+
 export function FileManagerWindow({
   side,
   state,
@@ -56,7 +65,22 @@ export function FileManagerWindow({
   const [items, setItems] = useState<ListItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [multiSelectMode, setMultiSelectMode] = useState(false);
+  const [viewerImages, setViewerImages] = useState<string[] | null>(null);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 点击附件小按钮：读取该条目的所有附件缩略图，打开浏览模式
+  const handleAttachmentView = useCallback(async (e: React.MouseEvent, entryId: string) => {
+    e.stopPropagation();
+    try {
+      const db = await getDatabase();
+      const entry = await db.getEntryById(entryId);
+      if (!entry?.attachments || entry.attachments.length === 0) return;
+      const srcs = await Promise.all(entry.attachments.map(a => readThumbAsSrc(a.thumbPath)));
+      setViewerImages(srcs.filter(Boolean));
+    } catch (err) {
+      console.warn('[FileManager] 读取附件失败:', err);
+    }
+  }, []);
 
   const loadItems = useCallback(async () => {
     setLoading(true);
@@ -208,7 +232,21 @@ export function FileManagerWindow({
                     {item.type === 'folder' ? <FolderSvg /> : item.isStarred ? <StarSvg /> : <FileTextSvg />}
                   </span>
                   <div className="fm-item-info">
-                    <span className="fm-item-title">{item.title}</span>
+                    <span className="fm-item-title">
+                      {item.title}
+                      {item.attachmentCount ? (
+                        <button
+                          className="fm-item-att-btn"
+                          onClick={(e) => handleAttachmentView(e, item.id)}
+                          title={`查看 ${item.attachmentCount} 张附件`}
+                        >
+                          <PaperclipSvg />
+                          {item.attachmentCount > 1 && (
+                            <span className="fm-att-count">{item.attachmentCount}</span>
+                          )}
+                        </button>
+                      ) : null}
+                    </span>
                     {item.subtitle && <span className="fm-item-subtitle">{item.subtitle}</span>}
                   </div>
                   {item.meta && <span className="fm-item-meta">{item.meta}</span>}
@@ -219,6 +257,15 @@ export function FileManagerWindow({
           </ul>
         )}
       </div>
+
+      {/* 附件浏览模式 */}
+      {viewerImages && viewerImages.length > 0 && (
+        <ImageViewer
+          images={viewerImages}
+          startIndex={0}
+          onClose={() => setViewerImages(null)}
+        />
+      )}
     </div>
   );
 }
@@ -232,6 +279,7 @@ function entriesToItems(entries: Entry[], sortBy: SortBy): ListItem[] {
     subtitle: e.source || undefined,
     meta: formatDate(e.createdAt),
     isStarred: e.isStarred,
+    attachmentCount: e.attachments?.length,
   }));
 
   return sortItems(items, sortBy);

@@ -1,13 +1,13 @@
 /**
  * 数据库服务接口
  */
-import type { Entry, Tag, Group, Link, Settings, Todo, TodoTag, TodoTemplate, TodoTemplateItem, TodoSearchTimeFilter } from '@/types';
+import type { Entry, Tag, Group, Link, Settings, Attachment, Todo, TodoTag, TodoTemplate, TodoTemplateItem, TodoSearchTimeFilter } from '@/types';
 
 export interface IDatabaseService {
   init(): Promise<void>;
 
   // 条目操作
-  createEntry(entry: Omit<Entry, 'tags'>): Promise<Entry>;
+  createEntry(entry: Omit<Entry, 'tags' | 'attachments'>): Promise<Entry>;
   getAllEntries(): Promise<Entry[]>;
   getEntryById(id: string): Promise<Entry | null>;
   updateEntry(id: string, updates: Partial<Entry>): Promise<void>;
@@ -34,6 +34,15 @@ export interface IDatabaseService {
   getAllGroups(): Promise<Group[]>;
   updateGroup(groupId: string, updates: Partial<Group>): Promise<void>;
   deleteGroup(groupId: string): Promise<void>;
+
+  // 图片附件操作
+  // id 可选传入：导入/同步场景下复用源设备 id，便于跨设备按需拉取原图
+  addAttachment(attachment: Omit<Attachment, 'id'> & { id?: string }): Promise<Attachment>;
+  getAttachmentsByEntryId(entryId: string): Promise<Attachment[]>;
+  getAllAttachments(): Promise<Attachment[]>;
+  deleteAttachment(attachmentId: string): Promise<void>;
+  deleteAttachmentsByEntryId(entryId: string): Promise<void>;
+  updateAttachmentSort(attachmentIds: string[], sortOrder: number[]): Promise<void>;
 
   // 扩展查询
   getEntriesByTagId(tagId: string): Promise<Entry[]>;

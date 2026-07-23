@@ -14,6 +14,27 @@ export interface Entry {
   lastUsedAt?: number;
   copyCount: number;
   tags?: Tag[];
+  /** 图片附件列表（查询时联表填充，不影响文本属性） */
+  attachments?: Attachment[];
+}
+
+/** 图片附件展示模式 */
+export type AttachmentDisplayMode = 'inline' | 'badge';
+
+/** 图片附件 */
+export interface Attachment {
+  id: string;
+  entryId: string;
+  /** 原图相对路径（相对于 Filesystem 根目录） */
+  filePath: string;
+  /** 缩略图相对路径 */
+  thumbPath: string;
+  /** MIME 类型，如 image/jpeg */
+  mimeType: string;
+  /** 排序序号（小在前） */
+  sortOrder: number;
+  /** 创建时间戳 */
+  createdAt: number;
 }
 
 export interface Tag {
@@ -49,6 +70,8 @@ export interface Link {
 export interface RandomConfig {
   /** 每屏随机卡片数 */
   cardsPerPage: number;
+  /** 图片附件展示模式：inline=原图直接展示，badge=仅显示附件标识 */
+  attachmentDisplayMode: AttachmentDisplayMode;
 }
 
 // ==================== 待办相关类型 ====================
@@ -289,6 +312,7 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   random: {
     cardsPerPage: 7,
+    attachmentDisplayMode: 'inline',
   },
   todo: DEFAULT_TODO_CONFIG,
 };

@@ -2,7 +2,7 @@
  * Web 平台数据库服务
  * 使用 localStorage 存储，便于开发和测试
  */
-import type { Entry, Tag, Group, Link, Settings } from '@/types';
+import type { Entry, Tag, Group, Link, Settings, Attachment } from '@/types';
 import type { IDatabaseService } from './types';
 
 /** Simple content hash for deduplication */
@@ -26,21 +26,27 @@ class WebDatabaseService implements IDatabaseService {
 
   // ==================== 条目操作 ====================
 
-  async createEntry(entry: Omit<Entry, 'tags'>): Promise<Entry> {
+  async createEntry(entry: Omit<Entry, 'tags' | 'attachments'>): Promise<Entry> {
     const entries = this.getEntriesFromStorage();
-    const newEntry: Entry = { ...entry, tags: [] };
+    const newEntry: Entry = { ...entry, tags: [], attachments: [] };
     entries.unshift(newEntry);
     this.saveEntriesToStorage(entries);
     return newEntry;
   }
 
   async getAllEntries(): Promise<Entry[]> {
-    return this.getEntriesFromStorage();
+    const entries = this.getEntriesFromStorage();
+    this.fillAttachmentsForEntries(entries);
+    return entries;
   }
 
   async getEntryById(id: string): Promise<Entry | null> {
     const entries = this.getEntriesFromStorage();
-    return entries.find(e => e.id === id) || null;
+    const entry = entries.find(e => e.id === id) || null;
+    if (entry) {
+      entry.attachments = this.getAttachmentsFromStorage().filter(a => a.entryId === id);
+    }
+    return entry;
   }
 
   async updateEntry(id: string, updates: Partial<Entry>): Promise<void> {
@@ -56,6 +62,9 @@ class WebDatabaseService implements IDatabaseService {
     const entries = this.getEntriesFromStorage();
     const filtered = entries.filter(e => e.id !== id);
     this.saveEntriesToStorage(filtered);
+    // 级联删除附件记录
+    const attachments = this.getAttachmentsFromStorage();
+    this.saveAttachmentsToStorage(attachments.filter(a => a.entryId !== id));
   }
 
   async searchEntries(keyword: string, options?: { tagIds?: string[]; isStarred?: boolean }): Promise<Entry[]> {
@@ -73,12 +82,61 @@ class WebDatabaseService implements IDatabaseService {
       entries = entries.filter(e => e.isStarred === options.isStarred);
     }
 
+    this.fillAttachmentsForEntries(entries);
     return entries;
   }
 
   async getRecentEntries(limit: number): Promise<Entry[]> {
-    const entries = this.getEntriesFromStorage();
-    return entries.slice(0, limit);
+    const entries = this.getEntriesFromStorage().slice(0, limit);
+    this.fillAttachmentsForEntries(entries);
+    return entries;
+  }
+
+  // ==================== 图片附件操作 ====================
+
+  async addAttachment(attachment: Omit<Attachment, 'id'> & { id?: string }): Promise<Attachment> {
+    const attachments = this.getAttachmentsFromStorage();
+    const full: Attachment = { ...attachment, id: attachment.id || this.generateId() };
+    attachments.push(full);
+    this.saveAttachmentsToStorage(attachments);
+    return full;
+  }
+
+  async getAttachmentsByEntryId(entryId: string): Promise<Attachment[]> {
+    return this.getAttachmentsFromStorage()
+      .filter(a => a.entryId === entryId)
+      .sort((a, b) => a.sortOrder - b.sortOrder || a.createdAt - b.createdAt);
+  }
+
+  async getAllAttachments(): Promise<Attachment[]> {
+    return this.getAttachmentsFromStorage();
+  }
+
+  async deleteAttachment(attachmentId: string): Promise<void> {
+    const attachments = this.getAttachmentsFromStorage();
+    this.saveAttachmentsToStorage(attachments.filter(a => a.id !== attachmentId));
+  }
+
+  async deleteAttachmentsByEntryId(entryId: string): Promise<void> {
+    const attachments = this.getAttachmentsFromStorage();
+    this.saveAttachmentsToStorage(attachments.filter(a => a.entryId !== entryId));
+  }
+
+  async updateAttachmentSort(attachmentIds: string[], sortOrder: number[]): Promise<void> {
+    if (attachmentIds.length !== sortOrder.length) {
+      throw new Error('attachmentIds 和 sortOrder 长度不一致');
+    }
+    const attachments = this.getAttachmentsFromStorage();
+    const idToOrder = new Map<string, number>();
+    for (let i = 0; i < attachmentIds.length; i++) {
+      idToOrder.set(attachmentIds[i], sortOrder[i]);
+    }
+    for (const att of attachments) {
+      if (idToOrder.has(att.id)) {
+        att.sortOrder = idToOrder.get(att.id)!;
+      }
+    }
+    this.saveAttachmentsToStorage(attachments);
   }
 
   // ==================== 标签操作 ====================
@@ -223,13 +281,15 @@ class WebDatabaseService implements IDatabaseService {
   }
 
   async getEntriesByTagId(tagId: string): Promise<Entry[]> {
-    const entries = this.getEntriesFromStorage();
-    return entries.filter(e => e.tags?.some(t => t.id === tagId));
+    const entries = this.getEntriesFromStorage().filter(e => e.tags?.some(t => t.id === tagId));
+    this.fillAttachmentsForEntries(entries);
+    return entries;
   }
 
   async getEntriesByGroupId(groupId: string): Promise<Entry[]> {
-    const entries = this.getEntriesFromStorage();
-    return entries.filter(e => e.groupId === groupId);
+    const entries = this.getEntriesFromStorage().filter(e => e.groupId === groupId);
+    this.fillAttachmentsForEntries(entries);
+    return entries;
   }
 
   async getAllContentHashes(): Promise<Set<string>> {
@@ -309,6 +369,37 @@ class WebDatabaseService implements IDatabaseService {
 
   private saveGroupsToStorage(groups: Group[]): void {
     localStorage.setItem('yiyan_groups', JSON.stringify(groups));
+  }
+
+  private getAttachmentsFromStorage(): Attachment[] {
+    try {
+      const data = localStorage.getItem('yiyan_attachments');
+      return data ? JSON.parse(data) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  private saveAttachmentsToStorage(attachments: Attachment[]): void {
+    localStorage.setItem('yiyan_attachments', JSON.stringify(attachments));
+  }
+
+  /** 批量为 entries 填充 attachments */
+  private fillAttachmentsForEntries(entries: Entry[]): void {
+    if (entries.length === 0) return;
+    const all = this.getAttachmentsFromStorage();
+    const map = new Map<string, Attachment[]>();
+    for (const att of all) {
+      const list = map.get(att.entryId) || [];
+      list.push(att);
+      map.set(att.entryId, list);
+    }
+    for (const e of entries) {
+      const list = (map.get(e.id) || []).slice().sort(
+        (a, b) => a.sortOrder - b.sortOrder || a.createdAt - b.createdAt
+      );
+      e.attachments = list;
+    }
   }
 
   private generateId(): string {

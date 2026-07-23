@@ -142,6 +142,35 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* 附件小按钮：紧贴标题文字 */
+.fm-item-att-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 4px;
+  border: none;
+  border-radius: var(--radius-sm, 4px);
+  background: rgba(247, 103, 7, 0.12);
+  color: var(--color-accent-primary);
+  cursor: pointer;
+  flex-shrink: 0;
+  vertical-align: middle;
+  transition: background var(--duration-fast) var(--ease-out);
+}
+
+.fm-item-att-btn:hover {
+  background: rgba(247, 103, 7, 0.22);
+}
+
+.fm-att-count {
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
 }
 
 .fm-item-subtitle {

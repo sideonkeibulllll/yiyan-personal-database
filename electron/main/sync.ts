@@ -10,6 +10,7 @@ import { app } from 'electron';
 import * as https from 'https';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
+import * as fsp from 'fs/promises';
 import * as path from 'path';
 import { Bonjour } from 'bonjour-service';
 
@@ -95,7 +96,7 @@ export async function startServer(preferPort: number, handler: ReceiveHandler): 
   for (let port = preferPort; port < preferPort + 10; port++) {
     try {
       await new Promise<void>((resolve, reject) => {
-        server = https.createServer({ key, cert }, (req, res) => {
+        server = https.createServer({ key, cert }, async (req, res) => {
           // CORS
           res.setHeader('Access-Control-Allow-Origin', '*');
           res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -139,6 +140,44 @@ export async function startServer(preferPort: number, handler: ReceiveHandler): 
                 res.end(JSON.stringify({ action: 'reject', error: String(err) }));
               }
             });
+            return;
+          }
+
+          // === 阶段2：附件原图按需拉取 ===
+
+          // 附件原图列表端点
+          // 返回本地存在的所有原图附件 id（文件名格式：<attId>_orig.jpg）
+          if (req.url === '/attachment/list' && req.method === 'GET') {
+            try {
+              const ids = await listLocalOriginalIds();
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ ids }));
+            } catch (err) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: String(err) }));
+            }
+            return;
+          }
+
+          // 附件原图下载端点：/attachment/orig/:id
+          const origMatch = req.url?.match(/^\/attachment\/orig\/(.+)$/);
+          if (origMatch && req.method === 'GET') {
+            const attId = decodeURIComponent(origMatch[1]);
+            try {
+              const origFile = await findOriginalFile(attId);
+              if (!origFile) {
+                res.writeHead(404, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: '原图不存在' }));
+                return;
+              }
+              const buffer = await fsp.readFile(origFile);
+              const base64 = buffer.toString('base64');
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ id: attId, data: base64, mimeType: 'image/jpeg' }));
+            } catch (err) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: String(err) }));
+            }
             return;
           }
 
@@ -214,6 +253,59 @@ export async function stopServer(): Promise<void> {
 /** 获取当前服务端口 */
 export function getServerPort(): number {
   return currentPort;
+}
+
+/** ============================================================
+ *  阶段2：附件原图按需拉取（服务端）
+ *  ============================================================ */
+
+/** 扫描本地附件目录，返回所有原图附件 id（文件名：<attId>_orig.jpg） */
+async function listLocalOriginalIds(): Promise<string[]> {
+  const attachmentsDir = path.join(app.getPath('userData'), 'attachments');
+  const ids: string[] = [];
+  const scanDir = async (dir: string): Promise<void> => {
+    let entries: import('fs').Dirent[];
+    try {
+      entries = await fsp.readdir(dir, { withFileTypes: true });
+    } catch {
+      return; // 目录不存在
+    }
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await scanDir(fullPath);
+      } else if (entry.isFile() && entry.name.endsWith('_orig.jpg')) {
+        ids.push(entry.name.replace(/_orig\.jpg$/, ''));
+      }
+    }
+  };
+  await scanDir(attachmentsDir);
+  return ids;
+}
+
+/** 根据附件 id 查找原图文件完整路径 */
+async function findOriginalFile(attId: string): Promise<string | null> {
+  const attachmentsDir = path.join(app.getPath('userData'), 'attachments');
+  const targetName = `${attId}_orig.jpg`;
+  const findInDir = async (dir: string): Promise<string | null> => {
+    let entries: import('fs').Dirent[];
+    try {
+      entries = await fsp.readdir(dir, { withFileTypes: true });
+    } catch {
+      return null;
+    }
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        const found = await findInDir(fullPath);
+        if (found) return found;
+      } else if (entry.isFile() && entry.name === targetName) {
+        return fullPath;
+      }
+    }
+    return null;
+  };
+  return await findInDir(attachmentsDir);
 }
 
 /** 获取本机 IP（暴露给渲染进程） */

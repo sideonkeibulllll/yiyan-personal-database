@@ -568,6 +568,61 @@ async function handleNativeRequest(event: any): Promise<void> {
     return;
   }
 
+  // === 阶段2：附件原图按需拉取 ===
+
+  // 附件原图列表端点
+  if (event.path === '/attachment/list' && event.method === 'GET') {
+    try {
+      const { Filesystem, Directory } = await import('./filesystemAdapter');
+      const ids = await listLocalOriginalIdsNative(Filesystem, Directory);
+      await respondRequest(event.requestId, 200, JSON.stringify({ ids }), {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+      });
+    } catch (err) {
+      await respondRequest(event.requestId, 500, JSON.stringify({ error: String(err) }), {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+      });
+    }
+    return;
+  }
+
+  // 附件原图下载端点：/attachment/orig/:id
+  const origMatch = event.path?.match(/^\/attachment\/orig\/(.+)$/);
+  if (origMatch && event.method === 'GET') {
+    const attId = decodeURIComponent(origMatch[1]);
+    try {
+      const { Filesystem, Directory } = await import('./filesystemAdapter');
+      const origPath = await findOriginalFileNative(attId, Filesystem, Directory);
+      if (!origPath) {
+        await respondRequest(event.requestId, 404, JSON.stringify({ error: '原图不存在' }), {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        });
+        return;
+      }
+      const result = await Filesystem.readFile({
+        path: origPath,
+        directory: Directory.Data,
+      });
+      await respondRequest(event.requestId, 200, JSON.stringify({
+        id: attId,
+        data: result.data,
+        mimeType: 'image/jpeg',
+      }), {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+      });
+    } catch (err) {
+      await respondRequest(event.requestId, 500, JSON.stringify({ error: String(err) }), {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+      });
+    }
+    return;
+  }
+
   // 未知路由
   await respondRequest(event.requestId, 404, 'Not Found');
 }
@@ -596,11 +651,35 @@ export async function stopLocalServer(): Promise<void> {
 
 /**
  * 生成发送用 zip 的 base64 数据
+ *
+ * 增量原图策略：传 device 时，先查接收方有哪些原图，
+ * 只把本地有、接收方没有的原图打包进 zip（真增量，接收方导入即有原图）
+ *
+ * @param device 目标设备；不传则不打包任何原图（仅文本+缩略图）
  */
-export async function prepareZipForSend(): Promise<{ base64: string; filename: string; size: number }> {
+export async function prepareZipForSend(device?: DiscoveredDevice): Promise<{ base64: string; filename: string; size: number }> {
+  // 计算要打包的原图集合：本地附件中接收方没有的
+  let includeOrigIds: Set<string> | undefined;
+  if (device) {
+    try {
+      const remoteIds = await listRemoteOriginalIds(device);
+      const remoteSet = new Set(remoteIds);
+      const { getDatabase } = await import('./database');
+      const db = await getDatabase();
+      const localAtts = await db.getAllAttachments();
+      // 本地有原图文件且接收方没有的 att id
+      includeOrigIds = new Set(
+        localAtts.filter(a => !remoteSet.has(a.id)).map(a => a.id)
+      );
+    } catch (err) {
+      // 查询失败：降级为不打包原图（接收方靠发送后 pullMissingOriginals 补齐）
+      console.warn('[sync] 查询接收方原图清单失败，降级不打包原图:', err);
+    }
+  }
+
   // 复用 backupService 创建备份
   const { createBackup } = await import('./backupService');
-  await createBackup('manual');
+  await createBackup('manual', includeOrigIds);
 
   // 读取最新创建的备份
   const { listBackups } = await import('./backupService');
@@ -621,4 +700,231 @@ export async function prepareZipForSend(): Promise<{ base64: string; filename: s
     filename: latest.filename,
     size: latest.size,
   };
+}
+
+/** ============================================================
+ *  阶段2：附件原图按需拉取（原生服务端辅助函数）
+ *  ============================================================ */
+
+/** 扫描本地附件目录，返回所有原图附件 id（文件名：<attId>_orig.jpg） */
+async function listLocalOriginalIdsNative(
+  Filesystem: any,
+  Directory: any,
+): Promise<string[]> {
+  const ids: string[] = [];
+  const scanDir = async (dirPath: string): Promise<void> => {
+    let result: { files: { name: string; type: string }[] };
+    try {
+      result = await Filesystem.readdir({ path: dirPath, directory: Directory.Data });
+    } catch {
+      return; // 目录不存在
+    }
+    for (const f of result.files) {
+      if (f.type === 'directory') {
+        await scanDir(`${dirPath}/${f.name}`);
+      } else if (f.type === 'file' && f.name.endsWith('_orig.jpg')) {
+        ids.push(f.name.replace(/_orig\.jpg$/, ''));
+      }
+    }
+  };
+  await scanDir('attachments');
+  return ids;
+}
+
+/** 根据附件 id 查找原图文件相对路径（原生端实现） */
+async function findOriginalFileNative(
+  attId: string,
+  Filesystem: any,
+  Directory: any,
+): Promise<string | null> {
+  const targetName = `${attId}_orig.jpg`;
+  const findInDir = async (dirPath: string): Promise<string | null> => {
+    let result: { files: { name: string; type: string }[] };
+    try {
+      result = await Filesystem.readdir({ path: dirPath, directory: Directory.Data });
+    } catch {
+      return null;
+    }
+    for (const f of result.files) {
+      const childPath = `${dirPath}/${f.name}`;
+      if (f.type === 'directory') {
+        const found = await findInDir(childPath);
+        if (found) return found;
+      } else if (f.type === 'file' && f.name === targetName) {
+        return childPath;
+      }
+    }
+    return null;
+  };
+  return await findInDir('attachments');
+}
+
+/** ============================================================
+ *  阶段2：附件原图按需拉取（客户端）
+ *  ============================================================ */
+
+/**
+ * 查询目标设备拥有的原图附件 id 列表
+ *
+ * @param device 目标设备（已通过握手验证）
+ * @returns 目标设备上存在的原图附件 id 数组；查询失败返回空数组
+ */
+export async function listRemoteOriginalIds(device: DiscoveredDevice): Promise<string[]> {
+  const protocol = device.type === 'phone' ? 'http' : 'https';
+  const url = `${protocol}://${device.ip}:${device.port}/attachment/list`;
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) return [];
+    const data = await resp.json();
+    return Array.isArray(data.ids) ? data.ids : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 从目标设备拉取指定附件的原图，写入本地文件系统
+ *
+ * 协议选择：手机端用 HTTP（插件），电脑端用 HTTPS（Electron）
+ * 失败时回退尝试另一协议
+ *
+ * @param device 目标设备
+ * @param attId 附件 id（跨设备一致）
+ * @param localFilePath 本地存储路径（如 attachments/<entryId>/<attId>_orig.jpg）
+ * @returns 成功返回 true，失败返回 false
+ */
+export async function fetchOriginalAttachment(
+  device: DiscoveredDevice,
+  attId: string,
+  localFilePath: string,
+): Promise<boolean> {
+  const tryFetch = async (protocol: 'https' | 'http'): Promise<boolean> => {
+    try {
+      const url = `${protocol}://${device.ip}:${device.port}/attachment/orig/${encodeURIComponent(attId)}`;
+      const resp = await fetch(url);
+      if (!resp.ok) return false;
+      const data = await resp.json();
+      if (!data.data) return false;
+
+      const { Filesystem, Directory } = await import('./filesystemAdapter');
+      await Filesystem.writeFile({
+        path: localFilePath,
+        data: data.data,
+        directory: Directory.Data,
+        recursive: true,
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  // 根据设备类型选主协议
+  const primaryProtocol = device.type === 'phone' ? 'http' : 'https';
+  if (await tryFetch(primaryProtocol)) return true;
+
+  // 主协议失败，回退另一协议
+  const fallbackProtocol = primaryProtocol === 'https' ? 'http' : 'https';
+  return await tryFetch(fallbackProtocol);
+}
+
+/**
+ * 检查本地是否存在指定附件的原图文件
+ *
+ * @param localFilePath 附件原图的本地路径
+ * @returns 存在返回 true
+ */
+export async function hasLocalOriginal(localFilePath: string): Promise<boolean> {
+  const { Filesystem, Directory } = await import('./filesystemAdapter');
+  try {
+    await Filesystem.readFile({
+      path: localFilePath,
+      directory: Directory.Data,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** ============================================================
+ *  待拉取原图队列（持久化到 localStorage）
+ *
+ *  设计：用户点开大图发现本地只有缩略图 → 入队；
+ *  下次同步连接到任意有原图的设备时，批量拉取，拉成功的出队。
+ *  避免时刻保持连接，省电。
+ *  ============================================================ */
+
+const MISSING_ORIGINALS_KEY = 'yiyan_missing_originals';
+
+/** 待拉取原图条目 */
+export interface MissingOriginalEntry {
+  /** 附件 id（跨设备一致） */
+  attId: string;
+  /** 本地存储路径（如 attachments/<entryId>/<attId>_orig.jpg） */
+  localFilePath: string;
+  /** 入队时间戳 */
+  addedAt: number;
+}
+
+/** 读取待拉取队列 */
+export function getMissingOriginals(): MissingOriginalEntry[] {
+  try {
+    const stored = localStorage.getItem(MISSING_ORIGINALS_KEY);
+    if (stored) return JSON.parse(stored) as MissingOriginalEntry[];
+  } catch {
+    // ignore
+  }
+  return [];
+}
+
+/** 加入待拉取队列（幂等：同 attId 重复入队不会重复） */
+export function addMissingOriginal(attId: string, localFilePath: string): void {
+  const list = getMissingOriginals();
+  if (list.some(item => item.attId === attId)) return;
+  list.push({ attId, localFilePath, addedAt: Date.now() });
+  localStorage.setItem(MISSING_ORIGINALS_KEY, JSON.stringify(list));
+}
+
+/** 从队列移除（拉取成功后调用） */
+export function removeMissingOriginal(attId: string): void {
+  const list = getMissingOriginals().filter(item => item.attId !== attId);
+  localStorage.setItem(MISSING_ORIGINALS_KEY, JSON.stringify(list));
+}
+
+/**
+ * 向指定设备批量拉取队列里对方拥有的原图
+ *
+ * 流程：
+ * 1. 读取本地待拉取队列
+ * 2. 查询目标设备拥有的原图 id 列表
+ * 3. 取交集，逐个拉取，拉成功的从队列移除
+ *
+ * 「任意有原图的设备」策略：不限定源端，谁有就向谁拉，最鲁棒
+ *
+ * @param device 已连接的目标设备
+ * @returns { pulled: 拉取成功数, remaining: 队列剩余数 }
+ */
+export async function pullMissingOriginals(
+  device: DiscoveredDevice,
+): Promise<{ pulled: number; remaining: number }> {
+  const queue = getMissingOriginals();
+  if (queue.length === 0) return { pulled: 0, remaining: 0 };
+
+  const remoteIds = await listRemoteOriginalIds(device);
+  if (remoteIds.length === 0) return { pulled: 0, remaining: queue.length };
+
+  const remoteSet = new Set(remoteIds);
+  let pulled = 0;
+
+  for (const item of queue) {
+    if (!remoteSet.has(item.attId)) continue;
+    const ok = await fetchOriginalAttachment(device, item.attId, item.localFilePath);
+    if (ok) {
+      removeMissingOriginal(item.attId);
+      pulled++;
+    }
+  }
+
+  return { pulled, remaining: getMissingOriginals().length };
 }

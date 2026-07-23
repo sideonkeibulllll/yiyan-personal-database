@@ -13,6 +13,9 @@ import { BottomNav } from '@/components/BottomNav';
 import { QuickMenu } from './QuickMenu';
 import { TagSelector } from '@/components/TagSelector';
 import { AIChatPanel } from '@/components/AIChatPanel';
+import { ImageViewer } from '@/components/ImageViewer';
+import { readThumbAsSrc } from '@/services/attachmentService';
+import { hasLocalOriginal, addMissingOriginal } from '@/services/syncService';
 import type { Entry } from '@/types';
 import './RandomPage.css';
 
@@ -53,8 +56,14 @@ const CloseIcon = () => (
 
 const InboxIcon = () => (
   <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-    <polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/>
-    <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>
+    <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
+    <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
+  </svg>
+);
+
+const PaperclipIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
   </svg>
 );
 
@@ -66,11 +75,17 @@ export function RandomPage() {
   const tags = useTagStore(state => state.tags);
   const settings = useSettingsStore(state => state.settings);
   const cardsPerPage = settings.random?.cardsPerPage ?? 7;
+  const attachmentMode = settings.random?.attachmentDisplayMode ?? 'inline';
 
   // 当前展示的一批条目
   const [currentEntries, setCurrentEntries] = useState<Entry[]>([]);
   // 上次抽取的 id 列表，用于避免连续两屏重复
   const lastIdsRef = useRef<Set<string>>(new Set());
+
+  // 每条 entry 的缩略图 src 数组（与 entry.attachments 顺序一致）
+  const [thumbSrcsByEntry, setThumbSrcsByEntry] = useState<Record<string, string[]>>({});
+  // 图片查看器状态
+  const [viewerState, setViewerState] = useState<{ images: string[]; startIndex: number } | null>(null);
 
   const [showMenu, setShowMenu] = useState(false);
   const [menuEntry, setMenuEntry] = useState<Entry | null>(null);
@@ -150,6 +165,55 @@ export function RandomPage() {
       setIsLoading(false);
     }
   }, [entries, getRandomEntries]);
+
+  // 加载当前批次的缩略图
+  useEffect(() => {
+    let cancelled = false;
+    const loadThumbs = async () => {
+      const entriesWithAtts = currentEntries.filter(
+        e => e.attachments && e.attachments.length > 0
+      );
+      if (entriesWithAtts.length === 0) {
+        setThumbSrcsByEntry({});
+        return;
+      }
+      const map: Record<string, string[]> = {};
+      await Promise.all(entriesWithAtts.map(async (entry) => {
+        const srcs = await Promise.all(
+          (entry.attachments || []).map(a => readThumbAsSrc(a.thumbPath))
+        );
+        if (!cancelled) map[entry.id] = srcs.filter(Boolean);
+      }));
+      if (!cancelled) setThumbSrcsByEntry(map);
+    };
+    loadThumbs();
+    return () => { cancelled = true; };
+  }, [currentEntries]);
+
+  // 打开图片查看器
+  const openViewer = useCallback((entryId: string, startIndex: number) => {
+    const images = thumbSrcsByEntry[entryId] || [];
+    if (images.length === 0) return;
+    setViewerState({ images, startIndex });
+
+    // 点开大图时，检查本地是否有原图；缺失的加入待拉取队列
+    // 队列会在下次同步连接到任意有原图的设备时批量拉取（省电，不时刻保持连接）
+    const entry = currentEntries.find(e => e.id === entryId);
+    if (entry?.attachments) {
+      // 不阻塞 UI，异步检查
+      Promise.all(
+        entry.attachments.map(async (att) => {
+          const has = await hasLocalOriginal(att.filePath);
+          if (!has) addMissingOriginal(att.id, att.filePath);
+        })
+      ).catch(() => { /* ignore */ });
+    }
+  }, [thumbSrcsByEntry, currentEntries]);
+
+  // 阻止冒泡（避免触发卡片复制/长按）
+  const stopPropagation = useCallback((e: React.SyntheticEvent) => {
+    e.stopPropagation();
+  }, []);
 
   // 复制内容
   const handleCopy = useCallback(async (entry: Entry) => {
@@ -344,6 +408,32 @@ export function RandomPage() {
                         {entry.content}
                       </div>
 
+                      {/* 图片附件展示 - inline 模式：纵向堆叠在文本下方 */}
+                      {attachmentMode === 'inline'
+                        && entry.attachments
+                        && entry.attachments.length > 0
+                        && (thumbSrcsByEntry[entry.id] || []).length > 0 && (
+                        <div
+                          className="card-attachments"
+                          onClick={stopPropagation}
+                          onMouseDown={stopPropagation}
+                          onMouseUp={stopPropagation}
+                          onTouchStart={stopPropagation}
+                          onTouchEnd={stopPropagation}
+                        >
+                          {thumbSrcsByEntry[entry.id].map((src, idx) => (
+                            <img
+                              key={idx}
+                              src={src}
+                              alt={`附件 ${idx + 1}`}
+                              className="card-attachment-img"
+                              loading="lazy"
+                              onClick={() => openViewer(entry.id, idx)}
+                            />
+                          ))}
+                        </div>
+                      )}
+
                       <div className="card-meta">
                         {entry.isStarred && (
                           <span className="meta-star"><StarFilledIcon /></span>
@@ -354,6 +444,21 @@ export function RandomPage() {
                               <span key={tag.id} className="meta-tag">#{tag.name}</span>
                             ))}
                           </div>
+                        )}
+                        {/* 图片附件展示 - badge 模式：仅显示附件数量徽标 */}
+                        {attachmentMode === 'badge'
+                          && entry.attachments
+                          && entry.attachments.length > 0 && (
+                          <span
+                            className="meta-attachment-badge"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openViewer(entry.id, 0);
+                            }}
+                            onTouchStart={(e) => e.stopPropagation()}
+                          >
+                            <PaperclipIcon /> ×{entry.attachments.length}
+                          </span>
                         )}
                         <span className="meta-time">
                           {new Date(entry.createdAt).toLocaleDateString('zh-CN')}
@@ -484,6 +589,15 @@ export function RandomPage() {
             />
           </div>
         </div>
+      )}
+
+      {/* 图片查看器 */}
+      {viewerState && (
+        <ImageViewer
+          images={viewerState.images}
+          startIndex={viewerState.startIndex}
+          onClose={() => setViewerState(null)}
+        />
       )}
 
       <BottomNav />
