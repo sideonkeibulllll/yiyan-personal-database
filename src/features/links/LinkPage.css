@@ -19,7 +19,7 @@
   align-items: center;
   justify-content: center;
   border-radius: var(--radius-sm);
-  background: rgba(26, 23, 20, 0.6);
+  background: rgba(40, 41, 47, 0.6);
   border: 1px solid var(--color-border-primary);
   color: var(--color-text-secondary);
   cursor: pointer;
@@ -190,7 +190,7 @@
   to { transform: rotate(360deg); }
 }
 
-/* Ìí¼ÓÁ¬ÏßÃæ°å */
+/* ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ */
 .add-link-btn {
   width: 32px;
   height: 32px;

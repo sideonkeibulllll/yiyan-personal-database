@@ -9,7 +9,7 @@
   padding: var(--space-2) var(--space-4);
   padding-bottom: calc(var(--space-2) + var(--safe-bottom));
   z-index: 100;
-  box-shadow: 0 -1px 20px rgba(203, 185, 159, 0.06), 0 -1px 4px rgba(203, 185, 159, 0.04);
+  box-shadow: 0 -1px 20px rgba(247, 103, 7, 0.06), 0 -1px 4px rgba(247, 103, 7, 0.04);
 }
 
 .nav-item {

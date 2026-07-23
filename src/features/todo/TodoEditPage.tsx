@@ -41,7 +41,7 @@ export function TodoEditPage() {
   const [saving, setSaving] = useState(false);
   const [showTagEditor, setShowTagEditor] = useState(false);
   const [newTagName, setNewTagName] = useState('');
-  const [newTagColor, setNewTagColor] = useState('#cbb99f');
+  const [newTagColor, setNewTagColor] = useState('#f76707');
 
   const updateTodo = useTodoStore(state => state.updateTodo);
   const addTodo = useTodoStore(state => state.addTodo);
@@ -216,18 +216,60 @@ export function TodoEditPage() {
           {/* 标签 */}
           <div className="form-group">
             <label className="form-label">标签</label>
+            {/* 已选标签区（带小x删除） */}
+            {selectedTagIds.length > 0 && (
+              <div className="selected-tags-list">
+                {selectedTagIds.map(tagId => {
+                  const tag = tags.find(t => t.id === tagId);
+                  if (!tag) return null;
+                  return (
+                    <div
+                      key={tagId}
+                      className="selected-tag-chip"
+                      style={{ borderColor: tag.color || undefined, background: tag.color ? tag.color + '22' : undefined }}
+                    >
+                      <span
+                        className="selected-tag-color-dot"
+                        style={{ background: tag.color || 'var(--color-text-tertiary)' }}
+                      />
+                      <span className="selected-tag-name">{tag.name}</span>
+                      <button
+                        className="selected-tag-remove"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedTagIds(prev => prev.filter(id => id !== tagId));
+                        }}
+                        title="移除标签"
+                      >
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M18 6 6 18M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {/* 可选标签列表（单击选中，双击删除整个标签） */}
             <div className="tag-list">
               {tags.map(tag => (
                 <button
                   key={tag.id}
                   className={`tag-chip ${selectedTagIds.includes(tag.id) ? 'active' : ''}`}
-                  style={tag.color ? { borderColor: tag.color } : undefined}
+                  style={tag.color ? { borderColor: selectedTagIds.includes(tag.id) ? tag.color : undefined } : undefined}
                   onClick={() => {
                     setSelectedTagIds(prev =>
                       prev.includes(tag.id)
                         ? prev.filter(t => t !== tag.id)
-                        : [...prev, tag.id]
+                        : [...prev, tag.id] // 追加到末尾：最近添加的在右侧
                     );
+                  }}
+                  onDoubleClick={() => {
+                    // 双击删除整个标签（从标签池中删除）
+                    if (confirm(`确定删除标签 "${tag.name}" 吗？`)) {
+                      useTodoTagStore.getState().deleteTag(tag.id);
+                      setSelectedTagIds(prev => prev.filter(t => t !== tag.id));
+                    }
                   }}
                 >
                   <span

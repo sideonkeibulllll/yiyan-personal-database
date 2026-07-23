@@ -20,6 +20,8 @@ export interface Tag {
   id: string;
   name: string;
   createdAt: number;
+  /** 标签颜色（hex 或 CSS 颜色名） */
+  color?: string;
   /** 智能标签：保存的搜索条件 */
   isSmart?: boolean;
   /** 智能标签的搜索条件 */

@@ -124,8 +124,8 @@
 }
 
 .message.user .message-bubble {
-  background: linear-gradient(135deg, var(--color-copper-primary), var(--color-accent-primary));
-  color: var(--color-bg-primary);
+  background: var(--color-accent-primary);
+  color: #ffffff;
   border-bottom-right-radius: var(--radius-xs);
 }
 
@@ -155,7 +155,7 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--color-copper-primary);
+  background: var(--color-accent-primary);
   animation: bounce 1.4s infinite ease-in-out;
 }
 
@@ -193,8 +193,8 @@
   padding: var(--space-2) var(--space-4);
   border-radius: var(--radius-md);
   font-size: var(--text-sm);
-  color: var(--color-bg-primary);
-  background: linear-gradient(135deg, var(--color-copper-primary), var(--color-accent-primary));
+  color: #ffffff;
+  background: var(--color-accent-primary);
   cursor: pointer;
   transition: all var(--duration-fast) var(--ease-out);
 }

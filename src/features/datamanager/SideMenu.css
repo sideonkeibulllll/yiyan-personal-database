@@ -118,7 +118,7 @@
   height: 6px;
   border-radius: var(--radius-full);
   background: var(--color-star);
-  box-shadow: 0 0 8px var(--color-star), 0 0 16px rgba(247, 155, 69, 0.3);
+  box-shadow: 0 0 8px var(--color-star), 0 0 16px rgba(247, 103, 7, 0.3);
 }
 
 .dm-side-menu-footer {

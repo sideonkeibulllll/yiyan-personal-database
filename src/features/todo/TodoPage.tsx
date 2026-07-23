@@ -11,6 +11,18 @@ import { BottomNav } from '@/components/BottomNav';
 import type { Todo } from '@/types';
 import './TodoPage.css';
 
+/** 暖色调色板（8 种交替分配，与待办管理器一致） */
+const WARM_PALETTE = [
+  '#f76707', // 鲜橙
+  '#f59f00', // 琥珀金
+  '#fa5252', // 珊瑚红
+  '#e67700', // 暗琥珀
+  '#d6336c', // 暖玫瑰
+  '#f08c00', // 金橙
+  '#c04509', // 深铜
+  '#e8590c', // 焦橙
+];
+
 /** 格式化日期为 YYYY-MM-DD */
 function formatDate(date: Date): string {
   const y = date.getFullYear();
@@ -165,10 +177,11 @@ export function TodoPage() {
           {isLoading ? (
             <div className="todo-loading">加载中...</div>
           ) : sortedTodos.length > 0 ? (
-            sortedTodos.map(todo => (
+            sortedTodos.map((todo, index) => (
               <TodoItem
                 key={todo.id}
                 todo={todo}
+                index={index}
                 now={now}
                 onToggleDone={() => toggleDone(todo.id)}
                 onDelete={() => deleteTodo(todo.id)}
@@ -214,19 +227,24 @@ export function TodoPage() {
 /** 单个待办项 */
 interface TodoItemProps {
   todo: Todo;
+  index: number;
   now: number;
   onToggleDone: () => void;
   onDelete: () => void;
   onEdit: () => void;
 }
 
-function TodoItem({ todo, now, onToggleDone, onDelete, onEdit }: TodoItemProps) {
+function TodoItem({ todo, index, now, onToggleDone, onDelete, onEdit }: TodoItemProps) {
   const [showMenu, setShowMenu] = useState(false);
   const [swipeOffset, setSwipeOffset] = useState(0);
   const touchStartX = useRef(0);
   const touchStartY = useRef(0);
+  const mouseStartX = useRef(0);
+  const mouseStartY = useRef(0);
   const isSwiping = useRef(false);
+  const isMouseDown = useRef(false);
 
+  // 触摸事件
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
     touchStartX.current = e.touches[0].clientX;
     touchStartY.current = e.touches[0].clientY;
@@ -252,14 +270,64 @@ function TodoItem({ todo, now, onToggleDone, onDelete, onEdit }: TodoItemProps) 
     isSwiping.current = false;
   }, [swipeOffset, onToggleDone, onDelete]);
 
+  // 鼠标拖拽事件（桌面端滑动支持）
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    // 仅左键
+    if (e.button !== 0) return;
+    mouseStartX.current = e.clientX;
+    mouseStartY.current = e.clientY;
+    isMouseDown.current = true;
+    isSwiping.current = false;
+  }, []);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!isMouseDown.current) return;
+    const dx = e.clientX - mouseStartX.current;
+    const dy = e.clientY - mouseStartY.current;
+    if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 10) {
+      isSwiping.current = true;
+      setSwipeOffset(Math.max(-80, Math.min(80, dx)));
+    }
+  }, []);
+
+  const handleMouseUp = useCallback(() => {
+    if (!isMouseDown.current) return;
+    if (swipeOffset <= -80) {
+      onToggleDone();
+    } else if (swipeOffset >= 80) {
+      onDelete();
+    }
+    setSwipeOffset(0);
+    isMouseDown.current = false;
+    // 延迟重置 isSwiping，防止 click 事件立即触发
+    setTimeout(() => { isSwiping.current = false; }, 100);
+  }, [swipeOffset, onToggleDone, onDelete]);
+
+  const handleMouseLeave = useCallback(() => {
+    if (isMouseDown.current && isSwiping.current) {
+      // 拖拽中离开元素，仍按当前偏移触发动作
+      if (swipeOffset <= -80) {
+        onToggleDone();
+      } else if (swipeOffset >= 80) {
+        onDelete();
+      }
+    }
+    if (isMouseDown.current) {
+      setSwipeOffset(0);
+      isMouseDown.current = false;
+      setTimeout(() => { isSwiping.current = false; }, 100);
+    }
+  }, [swipeOffset, onToggleDone, onDelete]);
+
   // 倒计时显示
   const countdown = todo.endTime && todo.endTime > now ? todo.endTime - now : 0;
   const showCountdown = todo.status === 'pending' && countdown > 0;
 
   const isDone = todo.status === 'done';
 
-  // 获取标签颜色（如果有标签）
+  // 获取卡片颜色：标签色优先，无标签则轮换暖色调色板
   const tagColor = todo.tags && todo.tags.length > 0 ? todo.tags[0].color : undefined;
+  const cardColor = tagColor || WARM_PALETTE[index % WARM_PALETTE.length];
 
   // 复制内容
   const handleCopy = useCallback(async (e: React.MouseEvent) => {
@@ -270,12 +338,11 @@ function TodoItem({ todo, now, onToggleDone, onDelete, onEdit }: TodoItemProps) 
     } catch {}
   }, [todo.title]);
 
-  // 添加到录入主页面
+  // 添加到录入主页面（不跳转，通过自定义事件通知主页展示）
   const handleAddToInput = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
-    // 将待办标题存入 sessionStorage，HomePage 加载时读取
-    sessionStorage.setItem('__yiyan_todo_to_input__', todo.title);
-    window.location.href = '/';
+    // 使用自定义事件通知主页（不刷新页面）
+    window.dispatchEvent(new CustomEvent('yiyan-add-to-input', { detail: todo.title }));
     setShowMenu(false);
   }, [todo.title]);
 
@@ -285,15 +352,20 @@ function TodoItem({ todo, now, onToggleDone, onDelete, onEdit }: TodoItemProps) 
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
+      onMouseDown={handleMouseDown}
+      onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUp}
+      onMouseLeave={handleMouseLeave}
       onClick={() => !isSwiping.current && setShowMenu(!showMenu)}
       onContextMenu={e => e.preventDefault()}
       style={{
         transform: `translateX(${swipeOffset}px)`,
-        ...(tagColor ? { background: tagColor } : {}),
+        background: cardColor,
+        borderLeft: `3px solid ${cardColor}`,
       }}
     >
       {/* 半透明隔膜层，确保文字可读 */}
-      {tagColor && <div className="todo-item-overlay" />}
+      <div className="todo-item-overlay" />
 
       <div className="todo-item-main">
         <div className="todo-item-header">

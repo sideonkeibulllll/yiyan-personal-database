@@ -121,6 +121,7 @@ export function HomePage() {
   const [todoIsToday, setTodoIsToday] = useState(true);
   const [showTodoAdvanced, setShowTodoAdvanced] = useState(false);
   const [lastTodoId, setLastTodoId] = useState<string | null>(null);
+  const [todoReminder, setTodoReminder] = useState<string | null>(null); // 修复2：待办添加到录入的提醒条
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const modeTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const navigate = useNavigate();
@@ -137,8 +138,9 @@ export function HomePage() {
     }
   }, [mode]);
 
-  // 读取从待办页面传来的「添加到录入」内容
+  // 读取从待办页面传来的「添加到录入」内容（兼容两种方式：自定义事件 + sessionStorage）
   useEffect(() => {
+    // 方式1：sessionStorage（页面刷新场景）
     const pendingTodo = sessionStorage.getItem('__yiyan_todo_to_input__');
     if (pendingTodo) {
       setContent(pendingTodo);
@@ -147,6 +149,21 @@ export function HomePage() {
         textareaRef.current.focus();
       }
     }
+    // 方式2：自定义事件（SPA 不刷新页面场景）
+    const handleAddToInput = (e: Event) => {
+      const detail = (e as CustomEvent<string>).detail;
+      if (detail) {
+        setContent(detail);
+        setTodoReminder(detail); // 修复2：显示提醒条
+        if (textareaRef.current) {
+          textareaRef.current.focus();
+        }
+      }
+    };
+    window.addEventListener('yiyan-add-to-input', handleAddToInput);
+    return () => {
+      window.removeEventListener('yiyan-add-to-input', handleAddToInput);
+    };
   }, []);
 
   // 显示轻提示
@@ -194,7 +211,8 @@ export function HomePage() {
       setContent('');
       showToastMessage('待办已创建');
 
-      // 3秒后弹出「添加更多信息」提示
+      // 修复5：待办模式发送后确保回到input模式，不出现"为上一条添加信息"
+      setMode('input');
       if (modeTimerRef.current) {
         clearTimeout(modeTimerRef.current);
       }
@@ -322,6 +340,22 @@ export function HomePage() {
         <div className="center-area">
         {mode === 'input' ? (
           <div className="input-section">
+            {/* 修复2：待办添加到录入的提醒条 */}
+            {todoReminder && (
+              <div className="todo-reminder-bar glass">
+                <span className="reminder-icon">📋</span>
+                <span className="reminder-text">{todoReminder}</span>
+                <button
+                  className="reminder-close"
+                  onClick={() => setTodoReminder(null)}
+                  title="关闭提醒"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M18 6 6 18M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            )}
             <div className="input-wrapper glass">
               <textarea
                 ref={textareaRef}

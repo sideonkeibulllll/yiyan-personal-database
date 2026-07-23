@@ -7,9 +7,10 @@ import { useNavigate } from 'react-router-dom';
 import { useEntryStore } from '@/stores/entryStore';
 import { useTagStore } from '@/stores/tagStore';
 import { useTodoStore } from '@/stores/todoStore';
+import { getDatabase } from '@/services/database';
 import { BottomNav } from '@/components/BottomNav';
 import { QuickMenu } from '@/features/random/QuickMenu';
-import type { Entry, Todo, TodoSearchTimeFilter } from '@/types';
+import type { Entry, Todo, TodoSearchTimeFilter, Tag } from '@/types';
 import './SearchPage.css';
 
 /** SVG icons (stroke-based, viewBox="0 0 24 24", strokeWidth="1.5") */
@@ -58,6 +59,12 @@ export function SearchPage() {
   const [showMenu, setShowMenu] = useState(false);
   const longPressTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
+  // 修复7：标签搜索模式 + 关联标签推荐
+  const [tagSearchMode, setTagSearchMode] = useState(false); // 是否处于标签搜索模式
+  const [matchedTags, setMatchedTags] = useState<Tag[]>([]); // 关键字匹配的标签
+  const [activeTagId, setActiveTagId] = useState<string | null>(null); // 当前激活的标签
+  const [linkedTags, setLinkedTags] = useState<{ tag: Tag; count: number }[]>([]); // 关联标签推荐
+
   const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
   const search = useEntryStore(state => state.search);
@@ -69,6 +76,68 @@ export function SearchPage() {
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
+
+  // 修复7：加载关联标签推荐 — 找出拥有该标签的数据还链接了哪些其他标签
+  const loadLinkedTags = useCallback(async (tagId: string) => {
+    try {
+      const db = await getDatabase();
+      const entriesWithTag = await db.getEntriesByTagId(tagId);
+      const linkedTagCount = new Map<string, number>();
+
+      for (const entry of entriesWithTag) {
+        if (entry.tags) {
+          for (const tag of entry.tags) {
+            if (tag.id !== tagId) {
+              linkedTagCount.set(tag.id, (linkedTagCount.get(tag.id) || 0) + 1);
+            }
+          }
+        }
+      }
+
+      // 获取关联标签的完整信息并按数量排序
+      const allTags = await db.getAllTags();
+      const linked = Array.from(linkedTagCount.entries())
+        .map(([id, count]) => ({ tag: allTags.find(t => t.id === id)!, count }))
+        .filter(item => item.tag)
+        .sort((a, b) => b.count - a.count);
+
+      setLinkedTags(linked);
+    } catch (err) {
+      console.error('加载关联标签失败:', err);
+      setLinkedTags([]);
+    }
+  }, []);
+
+  // 修复7：标签搜索 — 关键字匹配标签
+  const handleTagSearch = useCallback(async (kw: string) => {
+    if (!kw.trim()) {
+      setMatchedTags([]);
+      setTagSearchMode(false);
+      return;
+    }
+    const lower = kw.toLowerCase();
+    const matched = tags.filter(tag => tag.name.toLowerCase().includes(lower));
+    setMatchedTags(matched);
+    setTagSearchMode(matched.length > 0);
+  }, [tags]);
+
+  // 修复7：点击匹配的标签 → 列出该标签下所有卡片
+  const handleTagClick = useCallback(async (tagId: string) => {
+    setActiveTagId(tagId);
+    setKeyword('');
+    setMatchedTags([]);
+    setTagSearchMode(false);
+    setSelectedTagIds([tagId]);
+    // 加载关联标签推荐
+    loadLinkedTags(tagId);
+  }, [loadLinkedTags]);
+
+  // 修复7：切换关联标签
+  const handleSwitchTag = useCallback(async (tagId: string) => {
+    setActiveTagId(tagId);
+    setSelectedTagIds([tagId]);
+    loadLinkedTags(tagId);
+  }, [loadLinkedTags]);
 
   // 执行搜索
   const handleSearch = useCallback(async () => {
@@ -199,14 +268,55 @@ export function SearchPage() {
             ref={inputRef}
             type="text"
             className="search-input"
-            placeholder={todoMode ? "搜索待办..." : "搜索内容..."}
+            placeholder={todoMode ? "搜索待办..." : "搜索内容或标签..."}
             value={keyword}
-            onChange={e => setKeyword(e.target.value)}
+            onChange={e => {
+              setKeyword(e.target.value);
+              if (!todoMode) handleTagSearch(e.target.value);
+            }}
           />
           {keyword && (
-            <button className="clear-btn" onClick={() => setKeyword('')}><CloseIcon /></button>
+            <button className="clear-btn" onClick={() => { setKeyword(''); setMatchedTags([]); setTagSearchMode(false); }}><CloseIcon /></button>
           )}
         </div>
+
+        {/* 修复7：标签搜索匹配结果 */}
+        {!todoMode && tagSearchMode && matchedTags.length > 0 && (
+          <div className="tag-search-results">
+            <div className="tag-search-label">匹配的标签：</div>
+            <div className="tag-search-list">
+              {matchedTags.map(tag => (
+                <button
+                  key={tag.id}
+                  className={`tag-search-chip ${activeTagId === tag.id ? 'active' : ''}`}
+                  style={tag.color ? { borderColor: tag.color, color: tag.color } : undefined}
+                  onClick={() => handleTagClick(tag.id)}
+                >
+                  #{tag.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 修复7：关联标签推荐栏 */}
+        {!todoMode && activeTagId && linkedTags.length > 0 && (
+          <div className="linked-tags-bar">
+            <div className="linked-tags-label">拥有这个标签的数据还链接了：</div>
+            <div className="linked-tags-list">
+              {linkedTags.map(({ tag, count }) => (
+                <button
+                  key={tag.id}
+                  className={`linked-tag-chip ${activeTagId === tag.id ? 'active' : ''}`}
+                  style={tag.color ? { borderColor: tag.color } : undefined}
+                  onClick={() => handleSwitchTag(tag.id)}
+                >
+                  #{tag.name} ({count})
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* 模式切换 */}
         <div className="search-mode-tabs">

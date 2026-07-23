@@ -339,14 +339,14 @@
 }
 
 .group-picker-confirm {
-  background: var(--color-copper-primary);
+  background: var(--color-accent-primary);
   color: var(--color-text-primary);
   font-weight: 500;
 }
 
-/* === AI ¶Ô»°Ãæ°å === */
+/* === AI ï¿½Ô»ï¿½ï¿½ï¿½ï¿½ === */
 .ai-chat-panel {
-  /* ¼Ì³Ð group-panel ÑùÊ½ */
+  /* ï¿½Ì³ï¿½ group-panel ï¿½ï¿½Ê½ */
 }
 
 .ai-chat-options {

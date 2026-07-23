@@ -10,6 +10,7 @@ import { useEntryStore } from '@/stores/entryStore';
 import { useTagStore } from '@/stores/tagStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useTodoStore } from '@/stores/todoStore';
+import { shouldAutoBackup, createBackup } from '@/services/backupService';
 
 /** Triangle alert icon */
 const TriangleAlertSvg = () => (
@@ -50,6 +51,15 @@ export function App() {
           console.warn('过期归档检查失败:', e);
         }
 
+        // 每天首次打开时自动备份
+        try {
+          if (await shouldAutoBackup()) {
+            await createBackup('auto');
+          }
+        } catch (e) {
+          console.warn('自动备份失败:', e);
+        }
+
         setIsReady(true);
       } catch (err) {
         console.error('初始化失败:', err);
@@ -75,22 +85,22 @@ export function App() {
         minHeight: '100dvh',
         padding: '20px',
         textAlign: 'center',
-        background: '#060201',
+        background: '#131416',
       }}>
-        <div style={{ marginBottom: 16, color: 'var(--color-error, #ef4444)' }}><TriangleAlertSvg /></div>
-        <div style={{ fontSize: 16, color: '#ef4444', marginBottom: 8, fontFamily: 'var(--font-serif, Fraunces, serif)' }}>数据库初始化失败</div>
-        <div style={{ fontSize: 13, color: '#706556' }}>{error}</div>
+        <div style={{ marginBottom: 16, color: 'var(--color-error, #fa5252)' }}><TriangleAlertSvg /></div>
+        <div style={{ fontSize: 16, color: '#fa5252', marginBottom: 8, fontFamily: "'Sora', 'Inter', 'Noto Sans SC', sans-serif" }}>数据库初始化失败</div>
+        <div style={{ fontSize: 13, color: '#868e96' }}>{error}</div>
         <button
           onClick={() => window.location.reload()}
           style={{
             marginTop: 24,
             padding: '10px 24px',
-            borderRadius: 12,
-            background: 'linear-gradient(135deg, #806a4d, #cbb99f)',
-            color: '#060201',
+            borderRadius: 8,
+            background: '#f76707',
+            color: '#ffffff',
             border: 'none',
             fontSize: 14,
-            fontWeight: 500,
+            fontWeight: 600,
             cursor: 'pointer',
           }}
         >

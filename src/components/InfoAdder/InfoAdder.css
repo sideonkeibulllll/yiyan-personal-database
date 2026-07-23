@@ -162,6 +162,6 @@
 }
 
 .action-btn.primary {
-  color: var(--color-bg-primary);
-  background: linear-gradient(135deg, var(--color-copper-primary), var(--color-accent-primary));
+  color: #ffffff;
+  background: var(--color-accent-primary);
 }

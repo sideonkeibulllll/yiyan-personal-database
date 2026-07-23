@@ -7,14 +7,19 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTodoStore } from '@/stores/todoStore';
 import { useTodoTagStore } from '@/stores/todoTagStore';
-import { BottomNav } from '@/components/BottomNav';
 import type { Todo } from '@/types';
 import './TodoManagerPage.css';
 
-/** 系统色板（8 种） */
+/** 暖色调色板（8 种交替分配，相邻色差异最大化） */
 const COLOR_PALETTE = [
-  '#cbb99f', '#e3dfd6', '#f2e1ca', '#806a4d',
-  '#9b8568', '#e65c33', '#605039', '#8c7773',
+  '#f76707', // 鲜橙
+  '#f59f00', // 琥珀金
+  '#fa5252', // 珊瑚红
+  '#e67700', // 暗琥珀
+  '#d6336c', // 暖玫瑰
+  '#f08c00', // 金橙
+  '#c04509', // 深铜
+  '#e8590c', // 焦橙
 ];
 
 /** 格式化日期为 YYYY-MM-DD */
@@ -176,55 +181,84 @@ export function TodoManagerPage() {
               />
             )}
 
-            {/* 待办卡片 */}
-            {sortedTodos.map((todo, index) => {
-              const startHour = todo.startTime
-                ? new Date(todo.startTime).getHours() + new Date(todo.startTime).getMinutes() / 60
-                : 0;
-              const endHour = todo.endTime
-                ? new Date(todo.endTime).getHours() + new Date(todo.endTime).getMinutes() / 60
-                : startHour + 1;
+            {/* 待办卡片 — 同时段并排显示（修复4） */}
+            {(() => {
+              // 按起始时间分组同时段待办
+              const groups = new Map<number, typeof sortedTodos>();
+              sortedTodos.forEach(todo => {
+                const startHour = todo.startTime
+                  ? new Date(todo.startTime).getHours() + new Date(todo.startTime).getMinutes() / 60
+                  : -1;
+                const key = Math.floor(startHour * 2) / 2; // 按半小时分组
+                if (!groups.has(key)) groups.set(key, []);
+                groups.get(key)!.push(todo);
+              });
 
-              const top = `${(startHour / 24) * 100}%`;
-              const height = `${((endHour - startHour) / 24) * 100}%`;
-              const color = getTodoColor(todo, index);
-              const isSelected = selectedIds.has(todo.id);
+              return Array.from(groups.entries()).map(([groupKey, groupTodos]) => {
+                const top = `${((groupKey < 0 ? 0 : groupKey) / 24) * 100}%`;
+                return (
+                  <div
+                    key={groupKey}
+                    className="timeline-todo-group"
+                    style={{ top }}
+                  >
+                    {groupTodos.map((todo, index) => {
+                      const startHour = todo.startTime
+                        ? new Date(todo.startTime).getHours() + new Date(todo.startTime).getMinutes() / 60
+                        : 0;
+                      const endHour = todo.endTime
+                        ? new Date(todo.endTime).getHours() + new Date(todo.endTime).getMinutes() / 60
+                        : startHour + 1;
+                      const height = `${Math.max(((endHour - startHour) / 24) * 100, 2)}%`;
+                      const color = getTodoColor(todo, index);
+                      const isSelected = selectedIds.has(todo.id);
 
-              return (
-                <div
-                  key={todo.id}
-                  className={`timeline-todo-card ${todo.status === 'done' ? 'done' : ''} ${isSelected ? 'selected' : ''}`}
-                  style={{
-                    top,
-                    height,
-                    backgroundColor: color + '33',
-                    borderLeft: `3px solid ${color}`,
-                  }}
-                  onClick={() => {
-                    if (batchMode) toggleSelect(todo.id);
-                    else navigate(`/todo/${todo.id}/edit`);
-                  }}
-                >
-                  <div className="card-title">{todo.title}</div>
-                  <div className="card-time">
-                    {String(new Date(todo.startTime || 0).getHours()).padStart(2, '0')}:
-                    {String(new Date(todo.startTime || 0).getMinutes()).padStart(2, '0')} -
-                    {todo.endTime ? `${String(new Date(todo.endTime).getHours()).padStart(2, '0')}:${String(new Date(todo.endTime).getMinutes()).padStart(2, '0')}` : '--:--'}
+                      return (
+                        <div
+                          key={todo.id}
+                          className={`timeline-todo-card ${todo.status === 'done' ? 'done' : ''} ${isSelected ? 'selected' : ''}`}
+                          style={{
+                            height,
+                            backgroundColor: color + '33',
+                            borderLeft: `3px solid ${color}`,
+                          }}
+                          onClick={() => {
+                            if (batchMode) toggleSelect(todo.id);
+                            else navigate(`/todo/${todo.id}/edit`);
+                          }}
+                        >
+                          <div className="card-title">{todo.title}</div>
+                          <div className="card-time">
+                            {String(new Date(todo.startTime || 0).getHours()).padStart(2, '0')}:
+                            {String(new Date(todo.startTime || 0).getMinutes()).padStart(2, '0')} -
+                            {todo.endTime ? `${String(new Date(todo.endTime).getHours()).padStart(2, '0')}:${String(new Date(todo.endTime).getMinutes()).padStart(2, '0')}` : '--:--'}
+                          </div>
+                          {batchMode && isSelected && <div className="card-check">✓</div>}
+                        </div>
+                      );
+                    })}
                   </div>
-                  {batchMode && isSelected && <div className="card-check">✓</div>}
-                </div>
-              );
-            })}
+                );
+              });
+            })()}
           </div>
         </div>
 
-        {/* 从模板导入 */}
-        <button
-          className="manager-import-btn"
-          onClick={() => navigate('/todo/templates')}
-        >
-          从模板导入到这一天
-        </button>
+        {/* 从模板导入 + 添加待办（修复4）*/}
+        <div className="manager-bottom-actions">
+          <button
+            className="manager-import-btn"
+            onClick={() => navigate('/todo/templates')}
+          >
+            从模板导入到这一天
+          </button>
+          <button
+            className="manager-add-btn"
+            onClick={() => navigate('/todo/new')}
+          >
+            添加待办
+          </button>
+        </div>
       </main>
 
       {/* 批量操作栏 */}
@@ -267,8 +301,6 @@ export function TodoManagerPage() {
           </button>
         </div>
       )}
-
-      <BottomNav />
     </div>
   );
 }

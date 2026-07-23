@@ -30,16 +30,68 @@
   animation: slideUp var(--duration-normal) var(--ease-out);
 }
 
+/* === 修复2：待办提醒条 === */
+.todo-reminder-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  border-left: 3px solid var(--color-accent-primary);
+  background: var(--color-accent-subtle);
+  animation: slideUp var(--duration-fast) var(--ease-out);
+}
+
+.reminder-icon {
+  font-size: var(--text-lg);
+  flex-shrink: 0;
+}
+
+.reminder-text {
+  flex: 1;
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reminder-close {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+  flex-shrink: 0;
+}
+
+.reminder-close:hover {
+  background: var(--color-bg-elevated);
+  color: var(--color-text-primary);
+}
+
+.reminder-close:active {
+  transform: scale(0.9);
+}
+
 .input-wrapper {
   border-radius: var(--radius-lg);
   padding: var(--space-4);
-  transition: border-color var(--duration-fast) var(--ease-out),
-              box-shadow var(--duration-fast) var(--ease-out);
+  transition: box-shadow var(--duration-fast) var(--ease-out);
 }
 
 .input-wrapper:focus-within {
-  border-color: var(--color-border-accent);
-  box-shadow: 0 0 0 3px rgba(203, 185, 159, 0.08), 0 0 20px rgba(203, 185, 159, 0.06);
+  box-shadow: 0 0 0 3px rgba(247, 103, 7, 0.08), 0 0 20px rgba(247, 103, 7, 0.06);
+}
+
+.content-input:focus,
+.content-input:focus-visible {
+  outline: none;
 }
 
 .content-input {
@@ -80,9 +132,9 @@
 }
 
 .action-btn.primary {
-  background: linear-gradient(135deg, var(--color-copper-primary), var(--color-accent-primary));
-  color: var(--color-bg-base);
-  box-shadow: 0 4px 16px rgba(203, 185, 159, 0.15), 0 2px 6px rgba(128, 106, 77, 0.2);
+  background: var(--color-accent-primary);
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(247, 103, 7, 0.25);
 }
 
 .action-btn.primary:disabled {
@@ -145,7 +197,7 @@
 
 .mode-btn:hover {
   border-color: var(--color-border-accent);
-  box-shadow: 0 0 12px rgba(203, 185, 159, 0.06);
+  box-shadow: 0 0 12px rgba(247, 103, 7, 0.06);
 }
 
 .mode-btn:active {
@@ -182,7 +234,7 @@
 
 .quick-btn:hover {
   border-color: var(--color-border-accent);
-  box-shadow: 0 0 12px rgba(203, 185, 159, 0.06);
+  box-shadow: 0 0 12px rgba(247, 103, 7, 0.06);
 }
 
 .quick-btn:active {
@@ -238,9 +290,9 @@
 }
 
 .home-tag-confirm {
-  background: var(--color-copper-primary);
+  background: var(--color-accent-primary);
   color: var(--color-text-primary);
-  box-shadow: 0 2px 12px rgba(128, 106, 77, 0.25);
+  box-shadow: 0 2px 12px rgba(232, 89, 12, 0.25);
 }
 
 /* === 轻提示 === */
@@ -255,7 +307,7 @@
   color: var(--color-text-primary);
   animation: slideUp var(--duration-normal) var(--ease-out);
   z-index: 200;
-  box-shadow: 0 4px 24px rgba(203, 185, 159, 0.1), 0 0 12px rgba(203, 185, 159, 0.06);
+  box-shadow: 0 4px 24px rgba(247, 103, 7, 0.1), 0 0 12px rgba(247, 103, 7, 0.06);
 }
 
 /* === 待办模式切换 === */

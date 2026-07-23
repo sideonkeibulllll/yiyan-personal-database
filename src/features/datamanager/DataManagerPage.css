@@ -256,8 +256,8 @@
 }
 
 .dm-dialog-btn.confirm {
-  color: var(--color-bg-primary);
-  background: var(--color-copper-primary);
+  color: #ffffff;
+  background: var(--color-accent-primary);
 }
 
 .dm-dialog-btn.confirm:active {
@@ -372,7 +372,7 @@
   z-index: 300;
   animation: slideUp var(--duration-fast) var(--ease-out);
   white-space: nowrap;
-  box-shadow: 0 0 20px rgba(203, 185, 159, 0.15), 0 0 60px rgba(203, 185, 159, 0.05);
+  box-shadow: 0 0 20px rgba(247, 103, 7, 0.15), 0 0 60px rgba(247, 103, 7, 0.05);
 }
 
 /* === 遮罩 === */

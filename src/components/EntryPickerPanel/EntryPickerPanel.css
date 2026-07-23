@@ -11,7 +11,7 @@
 .entry-picker-panel {
   width: 100%;
   max-width: 600px;
-  max-height: 85vh;
+  height: 85vh;
   background: var(--color-bg-elevated);
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   display: flex;
@@ -19,6 +19,44 @@
   padding: var(--space-4);
   gap: var(--space-3);
   animation: ep-slide-up 0.25s var(--ease-out);
+  overflow: hidden;
+}
+
+/* === 三块固定高度布局（修复1 + 修复6）=== */
+.ep-search-section {
+  flex-shrink: 0;
+}
+
+.ep-data-section {
+  flex: 1 1 45%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.ep-data-section .ep-list {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.ep-related-section {
+  flex: 1 1 30%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.ep-related-section .ep-list {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.ep-footer {
+  flex-shrink: 0;
 }
 
 @keyframes ep-slide-up {
@@ -56,6 +94,7 @@
 .ep-search-section {
   display: flex;
   gap: var(--space-2);
+  flex-shrink: 0;
 }
 
 .ep-search-row {
@@ -85,7 +124,7 @@
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-md);
   background: var(--color-accent-primary);
-  color: var(--color-bg-primary);
+  color: #ffffff;
   font-size: var(--text-sm);
   cursor: pointer;
 }
@@ -98,6 +137,7 @@
   padding: var(--space-1) 0;
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: var(--space-1);
 }
 
@@ -157,7 +197,7 @@
   align-items: center;
   justify-content: center;
   font-size: 11px;
-  color: var(--color-bg-primary);
+  color: #ffffff;
   flex-shrink: 0;
 }
 
@@ -235,6 +275,7 @@
   justify-content: space-between;
   padding-top: var(--space-2);
   border-top: 1px solid var(--color-border-secondary);
+  flex-shrink: 0;
 }
 
 .ep-selected-count {
@@ -261,10 +302,10 @@
 
 .ep-confirm-btn {
   background: var(--color-accent-primary);
-  color: var(--color-bg-primary);
+  color: #ffffff;
 }
 
-/* === ģʽ�л� === */
+/* === ģʽ�л� === */
 .ep-mode-switch {
   display: flex;
   gap: var(--space-2);
@@ -290,7 +331,7 @@
   font-weight: 600;
 }
 
-/* === ����ɸѡ��ť === */
+/* === ����ɸѡ��ť === */
 .ep-todo-filter-buttons {
   display: flex;
   gap: var(--space-2);
@@ -312,4 +353,29 @@
   background: var(--color-accent-subtle);
   border-color: var(--color-border-accent);
   color: var(--color-accent-primary);
+}
+
+/* === һ��ȫѡ��ť === */
+.ep-select-all-btn {
+  font-size: var(--text-xs);
+  color: var(--color-accent-primary);
+  background: var(--color-accent-subtle);
+  border: 1px solid var(--color-border-accent);
+  border-radius: var(--radius-full);
+  padding: 2px var(--space-3);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.ep-select-all-btn:hover {
+  background: var(--color-accent-primary);
+  color: white;
+}
+
+/* === ����ɸѡ��ť�� === */
+.ep-related-filters {
+  display: flex;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-2);
 }

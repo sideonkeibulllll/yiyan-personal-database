@@ -268,7 +268,7 @@
 }
 
 .dialog-actions button:last-child:not(:disabled) {
-  background: var(--color-copper-primary);
+  background: var(--color-accent-primary);
   color: var(--color-text-primary);
   border-color: var(--color-copper-primary);
 }

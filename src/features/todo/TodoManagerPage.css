@@ -144,15 +144,37 @@
 }
 
 .timeline-todo-card {
-  position: absolute;
-  left: 4px;
-  right: 4px;
+  position: relative;
   padding: var(--space-2);
   border-radius: var(--radius-xs);
   cursor: pointer;
   overflow: hidden;
   transition: all var(--duration-fast) var(--ease-out);
   z-index: 1;
+  flex-shrink: 0;
+}
+
+/* === 修复4：同时段并排显示 === */
+.timeline-todo-group {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding: 2px 0;
+}
+
+.timeline-todo-group::-webkit-scrollbar {
+  display: none;
+}
+
+.timeline-todo-group .timeline-todo-card {
+  position: relative;
+  top: 0 !important;
+  min-width: 100px;
+  flex: 1;
 }
 
 .timeline-todo-card.done {
@@ -188,8 +210,14 @@
   font-weight: bold;
 }
 
-/* === 从模板导入 === */
+/* === 从模板导入 + 添加待办 === */
+.manager-bottom-actions {
+  display: flex;
+  gap: var(--space-3);
+}
+
 .manager-import-btn {
+  flex: 1;
   padding: var(--space-3);
   border-radius: var(--radius-md);
   text-align: center;
@@ -198,6 +226,23 @@
   background: var(--color-bg-elevated);
   border: 1px dashed var(--color-border-secondary);
   cursor: pointer;
+}
+
+.manager-add-btn {
+  flex: 1;
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  text-align: center;
+  font-size: var(--text-sm);
+  color: var(--color-accent-primary);
+  background: var(--color-accent-subtle);
+  border: 1px solid var(--color-border-accent);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.manager-add-btn:active {
+  transform: scale(0.98);
 }
 
 /* === 批量操作栏 === */

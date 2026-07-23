@@ -198,8 +198,8 @@
 }
 
 .create-confirm {
-  background: var(--color-copper-primary);
-  color: var(--color-bg-primary);
+  background: var(--color-accent-primary);
+  color: #ffffff;
 }
 
 .create-confirm:disabled {
@@ -251,7 +251,7 @@
 
 .ai-confirm-btn.ok {
   background: var(--color-accent-primary);
-  color: var(--color-bg-primary);
+  color: #ffffff;
 }
 
 .ai-suggest-loading {
@@ -337,7 +337,7 @@
 
 .ai-suggest-action.apply-all {
   background: var(--color-accent-primary);
-  color: var(--color-bg-primary);
+  color: #ffffff;
 }
 
 .ai-suggest-action.dismiss {

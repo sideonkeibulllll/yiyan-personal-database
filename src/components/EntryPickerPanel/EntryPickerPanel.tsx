@@ -168,6 +168,9 @@ export function EntryPickerPanel({
   const [loadingRelated, setLoadingRelated] = useState(false);
   // 待办模式下块过滤：'tag' 按标签 或 'time' 按时间
   const [todoFilterMode, setTodoFilterMode] = useState<'tag' | 'time'>('time');
+  // 关联数据的筛选选项（多条 tag/组时展示）
+  const [relatedFilterOptions, setRelatedFilterOptions] = useState<{ type: 'tag' | 'group'; id: string; name: string }[]>([]);
+  const [activeRelatedFilter, setActiveRelatedFilter] = useState<string | null>(null);
 
   /** 搜索条目 → 刷新第二块 */
   const handleSearch = useCallback(async () => {
@@ -224,31 +227,50 @@ export function EntryPickerPanel({
   /** 获取与指定条目关联的其他条目 */
   const loadRelated = useCallback(async (entryId: string, currentSelectedIds?: Set<string>) => {
     setLoadingRelated(true);
+    setActiveRelatedFilter(null);
     try {
       const db = await getDatabase();
       const entry = await db.getEntryById(entryId);
       if (!entry) {
         setRelatedEntries([]);
+        setRelatedFilterOptions([]);
         return;
       }
 
       const relatedMap = new Map<string, Entry>();
+      // 收集关联类型信息用于筛选
+      const tagSources = new Map<string, string>(); // entryId -> tagId
+      const groupSources = new Map<string, string>(); // entryId -> groupId
+      const linkSources = new Set<string>(); // 通过连线关联的 entryId
+      const filterOptions: { type: 'tag' | 'group'; id: string; name: string }[] = [];
 
       // 同组
       if (entry.groupId) {
         const sameGroup = await db.getEntriesByGroupId(entry.groupId);
         sameGroup.forEach(e => {
-          if (e.id !== entryId) relatedMap.set(e.id, e);
+          if (e.id !== entryId) {
+            relatedMap.set(e.id, e);
+            groupSources.set(e.id, entry.groupId!);
+          }
         });
+        if (sameGroup.length > 1) {
+          filterOptions.push({ type: 'group', id: entry.groupId, name: '同组' });
+        }
       }
 
-      // 同标签
+      // 同标签（可能有多个标签）
       if (entry.tags && entry.tags.length > 0) {
         for (const tag of entry.tags) {
           const sameTag = await db.getEntriesByTagId(tag.id);
           sameTag.forEach(e => {
-            if (e.id !== entryId) relatedMap.set(e.id, e);
+            if (e.id !== entryId) {
+              relatedMap.set(e.id, e);
+              tagSources.set(e.id, tag.id);
+            }
           });
+          if (sameTag.length > 1) {
+            filterOptions.push({ type: 'tag', id: tag.id, name: `#${tag.name}` });
+          }
         }
       }
 
@@ -257,8 +279,16 @@ export function EntryPickerPanel({
       for (const link of links) {
         const otherId = link.sourceId === entryId ? link.targetId : link.sourceId;
         const other = await db.getEntryById(otherId);
-        if (other) relatedMap.set(otherId, other);
+        if (other) {
+          relatedMap.set(otherId, other);
+          linkSources.add(otherId);
+        }
       }
+      if (links.length > 0) {
+        filterOptions.push({ type: 'group', id: '__links__', name: '连线' });
+      }
+
+      setRelatedFilterOptions(filterOptions);
 
       // === 修复 1：过滤已选中的数据 ===
       const selectedToFilter = currentSelectedIds ?? selectedIds;
@@ -269,6 +299,7 @@ export function EntryPickerPanel({
     } catch (err) {
       console.error('加载关联失败:', err);
       setRelatedEntries([]);
+      setRelatedFilterOptions([]);
     } finally {
       setLoadingRelated(false);
     }
@@ -440,9 +471,37 @@ export function EntryPickerPanel({
         {/* 第二块：数据/待办 */}
         <div className="ep-data-section">
           <div className="ep-section-label">
-            {pickerMode === 'todo' ? '待办' : '数据'} {(pickerMode === 'todo' ? dataTodos.length : dataEntries.length) > 0 && <span className="ep-count">({pickerMode === 'todo' ? dataTodos.length : dataEntries.length})</span>}
+            <span>
+              {pickerMode === 'todo' ? '待办' : '数据'} {(pickerMode === 'todo' ? dataTodos.length : dataEntries.length) > 0 && <span className="ep-count">({pickerMode === 'todo' ? dataTodos.length : dataEntries.length})</span>}
+            </span>
+            {/* 一键全选按钮 */}
+            {(pickerMode === 'todo' ? dataTodos.length : dataEntries.length) > 0 && (
+              <button
+                className="ep-select-all-btn"
+                onClick={() => {
+                  const allIds = pickerMode === 'todo'
+                    ? dataTodos.map(t => t.id)
+                    : dataEntries.map(e => e.id);
+                  const newSet = new Set(selectedIds);
+                  // 检查是否已全部选中，若全选则取消全选
+                  const allSelected = allIds.every(id => newSet.has(id));
+                  if (allSelected) {
+                    allIds.forEach(id => newSet.delete(id));
+                  } else {
+                    allIds.forEach(id => newSet.add(id));
+                  }
+                  onSelectionChange(newSet);
+                  // 注意：不刷新关联数据
+                }}
+              >
+                {pickerMode === 'todo'
+                  ? (dataTodos.every(t => selectedIds.has(t.id)) ? '取消全选' : '全选')
+                  : (dataEntries.every(e => selectedIds.has(e.id)) ? '取消全选' : '全选')
+                }
+              </button>
+            )}
           </div>
-          <div className="ep-list" style={{ maxHeight: '30vh', overflowY: 'auto' }}>
+          <div className="ep-list">
             {loadingData ? (
               <div className="ep-loading">加载中…</div>
             ) : pickerMode === 'todo' ? (
@@ -486,7 +545,26 @@ export function EntryPickerPanel({
         {pickerMode === 'todo' ? (
           <div className="ep-related-section">
             <div className="ep-section-label">
-              按标签/按时间
+              <span>按标签/按时间</span>
+              {/* 完成1：待办模式关联数据全选 */}
+              {relatedEntries.length > 0 && (
+                <button
+                  className="ep-select-all-btn"
+                  onClick={() => {
+                    const allIds = relatedEntries.map(e => e.id);
+                    const newSet = new Set(selectedIds);
+                    const allSelected = allIds.every(id => newSet.has(id));
+                    if (allSelected) {
+                      allIds.forEach(id => newSet.delete(id));
+                    } else {
+                      allIds.forEach(id => newSet.add(id));
+                    }
+                    onSelectionChange(newSet);
+                  }}
+                >
+                  {relatedEntries.every(e => selectedIds.has(e.id)) ? '取消全选' : '全选'}
+                </button>
+              )}
             </div>
             <div className="ep-todo-filter-buttons">
               <button
@@ -498,7 +576,7 @@ export function EntryPickerPanel({
                 onClick={() => setTodoFilterMode('tag')}
               >按标签</button>
             </div>
-            <div className="ep-list" style={{ maxHeight: '20vh', overflowY: 'auto' }}>
+            <div className="ep-list">
               {loadingRelated ? (
                 <div className="ep-loading">加载中…</div>
               ) : relatedEntries.length > 0 ? (
@@ -519,21 +597,67 @@ export function EntryPickerPanel({
           /* 第三块：数据模式下的关联数据 */
           <div className="ep-related-section">
             <div className="ep-section-label">
-              关联数据 {relatedEntries.length > 0 && <span className="ep-count">({relatedEntries.length})</span>}
-              {currentEntryId && <span className="ep-current-hint">· 基于：{dataEntries.find(e => e.id === currentEntryId)?.content.slice(0, 20) ?? '…'}…</span>}
+              <span>
+                关联数据 {relatedEntries.length > 0 && <span className="ep-count">({relatedEntries.length})</span>}
+                {currentEntryId && <span className="ep-current-hint">· 基于：{dataEntries.find(e => e.id === currentEntryId)?.content.slice(0, 20) ?? '…'}…</span>}
+              </span>
+              {/* 完成1：一键全选关联数据 */}
+              {relatedEntries.length > 0 && (
+                <button
+                  className="ep-select-all-btn"
+                  onClick={() => {
+                    const allIds = relatedEntries.map(e => e.id);
+                    const newSet = new Set(selectedIds);
+                    const allSelected = allIds.every(id => newSet.has(id));
+                    if (allSelected) {
+                      allIds.forEach(id => newSet.delete(id));
+                    } else {
+                      allIds.forEach(id => newSet.add(id));
+                    }
+                    onSelectionChange(newSet);
+                  }}
+                >
+                  {relatedEntries.every(e => selectedIds.has(e.id)) ? '取消全选' : '全选'}
+                </button>
+              )}
             </div>
-            <div className="ep-list" style={{ maxHeight: '25vh', overflowY: 'auto' }}>
+            {/* 关联筛选按钮（当有条目同时有多个 tag/组时显示） */}
+            {relatedFilterOptions.length > 1 && (
+              <div className="ep-related-filters">
+                <button
+                  className={`ep-filter-btn ${activeRelatedFilter === null ? 'active' : ''}`}
+                  onClick={() => setActiveRelatedFilter(null)}
+                >全部</button>
+                {relatedFilterOptions.map(opt => (
+                  <button
+                    key={opt.id}
+                    className={`ep-filter-btn ${activeRelatedFilter === opt.id ? 'active' : ''}`}
+                    onClick={() => setActiveRelatedFilter(opt.id)}
+                  >{opt.name}</button>
+                ))}
+              </div>
+            )}
+            <div className="ep-list">
               {loadingRelated ? (
                 <div className="ep-loading">加载中…</div>
               ) : relatedEntries.length > 0 ? (
-                relatedEntries.map(entry => (
-                  <EntryCard
-                    key={entry.id}
-                    entry={entry}
-                    isSelected={selectedIds.has(entry.id)}
-                    onToggle={() => handleRelatedEntryClick(entry.id)}
-                  />
-                ))
+                relatedEntries
+                  .filter(entry => {
+                    if (!activeRelatedFilter) return true;
+                    // 简单筛选：如果条目标签中有对应的 tag id 则保留
+                    if (entry.tags) {
+                      return entry.tags.some(t => t.id === activeRelatedFilter);
+                    }
+                    return false;
+                  })
+                  .map(entry => (
+                    <EntryCard
+                      key={entry.id}
+                      entry={entry}
+                      isSelected={selectedIds.has(entry.id)}
+                      onToggle={() => handleRelatedEntryClick(entry.id)}
+                    />
+                  ))
               ) : (
                 <div className="ep-empty">选择上方条目后显示关联</div>
               )}

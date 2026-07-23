@@ -157,8 +157,8 @@
 }
 
 .create-confirm {
-  background: var(--color-copper-primary);
-  color: var(--color-bg-primary);
+  background: var(--color-accent-primary);
+  color: #ffffff;
 }
 
 .create-confirm:disabled {

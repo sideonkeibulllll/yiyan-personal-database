@@ -84,6 +84,7 @@
   overflow-x: auto;
   padding-bottom: var(--space-2);
   scrollbar-width: none;
+  flex-shrink: 0;
 }
 
 .filter-bar::-webkit-scrollbar {
@@ -102,6 +103,7 @@
   border: 1px solid var(--color-border-primary);
   white-space: nowrap;
   cursor: pointer;
+  flex-shrink: 0;
   transition: all var(--duration-fast) var(--ease-out);
 }
 
@@ -109,6 +111,100 @@
   color: var(--color-accent-primary);
   background: var(--color-accent-subtle);
   border-color: var(--color-border-accent);
+}
+
+/* === 修复7：标签搜索结果 === */
+.tag-search-results {
+  padding: var(--space-2) 0;
+  flex-shrink: 0;
+}
+
+.tag-search-label {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  margin-bottom: var(--space-1);
+}
+
+.tag-search-list {
+  display: flex;
+  gap: var(--space-2);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tag-search-list::-webkit-scrollbar {
+  display: none;
+}
+
+.tag-search-chip {
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-full);
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-primary);
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.tag-search-chip.active {
+  background: var(--color-accent-subtle);
+  font-weight: 600;
+}
+
+.tag-search-chip:active {
+  transform: scale(0.96);
+}
+
+/* === 修复7：关联标签推荐栏 === */
+.linked-tags-bar {
+  padding: var(--space-2) 0;
+  border-top: 1px dashed var(--color-border-secondary);
+  border-bottom: 1px dashed var(--color-border-secondary);
+  flex-shrink: 0;
+}
+
+.linked-tags-label {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  margin-bottom: var(--space-1);
+}
+
+.linked-tags-list {
+  display: flex;
+  gap: var(--space-2);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.linked-tags-list::-webkit-scrollbar {
+  display: none;
+}
+
+.linked-tag-chip {
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-primary);
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.linked-tag-chip.active {
+  color: var(--color-accent-primary);
+  background: var(--color-accent-subtle);
+  border-color: var(--color-border-accent);
+  font-weight: 600;
+}
+
+.linked-tag-chip:active {
+  transform: scale(0.96);
 }
 
 /* === 搜索结果 === */
@@ -271,10 +367,10 @@
   color: var(--color-text-primary);
   animation: slideUp var(--duration-normal) var(--ease-out);
   z-index: 200;
-  box-shadow: 0 4px 20px rgba(203, 185, 159, 0.15);
+  box-shadow: 0 4px 20px rgba(247, 103, 7, 0.15);
 }
 
-/* ���ܱ�ǩ���� */
+/* ���ܱ�ǩ���� */
 .save-smart-tag-btn {
   display: block;
   width: 100%;

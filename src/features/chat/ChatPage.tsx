@@ -478,9 +478,22 @@ export function ChatPage() {
       let balance: number;
 
       if (baseURL.includes('siliconflow.cn')) {
-        balance = parseFloat(data?.data?.available_balance || data?.available_balance || 0);
+        balance = parseFloat(
+          data?.data?.available_balance ||
+          data?.available_balance ||
+          data?.balance_infos?.[0]?.total_balance ||
+          data?.balance ||
+          0
+        );
       } else {
-        balance = parseFloat(data?.data?.available_balance || data?.available_balance || data?.balance || 0);
+        balance = parseFloat(
+          data?.balance_infos?.[0]?.total_balance ||
+          data?.data?.available_balance ||
+          data?.available_balance ||
+          data?.total_balance ||
+          data?.balance ||
+          0
+        );
       }
 
       const savedLast = localStorage.getItem(BALANCE_STORAGE_KEY);
