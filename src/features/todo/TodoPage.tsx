@@ -195,17 +195,17 @@ export function TodoPage() {
             </div>
           )}
         </div>
+      </main>
 
-        {/* 从模板导入 */}
+      {/* 底部固定操作栏 */}
+      <div className="todo-bottom-actions glass">
         <button className="todo-import-btn glass" onClick={handleImportTemplate}>
           <span>从模板导入</span>
         </button>
-
-        {/* 新建待办 */}
         <button className="todo-import-btn glass todo-new-btn" onClick={() => navigate('/todo/new')}>
           <span>新建待办</span>
         </button>
-      </main>
+      </div>
 
       {/* 底部倒计时条 */}
       {settings.todo.showCountdown && countdownTodos.length > 0 && (

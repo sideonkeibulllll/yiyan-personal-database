@@ -2,7 +2,7 @@
   display: flex;
   flex-direction: column;
   min-height: 100dvh;
-  padding-bottom: calc(80px + var(--safe-bottom));
+  padding-bottom: calc(120px + var(--safe-bottom));
 }
 
 .page-content {
@@ -275,6 +275,27 @@
 
 .todo-import-btn:active {
   transform: scale(0.98);
+}
+
+/* === 底部固定操作栏 === */
+.todo-bottom-actions {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  padding-bottom: calc(var(--space-2) + var(--safe-bottom, 0px));
+  border-top: 1px solid var(--color-border-primary);
+  position: fixed;
+  bottom: 56px;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  background: var(--color-bg-glass);
+  backdrop-filter: blur(12px);
+}
+
+.todo-bottom-actions .todo-import-btn {
+  flex: 1;
+  padding: var(--space-2) var(--space-3);
 }
 
 /* === 底部倒计时条 === */

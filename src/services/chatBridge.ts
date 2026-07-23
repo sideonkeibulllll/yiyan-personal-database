@@ -16,9 +16,11 @@
  */
 
 import { getDatabase } from '@/services/database';
+import { getTodoDatabase } from '@/services/todoDatabase';
 import { useEntryStore } from '@/stores/entryStore';
 import { useTagStore } from '@/stores/tagStore';
-import type { Entry } from '@/types';
+import { useTodoStore } from '@/stores/todoStore';
+import type { Entry, Todo } from '@/types';
 
 /** 工具定义 */
 export interface BridgeTool {
@@ -50,31 +52,12 @@ export const BRIDGE_TOOLS: BridgeTool[] = [
     parameters: {
       type: 'object',
       properties: {
-        content: {
-          type: 'string',
-          description: '卡片内容（必填）',
-        },
-        source: {
-          type: 'string',
-          description: '内容来源（可选，如网址、书名、说话人等）',
-        },
-        supplement: {
-          type: 'string',
-          description: '补充信息（可选，对该条目的额外说明）',
-        },
-        tags: {
-          type: 'array',
-          items: { type: 'string' },
-          description: '标签名列表（可选）',
-        },
-        groupName: {
-          type: 'string',
-          description: '所属组名（可选）',
-        },
-        isStarred: {
-          type: 'boolean',
-          description: '是否星标（可选，默认false）',
-        },
+        content: { type: 'string', description: '卡片内容（必填）' },
+        source: { type: 'string', description: '内容来源（可选，如网址、书名、说话人等）' },
+        supplement: { type: 'string', description: '补充信息（可选，对该条目的额外说明）' },
+        tags: { type: 'array', items: { type: 'string' }, description: '标签名列表（可选）' },
+        groupName: { type: 'string', description: '所属组名（可选）' },
+        isStarred: { type: 'boolean', description: '是否星标（可选，默认false）' },
       },
       required: ['content'],
     },
@@ -85,27 +68,11 @@ export const BRIDGE_TOOLS: BridgeTool[] = [
     parameters: {
       type: 'object',
       properties: {
-        query: {
-          type: 'string',
-          description: '搜索关键字（可选，留空则返回全部）',
-        },
-        tags: {
-          type: 'array',
-          items: { type: 'string' },
-          description: '按标签名筛选（可选）',
-        },
-        groupName: {
-          type: 'string',
-          description: '按组名筛选（可选）',
-        },
-        isStarred: {
-          type: 'boolean',
-          description: '只看星标（可选）',
-        },
-        limit: {
-          type: 'number',
-          description: '返回数量上限，默认20',
-        },
+        query: { type: 'string', description: '搜索关键字（可选，留空则返回全部）' },
+        tags: { type: 'array', items: { type: 'string' }, description: '按标签名筛选（可选）' },
+        groupName: { type: 'string', description: '按组名筛选（可选）' },
+        isStarred: { type: 'boolean', description: '只看星标（可选）' },
+        limit: { type: 'number', description: '返回数量上限，默认20' },
       },
       required: [],
     },
@@ -116,14 +83,8 @@ export const BRIDGE_TOOLS: BridgeTool[] = [
     parameters: {
       type: 'object',
       properties: {
-        entryId: {
-          type: 'string',
-          description: '条目ID',
-        },
-        groupName: {
-          type: 'string',
-          description: '组名称（留空表示移除组归属）',
-        },
+        entryId: { type: 'string', description: '条目ID' },
+        groupName: { type: 'string', description: '组名称（留空表示移除组归属）' },
       },
       required: ['entryId'],
     },
@@ -134,28 +95,64 @@ export const BRIDGE_TOOLS: BridgeTool[] = [
     parameters: {
       type: 'object',
       properties: {
-        entryId: {
-          type: 'string',
-          description: '条目ID',
-        },
-        addTags: {
-          type: 'array',
-          items: { type: 'string' },
-          description: '要添加的标签名列表',
-        },
-        removeTags: {
-          type: 'array',
-          items: { type: 'string' },
-          description: '要移除的标签名列表',
-        },
+        entryId: { type: 'string', description: '条目ID' },
+        addTags: { type: 'array', items: { type: 'string' }, description: '要添加的标签名列表' },
+        removeTags: { type: 'array', items: { type: 'string' }, description: '要移除的标签名列表' },
       },
       required: ['entryId'],
+    },
+  },
+  // === 待办 MCP 工具 ===
+  {
+    name: 'create_todo',
+    description: '创建一条新的待办事项。用户提到了一个需要去做的事情时使用。支持设置时间、备注、标签。',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: '待办标题（必填）' },
+        note: { type: 'string', description: '待办备注（可选）' },
+        time: { type: 'string', description: '待办时间，ISO 8601 格式或自然语言如"明天下午3点"（可选）' },
+        folderDate: { type: 'string', description: '所在日期文件夹，YYYY-MM-DD 格式（可选，默认今天）' },
+        tags: { type: 'array', items: { type: 'string' }, description: '标签名列表（可选）' },
+      },
+      required: ['title'],
+    },
+  },
+  {
+    name: 'search_todos',
+    description: '搜索待办事项。支持关键字搜索、按标签筛选、按日期筛选、按完成状态筛选。',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: '搜索关键字（可选）' },
+        tags: { type: 'array', items: { type: 'string' }, description: '按标签名筛选（可选）' },
+        folderDate: { type: 'string', description: '按日期筛选，YYYY-MM-DD 格式（可选）' },
+        isDone: { type: 'boolean', description: '按完成状态筛选（可选）' },
+        limit: { type: 'number', description: '返回数量上限，默认20' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'complete_todo',
+    description: '将一条待办标记为已完成或重新激活。',
+    parameters: {
+      type: 'object',
+      properties: {
+        todoId: { type: 'string', description: '待办ID' },
+        uncomplete: { type: 'boolean', description: '如果为 true 则重新激活，默认 false' },
+      },
+      required: ['todoId'],
     },
   },
 ];
 
 /** 所有工具名称 */
 export const ALL_TOOL_NAMES = BRIDGE_TOOLS.map(t => t.name);
+
+/** 按类型分组的工具名 */
+export const ENTRY_TOOLS = ['create_card', 'search_cards', 'edit_group', 'edit_tags'];
+export const TODO_TOOLS = ['create_todo', 'search_todos', 'complete_todo'];
 
 /** 生成工具定义的系统提示词片段（只包含选中的工具） */
 export function getToolsSystemPrompt(enabledTools: string[]): string {
@@ -233,6 +230,7 @@ export async function executeToolCall(
 ): Promise<ToolResult> {
   try {
     const db = await getDatabase();
+    const todoDb = await getTodoDatabase();
 
     switch (toolName) {
       case 'create_card': {
@@ -425,6 +423,134 @@ export async function executeToolCall(
             addedTags: addTags,
             removedTags: removeTags,
             message: '标签已更新',
+          },
+        };
+      }
+
+      case 'complete_todo': {
+        const todoId = String(args.todoId || '');
+        if (!todoId) return { success: false, error: 'todoId 不能为空' };
+        const uncomplete = Boolean(args.uncomplete);
+
+        if (uncomplete) {
+          await todoDb.updateTodo(todoId, { status: 'pending', completedAt: undefined });
+        } else {
+          await todoDb.updateTodo(todoId, { status: 'done', completedAt: Date.now() });
+        }
+        await useTodoStore.getState().loadAllTodos();
+
+        return {
+          success: true,
+          data: {
+            todoId,
+            action: uncomplete ? '重新激活' : '标记完成',
+            message: '待办状态已更新',
+          },
+        };
+      }
+
+      case 'create_todo': {
+        const title = String(args.title || '');
+        if (!title) return { success: false, error: 'title 不能为空' };
+
+        const now = Date.now();
+        const folderDate = String(args.folderDate || new Date().toISOString().slice(0, 10));
+        const note = String(args.note || '');
+        const timeStr = String(args.time || '');
+        let startTime: number | undefined;
+        if (timeStr) {
+          const parsed = Date.parse(timeStr);
+          if (!isNaN(parsed)) startTime = parsed;
+        }
+
+        const newTodo = await todoDb.createTodo({
+          title,
+          note: note || undefined,
+          status: 'pending',
+          startTime,
+          isToday: false,
+          createdAt: now,
+          updatedAt: now,
+          folderDate,
+        });
+
+        // 处理标签
+        const tags = args.tags as string[] | undefined;
+        if (tags && Array.isArray(tags)) {
+          const allTags = await todoDb.getAllTodoTags();
+          const tagIds: string[] = [];
+          for (const tagName of tags) {
+            let tag = allTags.find((t: any) => t.name === tagName);
+            if (!tag) {
+              tag = await todoDb.createTodoTag(tagName, '#4dabf7');
+            }
+            tagIds.push(tag.id);
+          }
+          if (tagIds.length > 0) {
+            await todoDb.setTodoTags(newTodo.id, tagIds);
+          }
+        }
+
+        await useTodoStore.getState().loadAllTodos();
+
+        return {
+          success: true,
+          data: {
+            id: newTodo.id,
+            title,
+            note: note || null,
+            folderDate,
+            startTime: startTime || null,
+            tags: tags || [],
+            message: '待办已创建',
+          },
+        };
+      }
+
+      case 'search_todos': {
+        const query = String(args.query || '');
+        const folderDate = String(args.folderDate || '');
+        const isDone = args.isDone as boolean | undefined;
+        const tagNames = (args.tags as string[]) || [];
+        const limit = Number(args.limit) || 20;
+
+        let results = await todoDb.getAllTodos();
+
+        if (query) {
+          const lower = query.toLowerCase();
+          results = results.filter((t: Todo) =>
+            t.title.toLowerCase().includes(lower) ||
+            (t.note && t.note.toLowerCase().includes(lower))
+          );
+        }
+        if (folderDate) {
+          results = results.filter((t: Todo) => t.folderDate === folderDate);
+        }
+        if (isDone !== undefined) {
+          results = results.filter((t: Todo) => (t.status === 'done') === isDone);
+        }
+        if (tagNames.length > 0) {
+          const allTags = await todoDb.getAllTodoTags();
+          const tagIds = tagNames.map(n => allTags.find((t: any) => t.name === n)?.id).filter(Boolean) as string[];
+          if (tagIds.length > 0) {
+            results = results.filter((t: Todo) =>
+              t.tagIds?.some(id => tagIds.includes(id))
+            );
+          }
+        }
+
+        return {
+          success: true,
+          data: {
+            total: results.length,
+            results: results.slice(0, limit).map((t: Todo) => ({
+              id: t.id,
+              title: t.title,
+              note: t.note ? (t.note.length > 100 ? t.note.slice(0, 100) + '…' : t.note) : null,
+              folderDate: t.folderDate,
+              startTime: t.startTime || null,
+              status: t.status,
+            })),
           },
         };
       }

@@ -1,15 +1,20 @@
 {
   "name": "yiyan-personal-database",
   "private": true,
-  "version": "1.5.0",
+  "version": "1.6.0",
   "type": "module",
+  "main": "dist-electron/main/main.js",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "cap:add:android": "npx cap add android",
     "cap:sync": "npx cap sync android",
-    "cap:open": "npx cap open android"
+    "cap:open": "npx cap open android",
+    "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && tsc -p electron/tsconfig.json && cross-env NODE_ENV=development electron dist-electron/main/main.js\"",
+    "electron:compile": "tsc -p electron/tsconfig.json",
+    "electron:pack-app": "node electron/build-app.cjs",
+    "electron:build": "npm run build && npm run electron:compile && npm run electron:pack-app && npx electron-builder --win --prepackaged release-electron/win-unpacked"
   },
   "dependencies": {
     "@capacitor-community/sqlite": "^6.0.2",
@@ -22,19 +27,62 @@
     "@capacitor/status-bar": "^6.0.1",
     "antd-mobile": "^5.37.1",
     "antd-mobile-icons": "^0.3.0",
+    "bonjour-service": "^1.4.3",
     "jeep-sqlite": "^2.8.0",
     "jszip": "^3.10.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.26.2",
+    "sql.js": "^1.14.1",
     "zustand": "^4.5.5"
   },
   "devDependencies": {
     "@capacitor/cli": "^6.1.2",
+    "@types/node": "^22.20.1",
     "@types/react": "^18.3.5",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
+    "concurrently": "^10.0.3",
+    "cross-env": "^10.1.0",
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3",
     "typescript": "^5.5.4",
-    "vite": "^5.4.3"
+    "vite": "^5.4.3",
+    "wait-on": "^9.1.0"
+  },
+  "build": {
+    "appId": "com.yiyan.memorydb",
+    "productName": "记忆库",
+    "directories": {
+      "output": "release-electron"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "node_modules/sql.js/dist/sql-wasm.wasm",
+      "node_modules/bonjour-service/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "node_modules/sql.js/dist/sql-wasm.wasm",
+        "to": "sql-wasm.wasm"
+      }
+    ],
+    "win": {
+      "icon": "electron/build/icon.ico",
+      "target": "nsis",
+      "executableName": "记忆库"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "记忆库",
+      "installerIcon": "electron/build/icon.ico",
+      "uninstallerIcon": "electron/build/icon.ico",
+      "uninstallDisplayName": "记忆库"
+    }
   }
 }

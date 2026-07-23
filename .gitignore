@@ -6,6 +6,8 @@ package-lock.json
 dist/
 build/
 release/
+release-electron/
+dist-electron/
 *.tsbuildinfo
 
 # Android

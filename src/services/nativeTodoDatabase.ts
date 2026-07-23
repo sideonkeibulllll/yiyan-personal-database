@@ -1,6 +1,7 @@
 /**
  * 原生平台待办数据库服务
  * 使用 Capacitor SQLite，独立于笔记数据
+ * Electron 环境下通过适配器转发到主进程的 sql.js
  */
 import { Capacitor } from '@capacitor/core';
 import { CapacitorSQLite, SQLiteConnection, SQLiteDBConnection } from '@capacitor-community/sqlite';
@@ -11,15 +12,22 @@ class NativeTodoDatabaseService implements ITodoDatabaseService {
   private sqlite: SQLiteConnection;
   private db: SQLiteDBConnection | null = null;
   private isInitialized = false;
+  private isElectron: boolean;
 
-  constructor() {
-    this.sqlite = new SQLiteConnection(CapacitorSQLite);
+  constructor(electron = false) {
+    this.isElectron = electron;
+    if (electron) {
+      const adapter = (globalThis as any).__ELECTRON_SQLITE__;
+      this.sqlite = new adapter.SQLiteConnection();
+    } else {
+      this.sqlite = new SQLiteConnection(CapacitorSQLite);
+    }
   }
 
   async init(): Promise<void> {
     if (this.isInitialized) return;
 
-    if (Capacitor.getPlatform() === 'web') {
+    if (!this.isElectron && Capacitor.getPlatform() === 'web') {
       await import('jeep-sqlite/loader');
       await customElements.whenDefined('jeep-sqlite');
       await this.sqlite.initWebStore();

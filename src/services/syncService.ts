@@ -15,6 +15,7 @@
  * 在 Web/Electron 环境中使用浏览器 API 或 Node.js API。
  */
 import { Capacitor } from '@capacitor/core';
+import { isElectron } from './electronAdapter';
 import type {
   DiscoveredDevice,
   TrustedDevice,
@@ -71,7 +72,7 @@ function getHandshake(): DeviceHandshake {
     id: getDeviceId(),
     name: getDeviceName(),
     type: getDeviceType(),
-    appVersion: '1.5.0',
+    appVersion: '1.6.0',
   };
 }
 
@@ -112,10 +113,21 @@ export function isTrustedDevice(deviceId: string): boolean {
 
 /**
  * 获取本机局域网 IP 地址
- * 使用 WebRTC RTCPeerConnection API（STUN），无需外部 HTTP 服务
+ * - Electron: 通过 IPC 直接读取网络接口（更快更准）
+ * - Web/移动端: 使用 WebRTC RTCPeerConnection API（STUN）
  * 失败时返回空字符串
  */
 export async function getLocalIp(): Promise<string> {
+  // Electron 环境优先使用 IPC
+  if (isElectron()) {
+    try {
+      const ip = await (window as any).electronAPI.sync.getLocalIp();
+      if (ip) return ip;
+    } catch {
+      // fallthrough to WebRTC
+    }
+  }
+
   return new Promise((resolve) => {
     const ips = new Set<string>();
     let resolved = false;
@@ -319,9 +331,26 @@ export function setReceiveHandler(handler: ReceiveHandler | null): void {
 
 /**
  * 启动本地 HTTPS 服务端
- * 监听发送方请求，弹出接收选择
+ * - Electron: 通过 IPC 启动 Node.js HTTPS 服务 + mDNS 广播
+ * - Web/移动端: 需要原生插件支持
  */
 export async function startLocalServer(port: number): Promise<void> {
+  if (isElectron()) {
+    // Electron 环境：通过 IPC 启动主进程的 HTTPS 服务
+    const actualPort = await (window as any).electronAPI.sync.startServer(port);
+    // 注册接收回调
+    (window as any).electronAPI.sync.onReceiveRequest((request: any) => {
+      if (currentReceiveHandler) {
+        currentReceiveHandler(request, request.data).then((action) => {
+          (window as any).electronAPI.sync.resolveReceive(action);
+        });
+      } else {
+        (window as any).electronAPI.sync.resolveReceive('reject');
+      }
+    });
+    return;
+  }
+
   const platform = Capacitor.getPlatform();
   if (platform === 'web') {
     // Web 平台：无法启动本地服务器
@@ -335,6 +364,10 @@ export async function startLocalServer(port: number): Promise<void> {
  * 停止本地服务
  */
 export async function stopLocalServer(): Promise<void> {
+  if (isElectron()) {
+    await (window as any).electronAPI.sync.stopServer();
+    return;
+  }
   // TODO: 停止原生服务
 }
 
@@ -355,8 +388,8 @@ export async function prepareZipForSend(): Promise<{ base64: string; filename: s
   const backups = await listBackups();
   if (backups.length === 0) throw new Error('创建备份失败');
 
-  // 读取最新的备份文件
-  const { Filesystem, Directory } = await import('@capacitor/filesystem');
+  // 读取最新的备份文件（使用适配器，兼容 Electron 环境）
+  const { Filesystem, Directory } = await import('./filesystemAdapter');
   const latest = backups[0];
   const result = await Filesystem.readFile({
     path: latest.path,

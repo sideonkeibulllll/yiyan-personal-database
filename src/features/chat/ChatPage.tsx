@@ -24,6 +24,8 @@ import {
   executeToolCall,
   formatToolResult,
   ALL_TOOL_NAMES,
+  ENTRY_TOOLS,
+  TODO_TOOLS,
 } from '@/services/chatBridge';
 import { getDatabase } from '@/services/database';
 import { EntryPickerPanel } from '@/components/EntryPickerPanel';
@@ -256,6 +258,8 @@ export function ChatPage() {
   const [mcpSelectedIds, setMcpSelectedIds] = useState<Set<string>>(new Set());
   const [mcpPickerOpen, setMcpPickerOpen] = useState(false);
   const [mcpPickerMode, setMcpPickerMode] = useState<'entry' | 'todo'>('entry');
+  // 已激活的 MCP 类型（一次性，发送后清空）
+  const [mcpActiveTools, setMcpActiveTools] = useState<string[]>([]);
 
   // 重命名
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -657,8 +661,8 @@ export function ChatPage() {
       let systemPrompt = '你是一个友好的AI助手。';
 
       // MCP 工具注入（按需）
-      if (mcpEnabled) {
-        const toolsPrompt = getToolsSystemPrompt(ALL_TOOL_NAMES);
+      if (mcpEnabled && mcpActiveTools.length > 0) {
+        const toolsPrompt = getToolsSystemPrompt(mcpActiveTools);
         if (toolsPrompt) {
           systemPrompt += '\n' + toolsPrompt;
         }
@@ -733,7 +737,7 @@ export function ChatPage() {
       );
 
       // 流式结束后解析工具调用
-      if (mcpEnabled) {
+      if (mcpEnabled && mcpActiveTools.length > 0) {
         const toolCall = parseToolCall(fullContent);
         if (toolCall) {
           const toolResult = await executeToolCall(toolCall.toolName, toolCall.arguments);
@@ -801,8 +805,10 @@ export function ChatPage() {
       // 清除全局预备列表
       const PREPARED_KEY = '__yiyan_prepared_entry_ids__';
       delete (window as any)[PREPARED_KEY];
+      // 清空已激活的 MCP 工具（一次性注入，发送后清除）
+      setMcpActiveTools([]);
     }
-  }, [input, isLoading, settings, currentSessionId, sessions, persistSessions, updateSessionMessages, thinkingEnabled, thinkingEffort, mcpEnabled, currentModel, pickerSelectedIds]);
+  }, [input, isLoading, settings, currentSessionId, sessions, persistSessions, updateSessionMessages, thinkingEnabled, thinkingEffort, mcpEnabled, mcpActiveTools, currentModel, pickerSelectedIds]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -1140,7 +1146,7 @@ export function ChatPage() {
               title="MCP 桥梁通道"
             >
               <IconTool />
-              <span>MCP</span>
+              <span>MCP{mcpActiveTools.length > 0 ? ` (${mcpActiveTools.length})` : ''}</span>
             </button>
 
             {/* MCP 类型选择面板 */}
@@ -1156,28 +1162,27 @@ export function ChatPage() {
                   <button
                     className="mcp-picker-option"
                     onClick={() => {
-                      setMcpSearchOpen(true);
+                      setMcpActiveTools(prev => [...new Set([...prev, ...ENTRY_TOOLS])]);
                       setMcpPickerOpen(false);
                     }}
                   >
                     <div className="mcp-picker-icon">📊</div>
                     <div className="mcp-picker-text">
                       <div className="mcp-picker-title">数据卡片 MCP</div>
-                      <div className="mcp-picker-desc">从记忆库选择条目作为上下文</div>
+                      <div className="mcp-picker-desc">注入数据卡片工具提示词</div>
                     </div>
                   </button>
                   <button
                     className="mcp-picker-option"
                     onClick={() => {
-                      setMcpSearchOpen(true);
-                      setMcpPickerMode('todo');
+                      setMcpActiveTools(prev => [...new Set([...prev, ...TODO_TOOLS])]);
                       setMcpPickerOpen(false);
                     }}
                   >
                     <div className="mcp-picker-icon">✅</div>
                     <div className="mcp-picker-text">
                       <div className="mcp-picker-title">待办卡片 MCP</div>
-                      <div className="mcp-picker-desc">从待办选择任务作为上下文</div>
+                      <div className="mcp-picker-desc">注入待办工具提示词</div>
                     </div>
                   </button>
                 </div>

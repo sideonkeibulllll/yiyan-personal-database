@@ -13,7 +13,7 @@
  */
 import JSZip from 'jszip';
 import { Capacitor } from '@capacitor/core';
-import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
+import { Filesystem, Directory } from './filesystemAdapter';
 import { getDatabase } from './database';
 import { getTodoDatabase } from './todoDatabase';
 import { contentHash } from '@/features/datamanager/types';
