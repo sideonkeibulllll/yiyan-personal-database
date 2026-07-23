@@ -264,6 +264,13 @@ export function ChatPage() {
   // 模型选择
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
 
+  // 余额查询
+  const [balanceInfo, setBalanceInfo] = useState<{
+    currentBalance: number | null;
+    lastBalance: number | null;
+    isQuerying: boolean;
+  }>({ currentBalance: null, lastBalance: null, isQuerying: false });
+
   // === 任务 2 新增状态 ===
   // 条目选择器面板（上传按钮触发）
   const [entryPickerOpen, setEntryPickerOpen] = useState(false);
@@ -431,6 +438,68 @@ export function ChatPage() {
     ));
     setModelPickerOpen(false);
   }, [currentSessionId, sessions, persistSessions]);
+
+  /* === 余额查询 === */
+  const BALANCE_STORAGE_KEY = 'yiyan_last_balance';
+
+  const handleQueryBalance = useCallback(async () => {
+    if (!settings.ai.apiKey) {
+      alert('请先在设置页面配置 AI API Key');
+      return;
+    }
+
+    setBalanceInfo(prev => ({ ...prev, isQuerying: true }));
+
+    try {
+      const baseURL = settings.ai.baseURL.replace(/\/$/, '');
+      let balanceURL: string;
+
+      if (baseURL.includes('siliconflow.cn')) {
+        balanceURL = `${baseURL}/user/balance`;
+      } else if (baseURL.includes('deepseek.com')) {
+        balanceURL = `${baseURL}/user/balance`;
+      } else {
+        balanceURL = `${baseURL}/user/balance`;
+      }
+
+      const response = await fetch(balanceURL, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${settings.ai.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`查询失败: ${response.status}`);
+      }
+
+      const data = await response.json();
+      let balance: number;
+
+      if (baseURL.includes('siliconflow.cn')) {
+        balance = parseFloat(data?.data?.available_balance || data?.available_balance || 0);
+      } else {
+        balance = parseFloat(data?.data?.available_balance || data?.available_balance || data?.balance || 0);
+      }
+
+      const savedLast = localStorage.getItem(BALANCE_STORAGE_KEY);
+      const lastBalance = savedLast ? parseFloat(savedLast) : null;
+
+      if (balanceInfo.currentBalance !== null) {
+        localStorage.setItem(BALANCE_STORAGE_KEY, balanceInfo.currentBalance.toString());
+      }
+
+      setBalanceInfo({
+        currentBalance: balance,
+        lastBalance: balanceInfo.currentBalance,
+        isQuerying: false,
+      });
+    } catch (error) {
+      setBalanceInfo(prev => ({ ...prev, isQuerying: false }));
+      alert(`余额查询失败: ${(error as Error).message}`);
+    }
+  }, [settings.ai.apiKey, settings.ai.baseURL, balanceInfo.currentBalance]);
 
   /* === MCP 搜索 === */
   const handleMcpSearch = useCallback(async () => {
@@ -875,6 +944,30 @@ export function ChatPage() {
                     {(currentSession?.model || '') === opt.value && <span className="check">✓</span>}
                   </div>
                 ))}
+
+                <div className="model-picker-divider" />
+
+                <div
+                  className={`model-option balance-option ${balanceInfo.isQuerying ? 'disabled' : ''}`}
+                  onClick={() => !balanceInfo.isQuerying && handleQueryBalance()}
+                >
+                  <span className="balance-label">
+                    {balanceInfo.isQuerying
+                      ? '查询中...'
+                      : balanceInfo.currentBalance !== null
+                        ? `${balanceInfo.currentBalance.toFixed(2)} 元`
+                        : '余额查询'}
+                  </span>
+                  {balanceInfo.currentBalance !== null && !balanceInfo.isQuerying && (
+                    <span className="balance-refresh-hint">点击刷新</span>
+                  )}
+                </div>
+
+                {balanceInfo.currentBalance !== null && balanceInfo.lastBalance !== null && (
+                  <div className="balance-usage-info">
+                    使用 {(balanceInfo.lastBalance - balanceInfo.currentBalance).toFixed(2)} 元
+                  </div>
+                )}
               </div>
             )}
           </div>

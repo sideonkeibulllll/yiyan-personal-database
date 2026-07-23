@@ -42,7 +42,17 @@ yarn-error.log*
 # Temporary files
 tmp/
 temp/
+_tmp_md_backup/
+
+# Design library (local only)
+.design_library/
 
 # Work logs / task notes (not for release)
-*_20260722.md
-*_20260723.md
+*_2026*.md
+分析.md
+规划.md
+对比.md
+原始提示词*.md
+quickmenu-fix_*.md
+todo-sprint*.md
+entry_tags_info_optimization.md
