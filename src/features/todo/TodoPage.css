@@ -184,7 +184,7 @@
   line-height: 1.5;
 }
 
-/* === 滑动背景 === */
+/* === 滑动背景（仅触屏滑动时可见） === */
 .todo-swipe-left,
 .todo-swipe-right {
   position: absolute;
@@ -196,6 +196,8 @@
   font-size: var(--text-sm);
   font-weight: 500;
   z-index: 0;
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-out);
 }
 
 .todo-swipe-left {

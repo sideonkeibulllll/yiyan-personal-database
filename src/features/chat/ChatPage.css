@@ -1279,3 +1279,87 @@
   color: var(--color-accent-primary);
   background: var(--color-accent-subtle);
 }
+
+/* === MCP 类型选择面板 === */
+.mcp-picker-panel {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(320px, 90vw);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  z-index: 200;
+  animation: slideUp var(--duration-normal) var(--ease-out);
+}
+
+.mcp-picker-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border-primary);
+}
+
+.mcp-picker-header h4 {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.mcp-picker-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-tertiary);
+  padding: var(--space-1);
+  display: flex;
+  align-items: center;
+}
+
+.mcp-picker-options {
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.mcp-picker-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-primary);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+  text-align: left;
+}
+
+.mcp-picker-option:hover {
+  background: var(--color-accent-subtle);
+  border-color: var(--color-border-accent);
+}
+
+.mcp-picker-icon {
+  font-size: 24px;
+  flex-shrink: 0;
+}
+
+.mcp-picker-text {
+  flex: 1;
+}
+
+.mcp-picker-title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.mcp-picker-desc {
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  margin-top: 2px;
+}

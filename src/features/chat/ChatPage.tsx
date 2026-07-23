@@ -254,6 +254,8 @@ export function ChatPage() {
   const [mcpSearchTagFilter, setMcpSearchTagFilter] = useState('');
   const [mcpSearchGroupFilter, setMcpSearchGroupFilter] = useState('');
   const [mcpSelectedIds, setMcpSelectedIds] = useState<Set<string>>(new Set());
+  const [mcpPickerOpen, setMcpPickerOpen] = useState(false);
+  const [mcpPickerMode, setMcpPickerMode] = useState<'entry' | 'todo'>('entry');
 
   // 重命名
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -976,71 +978,14 @@ export function ChatPage() {
           <div ref={messagesEndRef} />
         </div>
 
-        {/* === MCP 搜索面板（半页）=== */}
+        {/* === MCP 搜索面板（半页，支持数据/待办切换）=== */}
         {mcpSearchOpen && (
-          <div className="mcp-search-panel glass">
-            <div className="mcp-search-header">
-              <h3>搜索记忆库条目</h3>
-              <button className="mcp-search-close" onClick={() => setMcpSearchOpen(false)}>
-                <IconClose />
-              </button>
-            </div>
-            <div className="mcp-search-filters">
-              <input
-                className="mcp-search-input"
-                placeholder="关键字搜索…"
-                value={mcpSearchQuery}
-                onChange={e => setMcpSearchQuery(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') handleMcpSearch(); }}
-              />
-              <input
-                className="mcp-search-input"
-                placeholder="标签（逗号分隔）…"
-                value={mcpSearchTagFilter}
-                onChange={e => setMcpSearchTagFilter(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') handleMcpSearch(); }}
-              />
-              <input
-                className="mcp-search-input"
-                placeholder="组名…"
-                value={mcpSearchGroupFilter}
-                onChange={e => setMcpSearchGroupFilter(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') handleMcpSearch(); }}
-              />
-              <button className="mcp-search-btn" onClick={handleMcpSearch}>搜索</button>
-            </div>
-            <div className="mcp-search-results">
-              {mcpSearchResults.length > 0 ? (
-                mcpSearchResults.map(entry => (
-                  <div
-                    key={entry.id}
-                    className={`mcp-result-item ${mcpSelectedIds.has(entry.id) ? 'selected' : ''}`}
-                    onClick={() => handleMcpToggleSelect(entry.id)}
-                  >
-                    <div className="mcp-result-checkbox">
-                      {mcpSelectedIds.has(entry.id) ? '✓' : ''}
-                    </div>
-                    <div className="mcp-result-content">
-                      <div className="mcp-result-text">{entry.content.slice(0, 150)}</div>
-                      <div className="mcp-result-meta">
-                        {entry.source && <span>来源: {entry.source}</span>}
-                        {entry.isStarred && <span>⭐</span>}
-                        <span>{formatDate(entry.createdAt)}</span>
-                      </div>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="mcp-search-empty">输入条件后点击搜索</div>
-              )}
-            </div>
-            <div className="mcp-search-footer">
-              <span className="mcp-selected-count">已选 {mcpSelectedIds.size} 条</span>
-              <button className="mcp-confirm-btn" onClick={handleMcpConfirmSelection}>
-                确认选择
-              </button>
-            </div>
-          </div>
+          <EntryPickerPanel
+            selectedIds={mcpSelectedIds}
+            onSelectionChange={setMcpSelectedIds}
+            onClose={() => setMcpSearchOpen(false)}
+            initialMode={mcpPickerMode}
+          />
         )}
 
         {/* 底部输入区 */}
@@ -1077,13 +1022,13 @@ export function ChatPage() {
               </button>
             )}
 
-            {/* MCP 开关 */}
+            {/* MCP 开关 - 点击展开选择器面板 */}
             <button
               className={`toolbar-btn ${mcpEnabled ? 'active mcp' : ''}`}
               onClick={() => {
                 setMcpEnabled(!mcpEnabled);
-                if (!mcpEnabled && !mcpSearchOpen) {
-                  setMcpSearchOpen(true);
+                if (!mcpEnabled) {
+                  setMcpPickerOpen(true);
                 }
               }}
               title="MCP 桥梁通道"
@@ -1091,6 +1036,47 @@ export function ChatPage() {
               <IconTool />
               <span>MCP</span>
             </button>
+
+            {/* MCP 类型选择面板 */}
+            {mcpPickerOpen && (
+              <div className="mcp-picker-panel glass">
+                <div className="mcp-picker-header">
+                  <h4>选择 MCP 类型</h4>
+                  <button className="mcp-picker-close" onClick={() => setMcpPickerOpen(false)}>
+                    <IconClose />
+                  </button>
+                </div>
+                <div className="mcp-picker-options">
+                  <button
+                    className="mcp-picker-option"
+                    onClick={() => {
+                      setMcpSearchOpen(true);
+                      setMcpPickerOpen(false);
+                    }}
+                  >
+                    <div className="mcp-picker-icon">📊</div>
+                    <div className="mcp-picker-text">
+                      <div className="mcp-picker-title">数据卡片 MCP</div>
+                      <div className="mcp-picker-desc">从记忆库选择条目作为上下文</div>
+                    </div>
+                  </button>
+                  <button
+                    className="mcp-picker-option"
+                    onClick={() => {
+                      setMcpSearchOpen(true);
+                      setMcpPickerMode('todo');
+                      setMcpPickerOpen(false);
+                    }}
+                  >
+                    <div className="mcp-picker-icon">✅</div>
+                    <div className="mcp-picker-text">
+                      <div className="mcp-picker-title">待办卡片 MCP</div>
+                      <div className="mcp-picker-desc">从待办选择任务作为上下文</div>
+                    </div>
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* 搜索回看按钮 */}
             {mcpEnabled && currentSession?.mcpSearchResults && currentSession.mcpSearchResults.length > 0 && (

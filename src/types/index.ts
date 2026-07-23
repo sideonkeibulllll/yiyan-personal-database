@@ -55,7 +55,7 @@ export interface RandomConfig {
 export type TodoStatus = 'pending' | 'done';
 
 /** 待办搜索时间筛选 */
-export type TodoSearchTimeFilter = 'future' | 'expired' | 'expiredOverMonth';
+export type TodoSearchTimeFilter = 'future' | 'expired' | 'expiredOverMonth' | 'all';
 
 /** 待办项 */
 export interface Todo {
@@ -69,6 +69,8 @@ export interface Todo {
   isToday: boolean;
   /** 标签 ID 列表 */
   tagIds?: string[];
+  /** 标签对象列表（查询时联表填充） */
+  tags?: TodoTag[];
   /** 创建时间 */
   createdAt: number;
   /** 更新时间 */

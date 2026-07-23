@@ -187,6 +187,11 @@ export function TodoPage() {
         <button className="todo-import-btn glass" onClick={handleImportTemplate}>
           <span>从模板导入</span>
         </button>
+
+        {/* 新建待办 */}
+        <button className="todo-import-btn glass todo-new-btn" onClick={() => navigate('/todo/new')}>
+          <span>新建待办</span>
+        </button>
       </main>
 
       {/* 底部倒计时条 */}
@@ -239,10 +244,8 @@ function TodoItem({ todo, now, onToggleDone, onDelete, onEdit }: TodoItemProps) 
 
   const handleTouchEnd = useCallback(() => {
     if (swipeOffset <= -80) {
-      // 左滑完成
       onToggleDone();
     } else if (swipeOffset >= 80) {
-      // 右滑删除
       onDelete();
     }
     setSwipeOffset(0);
@@ -255,6 +258,27 @@ function TodoItem({ todo, now, onToggleDone, onDelete, onEdit }: TodoItemProps) 
 
   const isDone = todo.status === 'done';
 
+  // 获取标签颜色（如果有标签）
+  const tagColor = todo.tags && todo.tags.length > 0 ? todo.tags[0].color : undefined;
+
+  // 复制内容
+  const handleCopy = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(todo.title);
+      setShowMenu(false);
+    } catch {}
+  }, [todo.title]);
+
+  // 添加到录入主页面
+  const handleAddToInput = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    // 将待办标题存入 sessionStorage，HomePage 加载时读取
+    sessionStorage.setItem('__yiyan_todo_to_input__', todo.title);
+    window.location.href = '/';
+    setShowMenu(false);
+  }, [todo.title]);
+
   return (
     <div
       className={`todo-item ${isDone ? 'done' : ''} ${todo.isToday ? 'is-today' : ''}`}
@@ -262,8 +286,15 @@ function TodoItem({ todo, now, onToggleDone, onDelete, onEdit }: TodoItemProps) 
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
       onClick={() => !isSwiping.current && setShowMenu(!showMenu)}
-      style={{ transform: `translateX(${swipeOffset}px)` }}
+      onContextMenu={e => e.preventDefault()}
+      style={{
+        transform: `translateX(${swipeOffset}px)`,
+        ...(tagColor ? { background: tagColor } : {}),
+      }}
     >
+      {/* 半透明隔膜层，确保文字可读 */}
+      {tagColor && <div className="todo-item-overlay" />}
+
       <div className="todo-item-main">
         <div className="todo-item-header">
           <span className="todo-item-title">{todo.title}</span>
@@ -281,7 +312,7 @@ function TodoItem({ todo, now, onToggleDone, onDelete, onEdit }: TodoItemProps) 
         {todo.note && <div className="todo-item-note">{todo.note}</div>}
       </div>
 
-      {/* 滑动背景 */}
+      {/* 滑动背景（仅触屏滑动时可见） */}
       <div className="todo-swipe-left">
         <span>{isDone ? '重新激活' : '完成'}</span>
       </div>
@@ -289,9 +320,11 @@ function TodoItem({ todo, now, onToggleDone, onDelete, onEdit }: TodoItemProps) 
         <span>删除</span>
       </div>
 
-      {/* 长按菜单 */}
+      {/* 点击菜单 */}
       {showMenu && (
         <div className="todo-quick-menu" onClick={e => e.stopPropagation()}>
+          <button onClick={handleCopy}>复制</button>
+          <button onClick={handleAddToInput}>添加到录入</button>
           <button onClick={onToggleDone}>{isDone ? '重新激活' : '标记完成'}</button>
           <button onClick={onEdit}>编辑</button>
           <button onClick={() => { onDelete(); setShowMenu(false); }}>删除</button>

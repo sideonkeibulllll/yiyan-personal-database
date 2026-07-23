@@ -263,3 +263,53 @@
   background: var(--color-accent-primary);
   color: var(--color-bg-primary);
 }
+
+/* === 模式切换 === */
+.ep-mode-switch {
+  display: flex;
+  gap: var(--space-2);
+  padding: 0 var(--space-4) var(--space-2);
+}
+
+.ep-mode-btn {
+  flex: 1;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-primary);
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.ep-mode-btn.active {
+  background: var(--color-accent-subtle);
+  border-color: var(--color-border-accent);
+  color: var(--color-accent-primary);
+  font-weight: 600;
+}
+
+/* === 待办筛选按钮 === */
+.ep-todo-filter-buttons {
+  display: flex;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.ep-filter-btn {
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-full);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-primary);
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.ep-filter-btn.active {
+  background: var(--color-accent-subtle);
+  border-color: var(--color-border-accent);
+  color: var(--color-accent-primary);
+}

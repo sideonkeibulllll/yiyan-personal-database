@@ -309,3 +309,17 @@ a {
   background: var(--color-accent-subtle);
   border-color: var(--color-border-accent);
 }
+
+/* === 全局禁用长按选中文字 === */
+* {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* 允许输入框和文本域选中 */
+input, textarea, [contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}

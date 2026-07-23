@@ -10,7 +10,8 @@
  */
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { getDatabase } from '@/services/database';
-import type { Entry } from '@/types';
+import { getTodoDatabase } from '@/services/todoDatabase';
+import type { Entry, Todo } from '@/types';
 import './EntryPickerPanel.css';
 
 interface EntryPickerPanelProps {
@@ -24,6 +25,8 @@ interface EntryPickerPanelProps {
   initialEntryId?: string;
   /** 是否允许多选（默认 true） */
   multiSelect?: boolean;
+  /** 初始模式：'entry' 数据选择器 或 'todo' 待办选择器 */
+  initialMode?: 'entry' | 'todo';
 }
 
 /** 搜索 SVG */
@@ -55,6 +58,12 @@ const ChevronUpSvg = () => (
 function formatDate(ts: number): string {
   const d = new Date(ts);
   return `${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+/** 格式化时间简短显示 */
+function formatTimeShort(ts: number): string {
+  const d = new Date(ts);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
 /** 单行卡片 */
@@ -140,11 +149,16 @@ export function EntryPickerPanel({
   onClose,
   initialEntryId,
   multiSelect = true,
+  initialMode = 'entry',
 }: EntryPickerPanelProps) {
+  // 模式切换：'entry' 数据选择器 或 'todo' 待办选择器
+  const [pickerMode, setPickerMode] = useState<'entry' | 'todo'>(initialMode);
   // 搜索
   const [searchQuery, setSearchQuery] = useState('');
   // 数据列表（第二块）
   const [dataEntries, setDataEntries] = useState<Entry[]>([]);
+  // 待办列表（第二块，待办模式）
+  const [dataTodos, setDataTodos] = useState<Todo[]>([]);
   // 关联列表（第三块）
   const [relatedEntries, setRelatedEntries] = useState<Entry[]>([]);
   // 当前选中的"主"条目（用于关联刷新）
@@ -152,41 +166,60 @@ export function EntryPickerPanel({
   // 加载状态
   const [loadingData, setLoadingData] = useState(false);
   const [loadingRelated, setLoadingRelated] = useState(false);
+  // 待办模式下块过滤：'tag' 按标签 或 'time' 按时间
+  const [todoFilterMode, setTodoFilterMode] = useState<'tag' | 'time'>('time');
 
   /** 搜索条目 → 刷新第二块 */
   const handleSearch = useCallback(async () => {
     setLoadingData(true);
     try {
-      const db = await getDatabase();
-      let results: Entry[];
-      if (searchQuery.trim()) {
-        results = await db.searchEntries(searchQuery.trim());
+      if (pickerMode === 'todo') {
+        // 待办模式：加载待办数据
+        const todoDb = await getTodoDatabase();
+        const today = new Date();
+        const y = today.getFullYear();
+        const m = String(today.getMonth() + 1).padStart(2, '0');
+        const d = String(today.getDate()).padStart(2, '0');
+        const todayStr = `${y}-${m}-${d}`;
+        let results: Todo[];
+        if (searchQuery.trim()) {
+          results = await todoDb.searchTodos(searchQuery.trim(), 'all');
+        } else {
+          results = await todoDb.getTodosByDate(todayStr);
+        }
+        setDataTodos(results);
+        setDataEntries([]);
       } else {
-        results = await db.getAllEntries();
+        const db = await getDatabase();
+        let results: Entry[];
+        if (searchQuery.trim()) {
+          results = await db.searchEntries(searchQuery.trim());
+        } else {
+          results = await db.getAllEntries();
+        }
+        // === 修复 2：按最近复制和最近长按排序 ===
+        const COPY_KEY = '__yiyan_last_copy_at__';
+        const MENU_KEY = '__yiyan_last_menu_at__';
+        const copyMap: Record<string, number> = (window as any)[COPY_KEY] || {};
+        const menuMap: Record<string, number> = (window as any)[MENU_KEY] || {};
+        results.sort((a, b) => {
+          const aCopy = copyMap[a.id] || 0;
+          const bCopy = copyMap[b.id] || 0;
+          const aMenu = menuMap[a.id] || 0;
+          const bMenu = menuMap[b.id] || 0;
+          const aMax = Math.max(aCopy, aMenu, a.lastUsedAt || 0);
+          const bMax = Math.max(bCopy, bMenu, b.lastUsedAt || 0);
+          return bMax - aMax;
+        });
+        setDataEntries(results);
+        setDataTodos([]);
       }
-      // === 修复 2：按最近复制和最近长按排序 ===
-      // 从 window 读取交互记录
-      const COPY_KEY = '__yiyan_last_copy_at__';
-      const MENU_KEY = '__yiyan_last_menu_at__';
-      const copyMap: Record<string, number> = (window as any)[COPY_KEY] || {};
-      const menuMap: Record<string, number> = (window as any)[MENU_KEY] || {};
-      results.sort((a, b) => {
-        const aCopy = copyMap[a.id] || 0;
-        const bCopy = copyMap[b.id] || 0;
-        const aMenu = menuMap[a.id] || 0;
-        const bMenu = menuMap[b.id] || 0;
-        // 取复制和长按中最新的时间
-        const aMax = Math.max(aCopy, aMenu, a.lastUsedAt || 0);
-        const bMax = Math.max(bCopy, bMenu, b.lastUsedAt || 0);
-        return bMax - aMax;
-      });
-      setDataEntries(results);
     } catch (err) {
       console.error('搜索失败:', err);
     } finally {
       setLoadingData(false);
     }
-  }, [searchQuery]);
+  }, [searchQuery, pickerMode]);
 
   /** 获取与指定条目关联的其他条目 */
   const loadRelated = useCallback(async (entryId: string, currentSelectedIds?: Set<string>) => {
@@ -241,10 +274,62 @@ export function EntryPickerPanel({
     }
   }, [selectedIds]);
 
+  /** 加载待办关联数据：同标签或同日期 */
+  const loadTodoRelated = useCallback(async (todoId: string, currentSelectedIds?: Set<string>) => {
+    setLoadingRelated(true);
+    try {
+      const todoDb = await getTodoDatabase();
+      const todo = await todoDb.getTodoById(todoId);
+      if (!todo) {
+        setRelatedEntries([]);
+        return;
+      }
+
+      const relatedMap = new Map<string, Entry>();
+
+      // 同日期待办中的同标签
+      if (todo.tags && todo.tags.length > 0) {
+        const sameDateTodos = await todoDb.getTodosByDate(todo.folderDate);
+        for (const t of sameDateTodos) {
+          if (t.id === todoId) continue;
+          if (t.tags && t.tags.some(tag => todo.tags!.some(tt => tt.id === tag.id))) {
+            // 将 Todo 转为类似 Entry 的结构以复用 EntryCard
+            relatedMap.set(t.id, {
+              id: t.id,
+              content: t.title,
+              createdAt: t.createdAt,
+              updatedAt: t.updatedAt,
+              isStarred: false,
+              copyCount: 0,
+              tags: t.tags,
+            } as Entry);
+          }
+        }
+      }
+
+      const selectedToFilter = currentSelectedIds ?? selectedIds;
+      const filtered = Array.from(relatedMap.values()).filter(
+        e => !selectedToFilter.has(e.id)
+      );
+      setRelatedEntries(filtered);
+    } catch (err) {
+      console.error('加载待办关联失败:', err);
+      setRelatedEntries([]);
+    } finally {
+      setLoadingRelated(false);
+    }
+  }, [selectedIds]);
+
   /** 初始加载 */
   useEffect(() => {
     handleSearch();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** 切换模式时重新加载 */
+  useEffect(() => {
+    handleSearch();
+    setRelatedEntries([]);
+  }, [pickerMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /** 如果有初始选中条目，加载关联 */
   useEffect(() => {
@@ -268,7 +353,11 @@ export function EntryPickerPanel({
       newSet.add(entryId);
       onSelectionChange(newSet);
       setCurrentEntryId(entryId);
-      loadRelated(entryId);
+      if (pickerMode === 'entry') {
+        loadRelated(entryId);
+      } else {
+        loadTodoRelated(entryId);
+      }
       return;
     }
 
@@ -281,8 +370,12 @@ export function EntryPickerPanel({
     }
     onSelectionChange(newSet);
     setCurrentEntryId(entryId);
-    loadRelated(entryId);
-  }, [multiSelect, selectedIds, onSelectionChange, loadRelated]);
+    if (pickerMode === 'entry') {
+      loadRelated(entryId);
+    } else {
+      loadTodoRelated(entryId);
+    }
+  }, [multiSelect, selectedIds, onSelectionChange, loadRelated, pickerMode]);
 
   /** 点击关联块中的条目 */
   const handleRelatedEntryClick = useCallback((entryId: string) => {
@@ -315,12 +408,24 @@ export function EntryPickerPanel({
           <button className="ep-close" onClick={onClose}><CloseSvg /></button>
         </div>
 
+        {/* 模式切换 */}
+        <div className="ep-mode-switch">
+          <button
+            className={`ep-mode-btn ${pickerMode === 'entry' ? 'active' : ''}`}
+            onClick={() => setPickerMode('entry')}
+          >数据</button>
+          <button
+            className={`ep-mode-btn ${pickerMode === 'todo' ? 'active' : ''}`}
+            onClick={() => setPickerMode('todo')}
+          >待办</button>
+        </div>
+
         {/* 第一块：搜索 */}
         <div className="ep-search-section">
           <div className="ep-search-row">
             <input
               className="ep-search-input"
-              placeholder="关键字搜索…"
+              placeholder={pickerMode === 'todo' ? '搜索待办…' : '关键字搜索…'}
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') handleSearch(); }}
@@ -332,52 +437,109 @@ export function EntryPickerPanel({
           </div>
         </div>
 
-        {/* 第二块：数据 */}
+        {/* 第二块：数据/待办 */}
         <div className="ep-data-section">
           <div className="ep-section-label">
-            数据 {dataEntries.length > 0 && <span className="ep-count">({dataEntries.length})</span>}
+            {pickerMode === 'todo' ? '待办' : '数据'} {(pickerMode === 'todo' ? dataTodos.length : dataEntries.length) > 0 && <span className="ep-count">({pickerMode === 'todo' ? dataTodos.length : dataEntries.length})</span>}
           </div>
           <div className="ep-list" style={{ maxHeight: '30vh', overflowY: 'auto' }}>
             {loadingData ? (
               <div className="ep-loading">加载中…</div>
-            ) : dataEntries.length > 0 ? (
-              dataEntries.map(entry => (
-                <EntryCard
-                  key={entry.id}
-                  entry={entry}
-                  isSelected={selectedIds.has(entry.id)}
-                  onToggle={() => handleDataEntryClick(entry.id)}
-                />
-              ))
+            ) : pickerMode === 'todo' ? (
+              dataTodos.length > 0 ? (
+                dataTodos.map(todo => (
+                  <div
+                    key={todo.id}
+                    className={`ep-card ${selectedIds.has(todo.id) ? 'selected' : ''}`}
+                    onClick={() => handleDataEntryClick(todo.id)}
+                  >
+                    <div className="ep-card-main">
+                      <div className={`ep-card-checkbox ${selectedIds.has(todo.id) ? 'checked' : ''}`}>
+                        {selectedIds.has(todo.id) && '✓'}
+                      </div>
+                      <div className="ep-card-text">{todo.title}</div>
+                      {todo.startTime && <span className="ep-card-date">{formatTimeShort(todo.startTime)}</span>}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="ep-empty">暂无待办</div>
+              )
             ) : (
-              <div className="ep-empty">暂无数据</div>
+              dataEntries.length > 0 ? (
+                dataEntries.map(entry => (
+                  <EntryCard
+                    key={entry.id}
+                    entry={entry}
+                    isSelected={selectedIds.has(entry.id)}
+                    onToggle={() => handleDataEntryClick(entry.id)}
+                  />
+                ))
+              ) : (
+                <div className="ep-empty">暂无数据</div>
+              )
             )}
           </div>
         </div>
 
-        {/* 第三块：关联数据 */}
-        <div className="ep-related-section">
-          <div className="ep-section-label">
-            关联数据 {relatedEntries.length > 0 && <span className="ep-count">({relatedEntries.length})</span>}
-            {currentEntryId && <span className="ep-current-hint">· 基于：{dataEntries.find(e => e.id === currentEntryId)?.content.slice(0, 20) ?? '…'}…</span>}
+        {/* 第三块：待办模式下的筛选块 */}
+        {pickerMode === 'todo' ? (
+          <div className="ep-related-section">
+            <div className="ep-section-label">
+              按标签/按时间
+            </div>
+            <div className="ep-todo-filter-buttons">
+              <button
+                className={`ep-filter-btn ${todoFilterMode === 'time' ? 'active' : ''}`}
+                onClick={() => setTodoFilterMode('time')}
+              >按时间</button>
+              <button
+                className={`ep-filter-btn ${todoFilterMode === 'tag' ? 'active' : ''}`}
+                onClick={() => setTodoFilterMode('tag')}
+              >按标签</button>
+            </div>
+            <div className="ep-list" style={{ maxHeight: '20vh', overflowY: 'auto' }}>
+              {loadingRelated ? (
+                <div className="ep-loading">加载中…</div>
+              ) : relatedEntries.length > 0 ? (
+                relatedEntries.map(entry => (
+                  <EntryCard
+                    key={entry.id}
+                    entry={entry}
+                    isSelected={selectedIds.has(entry.id)}
+                    onToggle={() => handleRelatedEntryClick(entry.id)}
+                  />
+                ))
+              ) : (
+                <div className="ep-empty">选择上方待办后显示关联</div>
+              )}
+            </div>
           </div>
-          <div className="ep-list" style={{ maxHeight: '25vh', overflowY: 'auto' }}>
-            {loadingRelated ? (
-              <div className="ep-loading">加载中…</div>
-            ) : relatedEntries.length > 0 ? (
-              relatedEntries.map(entry => (
-                <EntryCard
-                  key={entry.id}
-                  entry={entry}
-                  isSelected={selectedIds.has(entry.id)}
-                  onToggle={() => handleRelatedEntryClick(entry.id)}
-                />
-              ))
-            ) : (
-              <div className="ep-empty">选择上方条目后显示关联</div>
-            )}
+        ) : (
+          /* 第三块：数据模式下的关联数据 */
+          <div className="ep-related-section">
+            <div className="ep-section-label">
+              关联数据 {relatedEntries.length > 0 && <span className="ep-count">({relatedEntries.length})</span>}
+              {currentEntryId && <span className="ep-current-hint">· 基于：{dataEntries.find(e => e.id === currentEntryId)?.content.slice(0, 20) ?? '…'}…</span>}
+            </div>
+            <div className="ep-list" style={{ maxHeight: '25vh', overflowY: 'auto' }}>
+              {loadingRelated ? (
+                <div className="ep-loading">加载中…</div>
+              ) : relatedEntries.length > 0 ? (
+                relatedEntries.map(entry => (
+                  <EntryCard
+                    key={entry.id}
+                    entry={entry}
+                    isSelected={selectedIds.has(entry.id)}
+                    onToggle={() => handleRelatedEntryClick(entry.id)}
+                  />
+                ))
+              ) : (
+                <div className="ep-empty">选择上方条目后显示关联</div>
+              )}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* 底部 */}
         <div className="ep-footer">

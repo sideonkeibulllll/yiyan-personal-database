@@ -16,9 +16,9 @@ type InputMode = 'input' | 'tag' | 'info';
 
 /** 快捷时间预设（分钟后当前时间）*/
 const QUICK_TIME_PRESETS: { label: string; offsetMinutes: number }[] = [
+  { label: '-10分钟', offsetMinutes: -10 },
   { label: '+30分钟', offsetMinutes: 30 },
   { label: '+1小时', offsetMinutes: 60 },
-  { label: '+2小时', offsetMinutes: 120 },
   { label: '+4小时', offsetMinutes: 240 },
   { label: '今天18点', offsetMinutes: -1 }, // 特殊值，实际计算在函数里
   { label: '明天12点', offsetMinutes: -2 },
@@ -37,6 +37,17 @@ function getTomorrowAtHour(hour: number): number {
   now.setDate(now.getDate() + 1);
   now.setHours(hour, 0, 0, 0);
   return now.getTime();
+}
+
+/** 将时间戳转为本地 datetime-local 格式 (不使用 ISO，避免时区问题) */
+function toLocalDatetimeInput(ts: number): string {
+  const d = new Date(ts);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  const h = String(d.getHours()).padStart(2, '0');
+  const min = String(d.getMinutes()).padStart(2, '0');
+  return `${y}-${m}-${day}T${h}:${min}`;
 }
 
 /** 将时间戳转为 YYYY-MM-DD */
@@ -125,6 +136,18 @@ export function HomePage() {
       textareaRef.current.focus();
     }
   }, [mode]);
+
+  // 读取从待办页面传来的「添加到录入」内容
+  useEffect(() => {
+    const pendingTodo = sessionStorage.getItem('__yiyan_todo_to_input__');
+    if (pendingTodo) {
+      setContent(pendingTodo);
+      sessionStorage.removeItem('__yiyan_todo_to_input__');
+      if (textareaRef.current) {
+        textareaRef.current.focus();
+      }
+    }
+  }, []);
 
   // 显示轻提示
   const showToastMessage = useCallback((message: string) => {
@@ -269,22 +292,29 @@ export function HomePage() {
     navigate(`/entry/${lastEntryId}/edit`);
   }, [lastEntryId, navigate, showToastMessage]);
 
-  // 处理快捷时间预设
+  // 处理快捷时间预设（递增型：+x小时和-10分钟多次点击会累加）
   const handleQuickTime = useCallback((preset: typeof QUICK_TIME_PRESETS[0], target: 'start' | 'end') => {
+    const currentVal = target === 'start' ? todoStartTime : todoEndTime;
     let ts: number;
     if (preset.offsetMinutes === -1) {
       ts = getTodayAtHour(18);
     } else if (preset.offsetMinutes === -2) {
       ts = getTomorrowAtHour(12);
+    } else if (preset.offsetMinutes > 0) {
+      // +x小时：递增，基于当前已选时间或当前时间
+      const base = currentVal ?? Date.now();
+      ts = base + preset.offsetMinutes * 60 * 1000;
     } else {
-      ts = Date.now() + preset.offsetMinutes * 60 * 1000;
+      // -10分钟：递减，基于当前已选时间或当前时间
+      const base = currentVal ?? Date.now();
+      ts = base + preset.offsetMinutes * 60 * 1000;
     }
     if (target === 'start') {
       setTodoStartTime(ts);
     } else {
       setTodoEndTime(ts);
     }
-  }, []);
+  }, [todoStartTime, todoEndTime]);
 
   return (
     <div className="home-page">
@@ -311,7 +341,9 @@ export function HomePage() {
                 checked={isTodoMode}
                 onChange={e => {
                   setIsTodoMode(e.target.checked);
-                  if (!e.target.checked) {
+                  if (e.target.checked) {
+                    setShowTodoAdvanced(true); // 点击待办模式后自动展开高级选项
+                  } else {
                     setShowTodoAdvanced(false);
                     setTodoStartTime(undefined);
                     setTodoEndTime(undefined);
@@ -349,7 +381,7 @@ export function HomePage() {
                       <input
                         type="datetime-local"
                         className="todo-time-input glass"
-                        value={todoStartTime ? new Date(todoStartTime).toISOString().slice(0, 16) : ''}
+                        value={todoStartTime ? toLocalDatetimeInput(todoStartTime) : ''}
                         onChange={e => setTodoStartTime(e.target.value ? new Date(e.target.value).getTime() : undefined)}
                       />
                     </div>
@@ -371,7 +403,7 @@ export function HomePage() {
                       <input
                         type="datetime-local"
                         className="todo-time-input glass"
-                        value={todoEndTime ? new Date(todoEndTime).toISOString().slice(0, 16) : ''}
+                        value={todoEndTime ? toLocalDatetimeInput(todoEndTime) : ''}
                         onChange={e => setTodoEndTime(e.target.value ? new Date(e.target.value).getTime() : undefined)}
                       />
                     </div>
