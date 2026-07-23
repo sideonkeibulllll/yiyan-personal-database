@@ -1,7 +1,7 @@
 {
   "name": "yiyan-personal-database",
   "private": true,
-  "version": "1.6.0",
+  "version": "1.6.1",
   "type": "module",
   "main": "dist-electron/main/main.js",
   "scripts": {
@@ -28,6 +28,7 @@
     "antd-mobile": "^5.37.1",
     "antd-mobile-icons": "^0.3.0",
     "bonjour-service": "^1.4.3",
+    "html2canvas": "^1.4.1",
     "jeep-sqlite": "^2.8.0",
     "jszip": "^3.10.1",
     "react": "^18.3.1",

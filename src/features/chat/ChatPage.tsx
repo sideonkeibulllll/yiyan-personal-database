@@ -19,17 +19,22 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { renderMarkdown } from '@/utils/markdown';
 import {
-  getToolsSystemPrompt,
-  parseToolCall,
+  buildToolsPayload,
+  accumulateToolCallDeltas,
+  parseToolArguments,
   executeToolCall,
-  formatToolResult,
-  ALL_TOOL_NAMES,
+  formatToolResultMessage,
+  formatToolResultForUI,
+  type ResolvedToolCall,
+  type ToolCallDelta,
   ENTRY_TOOLS,
   TODO_TOOLS,
 } from '@/services/chatBridge';
 import { getDatabase } from '@/services/database';
+import { getTodoDatabase } from '@/services/todoDatabase';
 import { EntryPickerPanel } from '@/components/EntryPickerPanel';
-import type { Entry } from '@/types';
+import html2canvas from 'html2canvas';
+import type { Entry, Todo } from '@/types';
 import './ChatPage.css';
 
 /* === SVG Icons === */
@@ -75,6 +80,15 @@ const IconUpload = () => (
 const IconExit = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="m16 17 5-5-5-5" /><path d="M21 12H9" /></svg>
 );
+const IconShare = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" /><polyline points="16 6 12 2 8 6" /><line x1="12" y1="2" x2="12" y2="15" /></svg>
+);
+const IconCheck = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+);
+const IconClose2 = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18M6 6l12 12" /></svg>
+);
 
 /* === Types === */
 type ThinkingEffort = 'high' | 'max';
@@ -88,7 +102,13 @@ interface ChatMessage {
   isThinking?: boolean;
   thinkingEffort?: ThinkingEffort;
   model?: string;  // 该消息使用的模型
-  toolCalls?: { name: string; result: string; success: boolean }[];
+
+  /** assistant 触发工具调用时的原始 tool_calls（OpenAI 结构，用于重建 apiMessages） */
+  toolCalls?: ResolvedToolCall[];
+  /** 工具执行结果摘要（UI 展示用，与 toolCalls 一一对应） */
+  toolCallResults?: { name: string; success: boolean; summary: string }[];
+  /** role='tool' 时关联的 tool_call_id（用于重建 apiMessages） */
+  toolCallId?: string;
 }
 
 interface ChatSession {
@@ -144,23 +164,40 @@ const MODEL_OPTIONS = [
 interface StreamCallbacks {
   onReasoning: (chunk: string) => void;
   onContent: (chunk: string) => void;
+  /** 收到 tool_calls 增量时触发，由调用方累积并执行 */
+  onToolCall?: (deltas: ToolCallDelta[]) => void;
 }
 
+/**
+ * 流式调用 chat/completions。
+ * - messages: 完整对话历史（包含 system/user/assistant/tool 各角色）
+ * - toolsPayload: 启用工具的 OpenAI schema 数组；为空数组则不传 tools 字段
+ * - finishReason: 输出参数，返回 choices[0].finish_reason（'stop' | 'tool_calls' | 'length' | ...）
+ *   调用方据此判断是否需要进入 agent loop
+ */
 async function streamChatCompletion(
   baseURL: string,
   apiKey: string,
   model: string,
-  messages: { role: string; content: string }[],
+  messages: Array<{ role: string; content?: string; tool_calls?: unknown[]; tool_call_id?: string; name?: string }>,
   thinkingEnabled: boolean,
   reasoningEffort: ThinkingEffort | null,
+  toolsPayload: Array<{ type: 'function'; function: { name: string; description: string; parameters: unknown } }>,
   callbacks: StreamCallbacks,
   signal: AbortSignal,
-): Promise<void> {
+): Promise<{ finishReason: string | null }> {
   const body: Record<string, unknown> = {
     model,
     messages,
     stream: true,
   };
+
+  // 工具 schema（仅在有启用工具时传）
+  if (toolsPayload.length > 0) {
+    body.tools = toolsPayload;
+    // 让模型自主决定何时调用，必要时可改为 'required' 强制调用
+    body.tool_choice = 'auto';
+  }
 
   // 思考模式参数
   if (thinkingEnabled) {
@@ -198,6 +235,7 @@ async function streamChatCompletion(
 
   const decoder = new TextDecoder();
   let buffer = '';
+  let finishReason: string | null = null;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -211,11 +249,19 @@ async function streamChatCompletion(
       const trimmed = line.trim();
       if (!trimmed || !trimmed.startsWith('data: ')) continue;
       const data = trimmed.slice(6);
-      if (data === '[DONE]') return;
+      if (data === '[DONE]') continue;
 
       try {
         const json = JSON.parse(data);
-        const delta = json.choices?.[0]?.delta;
+        const choice = json.choices?.[0];
+        if (!choice) continue;
+        const delta = choice.delta;
+
+        // finish_reason 在最后一帧出现
+        if (choice.finish_reason) {
+          finishReason = choice.finish_reason;
+        }
+
         if (!delta) continue;
 
         // 思维链内容
@@ -226,11 +272,17 @@ async function streamChatCompletion(
         if (delta.content) {
           callbacks.onContent(delta.content);
         }
+        // 工具调用增量（流式期间累积）
+        if (delta.tool_calls && Array.isArray(delta.tool_calls) && callbacks.onToolCall) {
+          callbacks.onToolCall(delta.tool_calls as ToolCallDelta[]);
+        }
       } catch {
         // 忽略解析错误
       }
     }
   }
+
+  return { finishReason };
 }
 
 /* === Component === */
@@ -283,6 +335,12 @@ export function ChatPage() {
   const [pickerInitialEntryId, setPickerInitialEntryId] = useState<string | undefined>(undefined);
   // “特殊状态”返回按钮：指示从其他页面跳入且未完成对话
   const [returnTarget, setReturnTarget] = useState<string | null>(null);
+
+  // === 分享/选中模式（导出为图片）===
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedMsgIds, setSelectedMsgIds] = useState<Set<string>>(new Set());
+  const [isExporting, setIsExporting] = useState(false);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
 
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -337,6 +395,162 @@ export function ChatPage() {
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
+  // === 分享/选中模式：进入/退出时清理选中状态 ===
+  const handleEnterSelectMode = useCallback(() => {
+    setSelectedMsgIds(new Set());
+    setSelectMode(true);
+  }, []);
+
+  const handleExitSelectMode = useCallback(() => {
+    setSelectMode(false);
+    setSelectedMsgIds(new Set());
+  }, []);
+
+  // 切换某条消息的选中状态（仅 user/assistant，跳过 tool 消息）
+  const handleToggleSelectMsg = useCallback((msgId: string) => {
+    setSelectedMsgIds(prev => {
+      const next = new Set(prev);
+      if (next.has(msgId)) next.delete(msgId);
+      else next.add(msgId);
+      return next;
+    });
+  }, []);
+
+  // 导出选中的消息为图片（html2canvas 截取实际 DOM）
+  const handleExportSelected = useCallback(async () => {
+    if (selectedMsgIds.size === 0) {
+      alert('请先选择要导出的消息');
+      return;
+    }
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    setIsExporting(true);
+    try {
+      // 收集选中的消息 DOM 节点
+      const allMsgEls = Array.from(container.querySelectorAll<HTMLElement>('.chat-message'));
+      const selectedEls = allMsgEls.filter(el => selectedMsgIds.has(el.dataset.msgId || ''));
+      if (selectedEls.length === 0) {
+        alert('未找到选中的消息');
+        return;
+      }
+
+      // 构造一个临时容器，克隆选中的消息节点，用于截图
+      // 这样可以避免截取整个滚动区域，且只包含选中内容
+      const wrapper = document.createElement('div');
+      wrapper.style.cssText = `
+        position: fixed;
+        left: -99999px;
+        top: 0;
+        width: ${container.offsetWidth}px;
+        padding: 24px;
+        background: var(--color-bg-primary, #131416);
+        box-sizing: border-box;
+      `;
+      // 顶部标题
+      const header = document.createElement('div');
+      header.style.cssText = `
+        display: flex; align-items: center; gap: 8px;
+        padding-bottom: 14px; margin-bottom: 20px;
+        border-bottom: 1px solid rgba(255,255,255,0.08);
+        font-size: 12px; color: #868e96;
+        font-family: 'Inter', 'Noto Sans SC', sans-serif;
+      `;
+      const now = new Date();
+      const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      header.innerHTML = `
+        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#f76707;"></span>
+        <span style="font-weight:600;color:#adb5bd;">记忆库 · AI 对话</span>
+        <span style="margin-left:auto;font-size:11px;color:#495057;">${dateStr}</span>
+      `;
+      wrapper.appendChild(header);
+
+      // 克隆每条选中的消息（移除选中圆圈等装饰）
+      const list = document.createElement('div');
+      list.style.cssText = 'display:flex;flex-direction:column;gap:20px;';
+      for (const el of selectedEls) {
+        const clone = el.cloneNode(true) as HTMLElement;
+        // 移除选中圆圈
+        clone.querySelectorAll('.msg-select-checkbox').forEach(n => n.remove());
+        // 移除时间戳（可选，保留也行）
+        list.appendChild(clone);
+      }
+      wrapper.appendChild(list);
+
+      // 底部水印
+      const footer = document.createElement('div');
+      footer.style.cssText = `
+        margin-top: 24px; padding-top: 14px;
+        border-top: 1px solid rgba(255,255,255,0.08);
+        text-align: right; font-size: 11px; color: #495057;
+        font-family: 'Inter', 'Noto Sans SC', sans-serif;
+      `;
+      footer.textContent = '由 记忆库 导出';
+      wrapper.appendChild(footer);
+
+      document.body.appendChild(wrapper);
+
+      try {
+        const canvas = await html2canvas(wrapper, {
+          backgroundColor: '#131416',
+          scale: 2,
+          useCORS: true,
+          logging: false,
+        });
+        const dataUrl = canvas.toDataURL('image/png');
+
+        const filename = `对话_${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}.png`;
+
+        // 移动端优先系统分享，否则下载
+        const res = await fetch(dataUrl);
+        const blob = await res.blob();
+        const file = new File([blob], filename, { type: 'image/png' });
+        const nav = navigator as Navigator & {
+          canShare?: (data: { files?: File[] }) => boolean;
+        };
+        let shared = false;
+        if (nav.canShare && nav.canShare({ files: [file] })) {
+          try {
+            await nav.share({ files: [file], title: '记忆库 · AI 对话', text: '记忆库 · AI 对话' });
+            shared = true;
+          } catch (err) {
+            if ((err as Error).name === 'AbortError') {
+              // 用户取消分享，不下载
+              shared = true;
+            }
+          }
+        }
+        if (!shared) {
+          // 回退下载
+          const link = document.createElement('a');
+          link.href = dataUrl;
+          link.download = filename;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        }
+      } finally {
+        document.body.removeChild(wrapper);
+      }
+    } catch (err) {
+      console.error('导出图片失败:', err);
+      alert(`导出失败：${(err as Error).message}`);
+    } finally {
+      setIsExporting(false);
+      // 导出后退出选中模式
+      setSelectMode(false);
+      setSelectedMsgIds(new Set());
+    }
+  }, [selectedMsgIds]);
+
+  // 切换对话时，从 session 同步已启用的 MCP 工具到本地 state（对话级持久化）
+  useEffect(() => {
+    const s = sessions.find(s => s.id === currentSessionId);
+    setMcpActiveTools(s?.mcpEnabledTools ?? []);
+    // 同时同步 MCP 开关状态：有启用工具则视为开
+    setMcpEnabled((s?.mcpEnabledTools?.length ?? 0) > 0);
+  }, [currentSessionId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // 自动滚动
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -365,6 +579,19 @@ export function ChatPage() {
       return next;
     });
   }, []);
+
+  /* === MCP 工具激活：对话级持久化 ===
+   * 把当前启用的工具列表同时写到 state（即时 UI 反馈）与 session.mcpEnabledTools（持久化）。
+   * 这样切走再切回对话时，工具状态不丢失；handleSend 也直接从 session 读取。
+   */
+  const handleSetSessionMcpTools = useCallback((toolNames: string[]) => {
+    setMcpActiveTools(toolNames);
+    if (!currentSessionId) return;
+    persistSessions(sessions.map(s => s.id === currentSessionId
+      ? { ...s, mcpEnabledTools: toolNames }
+      : s
+    ));
+  }, [currentSessionId, sessions, persistSessions]);
 
   /* === 新建对话 === */
   const handleNewChat = useCallback(() => {
@@ -660,13 +887,8 @@ export function ChatPage() {
       // 构建系统提示
       let systemPrompt = '你是一个友好的AI助手。';
 
-      // MCP 工具注入（按需）
-      if (mcpEnabled && mcpActiveTools.length > 0) {
-        const toolsPrompt = getToolsSystemPrompt(mcpActiveTools);
-        if (toolsPrompt) {
-          systemPrompt += '\n' + toolsPrompt;
-        }
-      }
+      // 注意：MCP 工具已改为通过 OpenAI 原生 tools 字段下发，不再注入提示词。
+      // 用户启用的工具在下方 buildToolsPayload() 中转为结构化 schema 传给 API。
 
       // MCP 搜索结果注入
       if (session.mcpSearchResults && session.mcpSearchResults.length > 0) {
@@ -677,106 +899,226 @@ export function ChatPage() {
       }
 
       // === 修复 3：注入 pickerSelectedIds 作为对话上下文 ===
+      // EntryPickerPanel 的「数据」和「待办」两种模式共用一个 selectedIds 集合，
+      // 因此必须同时查询 entry 与 todo 两个数据库，否则待办会被静默丢弃。
       if (pickerSelectedIds.size > 0) {
         try {
           const db = await getDatabase();
+          const todoDb = await getTodoDatabase();
           const pickerEntries: Entry[] = [];
+          const pickerTodos: Todo[] = [];
           for (const eid of pickerSelectedIds) {
+            // 先查 entry 数据库
             const e = await db.getEntryById(eid);
-            if (e) pickerEntries.push(e);
+            if (e) {
+              pickerEntries.push(e);
+              continue;
+            }
+            // 查不到再查 todo 数据库
+            const t = await todoDb.getTodoById(eid);
+            if (t) pickerTodos.push(t);
           }
           if (pickerEntries.length > 0) {
             const pickerText = pickerEntries.map((e, i) =>
               `[${i + 1}] (ID: ${e.id}) ${e.content}${e.source ? ` [来源: ${e.source}]` : ''}${e.supplement ? ` [补充: ${e.supplement}]` : ''}`
             ).join('\n');
-            systemPrompt += `\n\n## 用户选择的数据上下文\n用户选择了以下条目作为本次对话的参考数据：\n${pickerText}\n`;
+            systemPrompt += `\n\n## 用户选择的数据上下文\n用户选择了以下数据卡片作为本次对话的参考：\n${pickerText}\n`;
+          }
+          if (pickerTodos.length > 0) {
+            const todoText = pickerTodos.map((t, i) => {
+              const parts = [`[${i + 1}] (ID: ${t.id}) ${t.title}`];
+              if (t.note) parts.push(`[备注: ${t.note}]`);
+              if (t.startTime) parts.push(`[时间: ${new Date(t.startTime).toLocaleString('zh-CN')}]`);
+              if (t.folderDate) parts.push(`[日期: ${t.folderDate}]`);
+              if (t.status === 'done') parts.push(`[已完成]`);
+              if (t.tags && t.tags.length > 0) parts.push(`[标签: ${t.tags.map(tg => '#' + tg.name).join(' ')}]`);
+              return parts.join(' ');
+            }).join('\n');
+            systemPrompt += `\n\n## 用户选择的待办上下文\n用户选择了以下待办事项作为本次对话的参考：\n${todoText}\n`;
           }
         } catch (err) {
           console.error('加载选中条目失败:', err);
         }
       }
 
-      // 构建 API 消息（保留最近20条 + system）
+      // 构建 API 消息（保留最近 20 条 + system），同时保留 assistant 的 tool_calls
+      // 与 tool 消息的 tool_call_id，以便 agent loop 第二轮起模型能看到完整上下文。
+      const buildApiMessage = (m: ChatMessage): { role: string; content?: string; tool_calls?: unknown[]; tool_call_id?: string } | null => {
+        if (m.role === 'user') return { role: 'user', content: m.content };
+        if (m.role === 'assistant') {
+          const msg: { role: string; content?: string; tool_calls?: unknown[] } = {
+            role: 'assistant',
+            content: m.content || '',
+          };
+          if (m.toolCalls && m.toolCalls.length > 0) {
+            msg.tool_calls = m.toolCalls.map(tc => ({
+              id: tc.id,
+              type: 'function',
+              function: { name: tc.function.name, arguments: tc.function.arguments },
+            }));
+          }
+          return msg;
+        }
+        if (m.role === 'tool') {
+          return { role: 'tool', tool_call_id: m.toolCallId || '', content: m.content };
+        }
+        return null;
+      };
+
       const apiMessages = [
         { role: 'system', content: systemPrompt },
-        ...updatedMessages
-          .filter(m => m.role === 'user' || (m.role === 'assistant' && m.content))
-          .map(m => ({ role: m.role, content: m.content })),
+        ...updatedMessages.map(buildApiMessage).filter(Boolean) as Array<{ role: string; content?: string; tool_calls?: unknown[]; tool_call_id?: string }>,
       ].slice(-22);
 
-      // 流式读取
-      let fullContent = '';
-      let fullReasoning = '';
+      // 工具 schema（替代旧的提示词注入）
+      const enabledTools = mcpEnabled ? (session.mcpEnabledTools ?? mcpActiveTools) : [];
+      const toolsPayload = buildToolsPayload(enabledTools);
+
+      // === Agent loop ===
+      // 每次 streamChatCompletion 返回 finish_reason='tool_calls' 时，
+      // 执行工具→追加 tool 消息→新建 AI 占位→再次请求，循环直到模型不再调用工具。
       const abortCtrl = new AbortController();
       abortRef.current = abortCtrl;
 
-      await streamChatCompletion(
-        settings.ai.baseURL,
-        settings.ai.apiKey,
-        currentModel,
-        apiMessages,
-        thinkingEnabled,
-        thinkingEnabled ? thinkingEffort : null,
-        {
-          onReasoning: (chunk) => {
-            fullReasoning += chunk;
-            currentMsgs = currentMsgs.map(m =>
-              m.id === aiMsgId ? { ...m, reasoningContent: fullReasoning } : m
-            );
-            updateSessionMessages(sessionId, currentMsgs);
+      let loopMessages = [...apiMessages];       // 传给 API 的消息序列（循环中追加）
+      let loopDisplayMsgs = [...currentMsgs];   // UI 显示的消息序列（含初始 AI 占位）
+      let currentAiMsgId = aiMsgId;
+
+      const MAX_ITERATIONS = 5;
+      let iteration = 0;
+      let hitLimit = false;
+
+      while (iteration < MAX_ITERATIONS) {
+        iteration++;
+
+        let fullContent = '';
+        let fullReasoning = '';
+        const toolCallAcc = new Map<number, ResolvedToolCall>();
+
+        const { finishReason } = await streamChatCompletion(
+          settings.ai.baseURL,
+          settings.ai.apiKey,
+          currentModel,
+          loopMessages,
+          thinkingEnabled,
+          thinkingEnabled ? thinkingEffort : null,
+          toolsPayload,
+          {
+            onReasoning: (chunk) => {
+              fullReasoning += chunk;
+              loopDisplayMsgs = loopDisplayMsgs.map(m =>
+                m.id === currentAiMsgId ? { ...m, reasoningContent: fullReasoning } : m
+              );
+              updateSessionMessages(sessionId, loopDisplayMsgs);
+            },
+            onContent: (chunk) => {
+              fullContent += chunk;
+              loopDisplayMsgs = loopDisplayMsgs.map(m =>
+                m.id === currentAiMsgId ? { ...m, content: fullContent } : m
+              );
+              updateSessionMessages(sessionId, loopDisplayMsgs);
+            },
+            onToolCall: (deltas) => {
+              accumulateToolCallDeltas(toolCallAcc, deltas);
+            },
           },
-          onContent: (chunk) => {
-            fullContent += chunk;
-            currentMsgs = currentMsgs.map(m =>
-              m.id === aiMsgId ? { ...m, content: fullContent } : m
-            );
-            updateSessionMessages(sessionId, currentMsgs);
-          },
-        },
-        abortCtrl.signal,
-      );
+          abortCtrl.signal,
+        );
 
-      // 流式结束后解析工具调用
-      if (mcpEnabled && mcpActiveTools.length > 0) {
-        const toolCall = parseToolCall(fullContent);
-        if (toolCall) {
-          const toolResult = await executeToolCall(toolCall.toolName, toolCall.arguments);
-          const resultStr = formatToolResult(toolResult);
+        // 检测是否触发了工具调用
+        const resolvedToolCalls = Array.from(toolCallAcc.values()).filter(
+          tc => tc.id && tc.function.name,
+        );
+        const hasToolCalls = finishReason === 'tool_calls' || resolvedToolCalls.length > 0;
 
-          // 更新 AI 消息 — 移除工具调用标签，保留 beforeText
-          currentMsgs = currentMsgs.map(m =>
-            m.id === aiMsgId
-              ? {
-                  ...m,
-                  content: toolCall.beforeText || '(已执行工具操作)',
-                  toolCalls: [{ name: toolCall.toolName, result: resultStr, success: toolResult.success }],
-                }
-              : m
-          );
+        if (!hasToolCalls) {
+          // 模型说完了，没有要调用工具 → agent loop 结束
+          break;
+        }
 
-          // 追加 tool 结果消息
+        // 执行所有 tool_calls
+        const toolCallResults: NonNullable<ChatMessage['toolCallResults']> = [];
+        const apiToolMessages: Array<{ role: 'tool'; tool_call_id: string; content: string }> = [];
+
+        for (const tc of resolvedToolCalls) {
+          const args = parseToolArguments(tc.function.arguments);
+          const result = await executeToolCall(tc.function.name, args);
+          apiToolMessages.push(formatToolResultMessage(result, tc.id));
+          toolCallResults.push({
+            name: tc.function.name,
+            success: result.success,
+            summary: formatToolResultForUI(result, tc.function.name),
+          });
+        }
+
+        // 把 toolCalls + toolCallResults 写到当前 AI 消息上
+        loopDisplayMsgs = loopDisplayMsgs.map(m =>
+          m.id === currentAiMsgId
+            ? { ...m, toolCalls: resolvedToolCalls, toolCallResults }
+            : m
+        );
+
+        // 追加 UI 展示用的 tool 消息
+        for (let i = 0; i < resolvedToolCalls.length; i++) {
+          const tc = resolvedToolCalls[i];
           const toolMsg: ChatMessage = {
             id: createId(),
-            role: 'tool' as const,
-            content: toolResult.success
-              ? `✅ ${toolCall.toolName} 执行成功：${JSON.stringify(toolResult.data)}`
-              : `❌ ${toolCall.toolName} 执行失败：${toolResult.error}`,
+            role: 'tool',
+            content: apiToolMessages[i].content,
+            toolCallId: tc.id,
             timestamp: Date.now(),
           };
-          currentMsgs = [...currentMsgs, toolMsg];
-          updateSessionMessages(sessionId, currentMsgs);
-
-          // 如果有 afterText，自动发起续接请求
-          if (toolCall.afterText) {
-            // 将 afterText 作为 AI 的继续内容
-            currentMsgs = currentMsgs.map(m =>
-              m.id === aiMsgId
-                ? { ...m, content: (toolCall.beforeText || '(已执行工具操作)') + '\n\n' + toolCall.afterText }
-                : m
-            );
-            updateSessionMessages(sessionId, currentMsgs);
-          }
+          loopDisplayMsgs = [...loopDisplayMsgs, toolMsg];
         }
+        updateSessionMessages(sessionId, loopDisplayMsgs);
+
+        // 更新传给 API 的消息序列：追加 assistant(tool_calls) + 多条 tool 消息
+        loopMessages = [
+          ...loopMessages,
+          {
+            role: 'assistant',
+            content: fullContent || '',
+            tool_calls: resolvedToolCalls.map(tc => ({
+              id: tc.id,
+              type: 'function',
+              function: { name: tc.function.name, arguments: tc.function.arguments },
+            })),
+          },
+          ...apiToolMessages,
+        ];
+
+        // 新建一个 AI 占位消息，用于下一轮流式续写
+        const nextAiMsg: ChatMessage = {
+          id: createId(),
+          role: 'assistant',
+          content: '',
+          reasoningContent: '',
+          timestamp: Date.now(),
+          isThinking: thinkingEnabled,
+          thinkingEffort: thinkingEnabled ? thinkingEffort : undefined,
+          model: currentModel,
+        };
+        loopDisplayMsgs = [...loopDisplayMsgs, nextAiMsg];
+        updateSessionMessages(sessionId, loopDisplayMsgs);
+        currentAiMsgId = nextAiMsg.id;
+      }
+
+      if (iteration >= MAX_ITERATIONS) {
+        hitLimit = true;
+      }
+
+      // 同步外层引用
+      currentMsgs = loopDisplayMsgs;
+
+      if (hitLimit) {
+        const limitMsg: ChatMessage = {
+          id: createId(),
+          role: 'assistant',
+          content: '_(已达到工具调用次数上限，请继续提问以让 AI 继续)_',
+          timestamp: Date.now(),
+        };
+        currentMsgs = [...currentMsgs, limitMsg];
+        updateSessionMessages(sessionId, currentMsgs);
       }
     } catch (error) {
       if ((error as Error).name === 'AbortError') {
@@ -805,8 +1147,8 @@ export function ChatPage() {
       // 清除全局预备列表
       const PREPARED_KEY = '__yiyan_prepared_entry_ids__';
       delete (window as any)[PREPARED_KEY];
-      // 清空已激活的 MCP 工具（一次性注入，发送后清除）
-      setMcpActiveTools([]);
+      // 注意：MCP 工具激活改为对话级持久化（session.mcpEnabledTools），
+      // 不再在每次发送后清空，让用户在一次对话内可以连续多次调用工具。
     }
   }, [input, isLoading, settings, currentSessionId, sessions, persistSessions, updateSessionMessages, thinkingEnabled, thinkingEffort, mcpEnabled, mcpActiveTools, currentModel, pickerSelectedIds]);
 
@@ -994,7 +1336,7 @@ export function ChatPage() {
           <h1 className="chat-header-title">{currentSession?.title || 'Chat'}</h1>
 
           {/* MCP 搜索结果回看按钮 */}
-          {currentSession?.mcpSearchResults && currentSession.mcpSearchResults.length > 0 && (
+          {currentSession?.mcpSearchResults && currentSession.mcpSearchResults.length > 0 && !selectMode && (
             <button
               className="chat-mcp-back-btn"
               onClick={() => {
@@ -1008,15 +1350,41 @@ export function ChatPage() {
             </button>
           )}
 
-          {messages.length > 0 && (
-            <button className="chat-clear-btn" onClick={handleClearMessages} title="清空对话">
-              <IconTrash />
-            </button>
+          {messages.length > 0 && !selectMode && (
+            <>
+              <button className="chat-share-btn" onClick={handleEnterSelectMode} title="分享对话">
+                <IconShare />
+              </button>
+              <button className="chat-clear-btn" onClick={handleClearMessages} title="清空对话">
+                <IconTrash />
+              </button>
+            </>
+          )}
+
+          {/* 选中模式：取消 + 已选数量 + 导出按钮 */}
+          {selectMode && (
+            <>
+              <button className="chat-select-cancel-btn" onClick={handleExitSelectMode} title="取消">
+                <IconClose2 />
+              </button>
+              <span className="chat-select-count">
+                已选 {selectedMsgIds.size} 条
+              </span>
+              <button
+                className="chat-export-btn"
+                onClick={handleExportSelected}
+                disabled={selectedMsgIds.size === 0 || isExporting}
+                title="导出为图片"
+              >
+                <IconShare />
+                <span>导出为图片</span>
+              </button>
+            </>
           )}
         </header>
 
         {/* 消息列表 */}
-        <div className="chat-messages">
+        <div className="chat-messages" ref={messagesContainerRef}>
           {messages.length === 0 ? (
             <div className="chat-welcome">
               <span className="welcome-icon"><IconMessage /></span>
@@ -1026,8 +1394,22 @@ export function ChatPage() {
               </p>
             </div>
           ) : (
-            messages.map(msg => (
-              <div key={msg.id} className={`chat-message ${msg.role}`}>
+            messages.map(msg => {
+              const isSelectable = selectMode && msg.role !== 'tool';
+              const isSelected = selectedMsgIds.has(msg.id);
+              return (
+              <div
+                key={msg.id}
+                className={`chat-message ${msg.role} ${selectMode ? 'select-mode' : ''} ${isSelected ? 'selected' : ''}`}
+                data-msg-id={msg.id}
+                onClick={isSelectable ? () => handleToggleSelectMsg(msg.id) : undefined}
+              >
+                {/* 选中模式下显示圆圈 checkbox */}
+                {isSelectable && (
+                  <div className={`msg-select-checkbox ${isSelected ? 'checked' : ''}`}>
+                    {isSelected && <IconCheck />}
+                  </div>
+                )}
                 <div className="message-avatar">
                   {msg.role === 'user' ? '我' : msg.role === 'tool' ? '🔧' : 'AI'}
                 </div>
@@ -1057,9 +1439,9 @@ export function ChatPage() {
                     <span className="message-tag">深度思考 · {msg.thinkingEffort}</span>
                   )}
 
-                  {msg.toolCalls && msg.toolCalls.length > 0 && (
+                  {msg.toolCallResults && msg.toolCallResults.length > 0 && (
                     <div className="tool-calls">
-                      {msg.toolCalls.map((tc, i) => (
+                      {msg.toolCallResults.map((tc, i) => (
                         <div key={i} className={`tool-call-badge ${tc.success ? 'success' : 'error'}`}>
                           🔧 {tc.name} {tc.success ? '✅' : '❌'}
                         </div>
@@ -1073,7 +1455,8 @@ export function ChatPage() {
                   <span className="message-time">{formatTime(msg.timestamp)}</span>
                 </div>
               </div>
-            ))
+              );
+            })
           )}
 
           {isLoading && messages.length > 0 && messages[messages.length - 1]?.role === 'user' && (
@@ -1138,12 +1521,18 @@ export function ChatPage() {
             <button
               className={`toolbar-btn ${mcpEnabled ? 'active mcp' : ''}`}
               onClick={() => {
-                setMcpEnabled(!mcpEnabled);
                 if (!mcpEnabled) {
+                  // 开启 MCP：直接展开类型选择器
+                  setMcpEnabled(true);
                   setMcpPickerOpen(true);
+                } else {
+                  // 关闭 MCP：清空工具并落库
+                  setMcpEnabled(false);
+                  handleSetSessionMcpTools([]);
+                  setMcpPickerOpen(false);
                 }
               }}
-              title="MCP 桥梁通道"
+              title="MCP 桥梁通道（对话级持久化）"
             >
               <IconTool />
               <span>MCP{mcpActiveTools.length > 0 ? ` (${mcpActiveTools.length})` : ''}</span>
@@ -1162,29 +1551,47 @@ export function ChatPage() {
                   <button
                     className="mcp-picker-option"
                     onClick={() => {
-                      setMcpActiveTools(prev => [...new Set([...prev, ...ENTRY_TOOLS])]);
+                      const next = [...new Set([...mcpActiveTools, ...ENTRY_TOOLS])];
+                      handleSetSessionMcpTools(next);
                       setMcpPickerOpen(false);
                     }}
                   >
                     <div className="mcp-picker-icon">📊</div>
                     <div className="mcp-picker-text">
                       <div className="mcp-picker-title">数据卡片 MCP</div>
-                      <div className="mcp-picker-desc">注入数据卡片工具提示词</div>
+                      <div className="mcp-picker-desc">为本次对话启用数据卡片工具</div>
                     </div>
                   </button>
                   <button
                     className="mcp-picker-option"
                     onClick={() => {
-                      setMcpActiveTools(prev => [...new Set([...prev, ...TODO_TOOLS])]);
+                      const next = [...new Set([...mcpActiveTools, ...TODO_TOOLS])];
+                      handleSetSessionMcpTools(next);
                       setMcpPickerOpen(false);
                     }}
                   >
                     <div className="mcp-picker-icon">✅</div>
                     <div className="mcp-picker-text">
                       <div className="mcp-picker-title">待办卡片 MCP</div>
-                      <div className="mcp-picker-desc">注入待办工具提示词</div>
+                      <div className="mcp-picker-desc">为本次对话启用待办工具</div>
                     </div>
                   </button>
+                  {/* 清空工具按钮：方便用户取消已选的工具 */}
+                  {mcpActiveTools.length > 0 && (
+                    <button
+                      className="mcp-picker-option"
+                      onClick={() => {
+                        handleSetSessionMcpTools([]);
+                        setMcpPickerOpen(false);
+                      }}
+                    >
+                      <div className="mcp-picker-icon">🗑️</div>
+                      <div className="mcp-picker-text">
+                        <div className="mcp-picker-title">清空已启用工具</div>
+                        <div className="mcp-picker-desc">当前已启用 {mcpActiveTools.length} 个工具</div>
+                      </div>
+                    </button>
+                  )}
                 </div>
               </div>
             )}
@@ -1237,6 +1644,16 @@ export function ChatPage() {
           onClose={() => setEntryPickerOpen(false)}
           initialEntryId={pickerInitialEntryId}
         />
+      )}
+
+      {/* === 导出中遮罩 === */}
+      {isExporting && (
+        <div className="chat-export-overlay">
+          <div className="chat-export-loading glass">
+            <span className="loading-spinner" />
+            <span>正在生成图片…</span>
+          </div>
+        </div>
       )}
     </div>
   );

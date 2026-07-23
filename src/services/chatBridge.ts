@@ -1,18 +1,22 @@
 /**
- * Chat Bridge — MCP 风格的底层框架桥梁通道
- * 
+ * Chat Bridge — 基于 OpenAI 原生 function calling 的工具桥接层
+ *
  * 提供 AI 在对话中操作记忆库的能力：
  * - 创建卡片（条目）— 支持内容/来源/补充/标签/组/星标
  * - 搜索卡片 — 支持关键字/标签/组筛选，返回结果列表
  * - 编辑组 — 设置或移除组归属
  * - 编辑标签 — 添加或移除标签
- * 
- * 工作原理：
- * 1. 用户通过 MCP 面板选择要注入的工具信息
- * 2. 选中的工具定义注入系统提示词
- * 3. AI 回复中使用 <tool> XML 标签调用工具
- * 4. 流式结束后解析工具调用，执行操作，将结果作为 tool_result 消息追加
- * 5. AI 在下一轮对话中可以看到工具结果
+ * - 创建/搜索/完成待办
+ *
+ * 工作原理（agent loop）：
+ * 1. 用户在对话中启用某类工具，工具 schema 通过 `tools` 字段传给模型
+ * 2. 模型在流式响应中输出 `tool_calls`（结构化，非文本嵌入）
+ * 3. 客户端流式期间累积 tool_call 增量，拿到完整调用后立即执行
+ * 4. 执行结果作为 `role: 'tool'` + `tool_call_id` 消息追加
+ * 5. 再次请求模型，让它基于结果继续生成；循环直到模型不再调用工具
+ *
+ * 这取代了原先基于 <tool> XML 标签 + 流式后解析的伪 MCP 方案，
+ * 解决了「AI 看不到结果」「一次只能调一个」「无 agent loop」等弊端。
  */
 
 import { getDatabase } from '@/services/database';
@@ -22,7 +26,7 @@ import { useTagStore } from '@/stores/tagStore';
 import { useTodoStore } from '@/stores/todoStore';
 import type { Entry, Todo } from '@/types';
 
-/** 工具定义 */
+/** 工具元数据（仅用于内部描述，传给 API 时由 buildToolsPayload 转换） */
 export interface BridgeTool {
   name: string;
   description: string;
@@ -42,6 +46,33 @@ export interface ToolResult {
   success: boolean;
   data?: unknown;
   error?: string;
+}
+
+/**
+ * OpenAI / DeepSeek 兼容的 tool_call 增量结构。
+ * 流式响应中 delta.tool_calls 数组每项的字段都可能分片到达，需要按 index 累积。
+ */
+export interface ToolCallDelta {
+  index: number;
+  id?: string;
+  /** 'function' | 'code' | ... 目前只处理 function */
+  type?: string;
+  function?: {
+    name?: string;
+    arguments?: string;
+  };
+}
+
+/**
+ * 累积后的完整 tool_call（执行阶段使用）。
+ */
+export interface ResolvedToolCall {
+  id: string;
+  type: 'function';
+  function: {
+    name: string;
+    arguments: string;
+  };
 }
 
 /** 可用的工具列表 */
@@ -154,73 +185,69 @@ export const ALL_TOOL_NAMES = BRIDGE_TOOLS.map(t => t.name);
 export const ENTRY_TOOLS = ['create_card', 'search_cards', 'edit_group', 'edit_tags'];
 export const TODO_TOOLS = ['create_todo', 'search_todos', 'complete_todo'];
 
-/** 生成工具定义的系统提示词片段（只包含选中的工具） */
-export function getToolsSystemPrompt(enabledTools: string[]): string {
-  const tools = BRIDGE_TOOLS.filter(t => enabledTools.includes(t.name));
-  if (tools.length === 0) return '';
-
-  const toolsDesc = tools.map(t => {
-    const params = Object.entries(t.parameters.properties)
-      .map(([key, val]) => `${key}(${val.type}): ${val.description}`)
-      .join(', ');
-    const required = t.parameters.required.length > 0 ? `\n  必填: ${t.parameters.required.join(', ')}` : '';
-    return `- ${t.name}: ${t.description}\n  参数: ${params}${required}`;
-  }).join('\n');
-
-  return `
-你可以使用以下工具操作用户的记忆库：
-
-${toolsDesc}
-
-## 工具调用格式
-当你需要调用工具时，在回复中独占一行使用以下 XML 格式：
-<tool name="工具名">{"参数名": "值"}</tool>
-
-示例：
-<tool name="create_card">{"content": "今天学到了 MCP 协议", "tags": ["学习", "MCP"]}</tool>
-
-<tool name="search_cards">{"query": "MCP", "limit": 5}</tool>
-
-## 规则
-1. 工具调用必须独占一行
-2. 一次只能调用一个工具
-3. 调用工具后，系统会执行操作并在下一轮对话中返回结果
-4. 如果用户没有明确要求操作记忆库，不要主动调用工具
-5. 可以在普通回复中混合工具调用
-`;
-}
-
-/** 解析 AI 回复中的工具调用 */
-export interface ParsedToolCall {
-  toolName: string;
-  arguments: Record<string, unknown>;
-  beforeText: string;
-  afterText: string;
-}
-
-export function parseToolCall(response: string): ParsedToolCall | null {
-  const regex = /<tool\s+name="([^"]+)">([\s\S]*?)<\/tool>/;
-  const match = response.match(regex);
-  if (!match) return null;
-
-  const toolName = match[1];
-  let args: Record<string, unknown> = {};
-  try {
-    args = JSON.parse(match[2].trim());
-  } catch {
-    args = {};
-  }
-
-  const matchStart = match.index ?? 0;
-  const beforeText = response.slice(0, matchStart).trim();
-  const afterText = response.slice(matchStart + match[0].length).trim();
-
-  return {
-    toolName,
-    arguments: args,
-    beforeText,
-    afterText,
+/**
+ * 生成传给 OpenAI/DeepSeek API 的 `tools` 字段（结构化工具 schema）。
+ * 只包含用户启用的工具，传给 chat/completions 接口的 tools 参数。
+ */
+export function buildToolsPayload(enabledTools: string[]): Array<{
+  type: 'function';
+  function: {
+    name: string;
+    description: string;
+    parameters: BridgeTool['parameters'];
   };
+}> {
+  return BRIDGE_TOOLS
+    .filter(t => enabledTools.includes(t.name))
+    .map(t => ({
+      type: 'function' as const,
+      function: {
+        name: t.name,
+        description: t.description,
+        parameters: t.parameters,
+      },
+    }));
+}
+
+/**
+ * 累积流式 tool_call 增量。每次收到 delta.tool_calls 时调用，
+ * 按 index 合并到 accumulator 中，返回更新后的 accumulator（同一引用，已原地更新）。
+ *
+ * 注意：arguments 是 JSON 字符串分片，需要字符串拼接而非解析。
+ */
+export function accumulateToolCallDeltas(
+  accumulator: Map<number, ResolvedToolCall>,
+  deltas: ToolCallDelta[],
+): Map<number, ResolvedToolCall> {
+  for (const d of deltas) {
+    if (d.index === undefined) continue;
+    let entry = accumulator.get(d.index);
+    if (!entry) {
+      entry = { id: '', type: 'function', function: { name: '', arguments: '' } };
+      accumulator.set(d.index, entry);
+    }
+    if (d.id) entry.id = d.id;
+    if (d.type) entry.type = d.type as 'function';
+    if (d.function) {
+      if (d.function.name) entry.function.name += d.function.name;
+      if (d.function.arguments) entry.function.arguments += d.function.arguments;
+    }
+  }
+  return accumulator;
+}
+
+/**
+ * 将解析完成的 arguments JSON 字符串安全解析为对象。
+ * 解析失败返回空对象并打印警告（不再静默吞掉，方便调试）。
+ */
+export function parseToolArguments(argsStr: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(argsStr);
+    return typeof parsed === 'object' && parsed !== null ? parsed : {};
+  } catch (err) {
+    console.warn('[chatBridge] 工具参数 JSON 解析失败:', err, '原始:', argsStr);
+    return {};
+  }
 }
 
 /** 执行工具调用 */
@@ -566,11 +593,36 @@ export async function executeToolCall(
   }
 }
 
-/** 将工具结果格式化为 AI 可读的字符串 */
-export function formatToolResult(result: ToolResult): string {
-  if (!result.success) {
-    return `<tool_result success="false" error="${result.error}" />`;
-  }
+/**
+ * 将工具结果格式化为 OpenAI 规范的 tool 角色消息（用于追加到 messages 数组）。
+ * 字段说明：
+ * - role: 'tool'
+ * - tool_call_id: 对应触发本次执行的 tool_call.id
+ * - content: 给模型看的执行结果文本
+ *
+ * 即使失败也用 role: 'tool'（在 content 里说明错误），不要用 'system' 等其他角色，
+ * 否则 OpenAI/DeepSeek 会拒绝请求。
+ */
+export function formatToolResultMessage(
+  result: ToolResult,
+  toolCallId: string,
+): { role: 'tool'; tool_call_id: string; content: string } {
+  const content = result.success
+    ? JSON.stringify({ success: true, data: result.data })
+    : JSON.stringify({ success: false, error: result.error });
+  return {
+    role: 'tool',
+    tool_call_id: toolCallId,
+    content,
+  };
+}
 
-  return `<tool_result success="true">${JSON.stringify(result.data)}</tool_result>`;
+/**
+ * 将工具结果格式化为 UI 展示用的简短摘要（用于聊天界面上的 tool 气泡）。
+ */
+export function formatToolResultForUI(result: ToolResult, toolName: string): string {
+  if (!result.success) {
+    return `❌ ${toolName} 执行失败：${result.error}`;
+  }
+  return `✅ ${toolName} 执行成功：${JSON.stringify(result.data)}`;
 }

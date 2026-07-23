@@ -336,6 +336,9 @@ export function HomePage() {
 
   return (
     <div className="home-page">
+      <header className="home-page-header">
+        <h1 className="home-page-title">录入你的每一条知识</h1>
+      </header>
       <main className="page-content">
         <div className="center-area">
         {mode === 'input' ? (
