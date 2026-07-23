@@ -194,51 +194,76 @@ export function HomePage() {
 
     if (isTodoMode) {
       // 待办模式：创建待办
-      const now = Date.now();
-      const startTime = todoStartTime;
-      const endTime = todoEndTime;
-      // folderDate 以开始时间为准，没开始时间则用当天
-      const refTime = startTime || now;
-      const folderDate = timestampToFolderDate(refTime);
-      const todo = await addTodo({
-        title: content.trim(),
-        startTime,
-        endTime,
-        isToday: todoIsToday,
-        folderDate,
-      });
-      setLastTodoId(todo.id);
-      setContent('');
-      showToastMessage('待办已创建');
+      try {
+        const now = Date.now();
+        const startTime = todoStartTime;
+        const endTime = todoEndTime;
+        // folderDate 以开始时间为准，没开始时间则用当天
+        const refTime = startTime || now;
+        const folderDate = timestampToFolderDate(refTime);
+        const todo = await addTodo({
+          title: content.trim(),
+          startTime,
+          endTime,
+          isToday: todoIsToday,
+          folderDate,
+        });
+        setLastTodoId(todo.id);
+        setContent('');
+        showToastMessage('待办已创建');
 
-      // 修复5：待办模式发送后确保回到input模式，不出现"为上一条添加信息"
-      setMode('input');
-      if (modeTimerRef.current) {
-        clearTimeout(modeTimerRef.current);
+        // 修复5：待办模式发送后确保回到input模式，不出现"为上一条添加信息"
+        setMode('input');
+        if (modeTimerRef.current) {
+          clearTimeout(modeTimerRef.current);
+        }
+        // 快速提示后重置高级选项
+        setTodoStartTime(undefined);
+        setTodoEndTime(undefined);
+        setShowTodoAdvanced(false);
+      } catch (err) {
+        console.error('创建待办失败:', err);
+        showToastMessage(
+          err instanceof Error
+            ? `创建失败: ${err.message}`
+            : '创建失败，请重试'
+        );
       }
-      // 快速提示后重置高级选项
-      setTodoStartTime(undefined);
-      setTodoEndTime(undefined);
-      setShowTodoAdvanced(false);
       return;
     }
 
-    const entry = await addEntry(content.trim());
-    setLastEntryId(entry.id);
-    setLastEntryContent(content.trim());
-    setContent('');
-    showToastMessage('已入库');
+    // 普通录入模式
+    try {
+      const entry = await addEntry(content.trim());
+      setLastEntryId(entry.id);
+      setLastEntryContent(content.trim());
+      setContent('');
+      showToastMessage('已入库');
 
-    // 切换到标签/信息选择模式
-    setMode('tag');
+      // 切换到标签/信息选择模式
+      setMode('tag');
 
-    // 3秒后自动回退到输入模式
-    if (modeTimerRef.current) {
-      clearTimeout(modeTimerRef.current);
+      // 3秒后自动回退到输入模式
+      if (modeTimerRef.current) {
+        clearTimeout(modeTimerRef.current);
+      }
+      modeTimerRef.current = setTimeout(() => {
+        setMode('input');
+      }, 3000);
+    } catch (err) {
+      console.error('录入失败:', err);
+      const msg = err instanceof Error ? err.message : '未知错误';
+      showToastMessage(
+        msg.includes('no available connection') || msg.includes('no avaliable')
+          ? '数据库连接丢失，正在重试...'
+          : `录入失败: ${msg}`
+      );
+      // 如果是连接问题，尝试重新初始化数据库
+      if (msg.includes('connection') || msg.includes('database')) {
+        const { getDatabase } = await import('@/services/database');
+        getDatabase().catch(() => {/* 重试将在下次调用时生效 */});
+      }
     }
-    modeTimerRef.current = setTimeout(() => {
-      setMode('input');
-    }, 3000);
   }, [content, addEntry, showToastMessage, isTodoMode, todoStartTime, todoEndTime, todoIsToday, addTodo]);
 
   // 处理键盘事件

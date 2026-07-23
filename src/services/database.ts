@@ -11,6 +11,20 @@ import { isElectron } from './electronAdapter';
 let dbInstance: IDatabaseService | null = null;
 
 export async function getDatabase(): Promise<IDatabaseService> {
+  if (dbInstance) {
+    // 健康检查：确保连接仍然可用
+    // Android 上应用切后台再恢复可能导致连接丢失
+    const nativeDb = dbInstance as any;
+    if (typeof nativeDb.ensureConnection === 'function') {
+      try {
+        await nativeDb.ensureConnection();
+      } catch (err) {
+        console.warn('[database] ensureConnection failed, recreating instance:', err);
+        dbInstance = null;
+      }
+    }
+  }
+
   if (dbInstance) return dbInstance;
 
   if (isElectron()) {

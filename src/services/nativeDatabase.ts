@@ -26,7 +26,7 @@ class NativeDatabaseService implements IDatabaseService {
   }
 
   async init(): Promise<void> {
-    if (this.isInitialized) return;
+    if (this.isInitialized && this.db) return;
 
     // Web 平台需要特殊处理（Electron 不需要）
     if (!this.isElectron && Capacitor.getPlatform() === 'web') {
@@ -35,18 +35,78 @@ class NativeDatabaseService implements IDatabaseService {
       await this.sqlite.initWebStore();
     }
 
-    const ret = await this.sqlite.checkConnectionsConsistency();
-    const isConn = (await this.sqlite.isConnection('memorydb', false)).result;
-
-    if (ret.result && isConn) {
-      this.db = await this.sqlite.retrieveConnection('memorydb', false);
-    } else {
-      this.db = await this.sqlite.createConnection('memorydb', false, 'no-encryption', 1, false);
-    }
-
-    await this.db.open();
+    await this.initConnection();
     await this.createTables();
     this.isInitialized = true;
+  }
+
+  /**
+   * 初始化数据库连接（带重试）
+   *
+   * Android 上 Capacitor SQLite 的 checkConnectionsConsistency 可能返回 false
+   * 或 createConnection 后 open() 静默失败。
+   * 此方法尝试多种恢复策略，最多重试 3 次。
+   */
+  private async initConnection(): Promise<void> {
+    const DB_NAME = 'memorydb';
+    let lastError: unknown = null;
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const ret = await this.sqlite.checkConnectionsConsistency();
+        const isConn = (await this.sqlite.isConnection(DB_NAME, false)).result;
+
+        if (ret.result && isConn) {
+          // 连接已存在，尝试 retrieve
+          try {
+            this.db = await this.sqlite.retrieveConnection(DB_NAME, false);
+          } catch {
+            // retrieve 失败，说明连接状态不一致，重新创建
+            this.db = await this.sqlite.createConnection(DB_NAME, false, 'no-encryption', 1, false);
+          }
+        } else {
+          this.db = await this.sqlite.createConnection(DB_NAME, false, 'no-encryption', 1, false);
+        }
+
+        await this.db.open();
+
+        // 验证连接是否真的可用（执行一个简单查询）
+        await this.db.query('SELECT 1 as test');
+        return; // 成功
+      } catch (err) {
+        console.warn(`[NativeDatabase] initConnection attempt ${attempt + 1} failed:`, err);
+        lastError = err;
+        this.db = null;
+        // 短暂等待后重试
+        if (attempt < 2) await new Promise(r => setTimeout(r, 200 * (attempt + 1)));
+      }
+    }
+
+    throw new Error(`Database connection failed after 3 attempts: ${lastError}`);
+  }
+
+  /**
+   * 检查连接健康状态，必要时重新初始化
+   * 应在外部调用方发现连接可能丢失时调用
+   */
+  async ensureConnection(): Promise<void> {
+    if (!this.db || !this.isInitialized) {
+      this.isInitialized = false;
+      this.db = null;
+      await this.init();
+      return;
+    }
+
+    try {
+      // 健康检查
+      await this.db.query('SELECT 1 as test');
+    } catch {
+      // 连接已断开，重新初始化
+      console.warn('[NativeDatabase] connection lost, reinitializing...');
+      this.isInitialized = false;
+      this.db = null;
+      await this.init();
+    }
   }
 
   private async createTables(): Promise<void> {

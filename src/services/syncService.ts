@@ -207,16 +207,18 @@ export async function discoverDevices(timeoutMs: number = 5000): Promise<Discove
 /**
  * 手动添加设备（通过 IP 地址）
  *
- * 注意：此函数不验证设备是否在线，仅构造占位设备对象。
- * 推荐使用 handshakeAndCreateDevice 进行握手验证后添加。
+ * @deprecated 请使用 `handshakeAndCreateDevice` 进行握手验证后添加。
+ * 此函数现在内部也会先握手验证，握手失败返回 null。
  *
  * 设备类型默认为 'phone'，实际类型应由握手返回的真实信息确定。
  */
-export function createDeviceByIp(ip: string, port: number, name?: string): DiscoveredDevice {
+export async function createDeviceByIp(ip: string, port: number, name?: string): Promise<DiscoveredDevice | null> {
+  const hs = await handshake(ip, port);
+  if (!hs) return null;
   return {
     id: hashStr(ip + port).slice(0, 8),
-    name: name || `设备 ${ip}`,
-    type: 'phone', // 默认值，实际类型应由握手确定（不再根据 IP 段瞎猜）
+    name: name || hs.name || `设备 ${ip}`,
+    type: hs.type,
     ip,
     port,
     discoveredAt: Date.now(),

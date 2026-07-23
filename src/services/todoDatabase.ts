@@ -11,6 +11,19 @@ import { isElectron } from './electronAdapter';
 let todoDbInstance: ITodoDatabaseService | null = null;
 
 export async function getTodoDatabase(): Promise<ITodoDatabaseService> {
+  if (todoDbInstance) {
+    // 健康检查
+    const nativeDb = todoDbInstance as any;
+    if (typeof nativeDb.ensureConnection === 'function') {
+      try {
+        await nativeDb.ensureConnection();
+      } catch (err) {
+        console.warn('[todoDatabase] ensureConnection failed, recreating instance:', err);
+        todoDbInstance = null;
+      }
+    }
+  }
+
   if (todoDbInstance) return todoDbInstance;
 
   if (isElectron()) {

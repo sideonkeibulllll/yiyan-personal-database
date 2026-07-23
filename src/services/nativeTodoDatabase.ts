@@ -25,7 +25,7 @@ class NativeTodoDatabaseService implements ITodoDatabaseService {
   }
 
   async init(): Promise<void> {
-    if (this.isInitialized) return;
+    if (this.isInitialized && this.db) return;
 
     if (!this.isElectron && Capacitor.getPlatform() === 'web') {
       await import('jeep-sqlite/loader');
@@ -33,18 +33,67 @@ class NativeTodoDatabaseService implements ITodoDatabaseService {
       await this.sqlite.initWebStore();
     }
 
-    const ret = await this.sqlite.checkConnectionsConsistency();
-    const isConn = (await this.sqlite.isConnection('memorydb_todo', false)).result;
-
-    if (ret.result && isConn) {
-      this.db = await this.sqlite.retrieveConnection('memorydb_todo', false);
-    } else {
-      this.db = await this.sqlite.createConnection('memorydb_todo', false, 'no-encryption', 1, false);
-    }
-
-    await this.db.open();
+    await this.initConnection();
     await this.createTables();
     this.isInitialized = true;
+  }
+
+  /**
+   * 初始化数据库连接（带重试）
+   * 与 NativeDatabaseService 保持一致的恢复策略
+   */
+  private async initConnection(): Promise<void> {
+    const DB_NAME = 'memorydb_todo';
+    let lastError: unknown = null;
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const ret = await this.sqlite.checkConnectionsConsistency();
+        const isConn = (await this.sqlite.isConnection(DB_NAME, false)).result;
+
+        if (ret.result && isConn) {
+          try {
+            this.db = await this.sqlite.retrieveConnection(DB_NAME, false);
+          } catch {
+            this.db = await this.sqlite.createConnection(DB_NAME, false, 'no-encryption', 1, false);
+          }
+        } else {
+          this.db = await this.sqlite.createConnection(DB_NAME, false, 'no-encryption', 1, false);
+        }
+
+        await this.db.open();
+        await this.db.query('SELECT 1 as test');
+        return;
+      } catch (err) {
+        console.warn(`[NativeTodoDatabase] initConnection attempt ${attempt + 1} failed:`, err);
+        lastError = err;
+        this.db = null;
+        if (attempt < 2) await new Promise(r => setTimeout(r, 200 * (attempt + 1)));
+      }
+    }
+
+    throw new Error(`Todo database connection failed after 3 attempts: ${lastError}`);
+  }
+
+  /**
+   * 检查连接健康状态，必要时重新初始化
+   */
+  async ensureConnection(): Promise<void> {
+    if (!this.db || !this.isInitialized) {
+      this.isInitialized = false;
+      this.db = null;
+      await this.init();
+      return;
+    }
+
+    try {
+      await this.db.query('SELECT 1 as test');
+    } catch {
+      console.warn('[NativeTodoDatabase] connection lost, reinitializing...');
+      this.isInitialized = false;
+      this.db = null;
+      await this.init();
+    }
   }
 
   private async createTables(): Promise<void> {
