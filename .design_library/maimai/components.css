@@ -1,0 +1,174 @@
+/* ═══════════════════════════════════════════════════════════════
+   components.css — Design System Component Definitions
+   Auto-extracted from preview/component-*.html
+   DO NOT EDIT MANUALLY — regenerate via extract-components-css.mjs
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Button ────────────────────────────────────────────────── */
+/* @anatomy
+   <span class="label">主操作</span><button class="btn btn-primary" data-evidence-sample="primary">导出报告</button>
+*/
+/* Component definitions — extracted to components.css by deterministic script */
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); box-sizing: border-box; height: var(--size-button-md); min-width: var(--size-button-md); padding: 0 var(--space-4); border: none; border-radius: var(--radius-sm); font-family: var(--font-family-base); font-size: var(--font-size-body); font-weight: 500; line-height: 1; cursor: pointer; white-space: nowrap; transition: background .15s, border-color .15s, filter .15s; flex-shrink: 0; }
+  .btn:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+  .btn:disabled { opacity: .5; cursor: not-allowed; pointer-events: none; }
+  .btn-primary { background: var(--color-primary); color: var(--color-on-primary); }
+  .btn-primary:hover { background: var(--color-primary-hover); }
+  .btn-secondary { background: var(--color-surface); color: var(--color-foreground); border: 1px solid var(--color-border); }
+  .btn-secondary:hover { background: var(--color-surface-container-low); }
+  .btn-ghost { background: transparent; color: var(--color-primary); }
+  .btn-ghost:hover { background: var(--color-primary-container); }
+  .btn-danger { background: var(--color-error); color: #FFFFFF; }
+  .btn-danger:hover { filter: brightness(.92); }
+  .btn:active { filter: brightness(.88); }
+  .btn-sm { height: var(--size-button-sm); min-width: var(--size-button-sm); }
+  .btn-lg { height: var(--size-button-lg); min-width: var(--size-button-lg); }
+
+/* ── Card ──────────────────────────────────────────────────── */
+/* @anatomy
+   <span class="label">默认</span><div class="card" data-evidence-sample="Default Card with Header"><div class="card-header"><span class="card-title">数据分析</span><button class="card-ghost-btn" type="button">导出报告</button>
+*/
+.card { background: var(--color-surface); color: var(--color-foreground); border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: var(--space-5); min-width: 0; }
+.card.outlined { padding: var(--space-4); }
+.card.elevated { box-shadow: var(--shadow-2); }
+.card-header { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); padding-bottom: var(--space-3); border-bottom: 1px solid var(--color-border); margin-bottom: var(--space-4); }
+.card-title { font-family: var(--font-heading); font-size: var(--font-size-h4); font-weight: var(--font-weight-h4); line-height: var(--line-height-h4); color: var(--color-foreground); word-break: keep-all; overflow-wrap: break-word; }
+.card-ghost-btn { background: transparent; border: none; color: var(--color-primary); font-family: var(--font-body); font-size: var(--font-size-body); cursor: pointer; padding: 4px 8px; border-radius: var(--radius-sm); white-space: nowrap; transition: background .15s; }
+.card-ghost-btn:hover { background: var(--color-primary-container); }
+.card-tag { display: inline-flex; align-items: center; background: var(--color-primary-container); color: var(--color-on-primary-container); font-size: var(--font-size-caption); padding: 2px 8px; border-radius: var(--radius-full); white-space: nowrap; }
+.stat-row { display: flex; justify-content: space-between; align-items: baseline; gap: var(--space-3); padding: var(--space-2) 0; }
+.stat-label { color: var(--color-muted-foreground); font-size: var(--font-size-body); }
+.stat-value { font-family: var(--font-mono); font-size: var(--font-size-h4); font-weight: var(--font-weight-h4); color: var(--color-foreground); }
+.card-note { color: var(--color-foreground); font-size: var(--font-size-body); line-height: var(--line-height-body); margin: 0 0 var(--space-2); overflow-wrap: break-word; }
+.card-time { color: var(--color-muted-foreground); font-size: var(--font-size-caption); }
+.user-row { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) 0; }
+.avatar { width: 32px; height: 32px; border-radius: var(--radius-full); background: var(--color-secondary-container); color: var(--color-on-secondary-container); display: inline-flex; align-items: center; justify-content: center; font-size: var(--font-size-caption); font-weight: var(--font-weight-h4); flex-shrink: 0; }
+.user-name { color: var(--color-foreground); font-size: var(--font-size-body); }
+.user-role { color: var(--color-muted-foreground); font-size: var(--font-size-caption); }
+
+/* ── Input ─────────────────────────────────────────────────── */
+/* @anatomy
+   <span class="label">默认</span><div class="field-wrap" data-evidence-sample="text-input-default"><span class="field-label">用户名</span><input class="field" type="text" placeholder="请输入用户名">
+*/
+/* Component definitions — extracted to components.css by deterministic script */
+.field-wrap { display: flex; flex-direction: column; gap: var(--space-1); }
+.field-label { font-size: var(--font-size-caption); color: var(--color-muted-foreground); line-height: var(--line-height-caption); }
+.field { display: block; width: 240px; height: var(--size-input); padding: 0 var(--space-3); background: var(--color-background); color: var(--color-foreground); border: 1px solid var(--color-border); border-radius: var(--radius-md); font-family: var(--font-family-base); font-size: var(--font-size-body); line-height: var(--line-height-body); box-sizing: border-box; outline: none; appearance: none; -webkit-appearance: none; transition: border-color .15s, box-shadow .15s; }
+.field::placeholder { color: var(--color-muted-foreground); }
+.field:focus { border-color: var(--color-primary); box-shadow: 0 0 0 2px rgba(232,89,12,.2); }
+.field.is-error { border-color: var(--color-error); }
+.field:disabled { background: var(--color-surface-container-low); color: var(--color-muted-foreground); cursor: not-allowed; }
+.field-helper { font-size: var(--font-size-caption); color: var(--color-muted-foreground); line-height: var(--line-height-caption); }
+.field-helper.is-error { color: var(--color-error); }
+.field-host { position: relative; display: inline-block; }
+.search-field { padding-left: var(--space-8); }
+.search-icon { position: absolute; left: var(--space-3); top: 50%; transform: translateY(-50%); width: 16px; height: 16px; pointer-events: none; opacity: .55; }
+
+/* ── Menu ──────────────────────────────────────────────────── */
+/* @anatomy
+   <span class="label">默认菜单</span> <div class="menu"> <div class="menu-item"><span class="menu-item__label">编辑</span>
+*/
+.menu{display:flex;flex-direction:column;background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-md);box-shadow:var(--shadow-3);padding:var(--space-1) 0;min-width:160px;flex-shrink:0;font-family:var(--font-body);}
+  .menu--wide{min-width:180px;}
+  .menu-item{display:flex;align-items:center;gap:var(--space-3);height:32px;padding:0 var(--space-4);font-size:var(--font-size-body);line-height:1;color:var(--color-foreground);cursor:pointer;flex-shrink:0;}
+  .menu-item:hover{background:var(--color-surface-container);}
+  .menu-item--selected{color:var(--color-primary);background:var(--color-primary-container);}
+  .menu-item--selected:hover{background:var(--color-primary-container);}
+  .menu-item--danger{color:var(--color-error);}
+  .menu-item--danger:hover{background:var(--color-surface-container);}
+  .menu-item--disabled{opacity:.5;cursor:not-allowed;}
+  .menu-item--disabled:hover{background:transparent;}
+  .menu-item__icon{width:16px;height:16px;flex-shrink:0;color:var(--color-muted-foreground);}
+  .menu-item__label{flex:1;white-space:nowrap;}
+  .menu-item__check{width:16px;height:16px;flex-shrink:0;color:var(--color-primary);}
+  .menu-divider{border:none;border-top:1px solid var(--color-border);margin:var(--space-1) 0;height:0;}
+
+/* ── Modal ─────────────────────────────────────────────────── */
+/* @anatomy
+   <span class="label">默认</span> <div class="modal-stage" data-evidence-sample="Default Modal"> <div class="modal"> <div class="modal-header"> <h3 class="modal-title">编辑用户</h3> <button class="modal-close" aria-label="关闭"><i data-lucide="x"></i></button>
+*/
+/* Component definitions — extracted to components.css by deterministic script */
+.modal-stage { position: relative; flex: 1; min-width: 0; padding: 24px; background: rgba(0,0,0,.6); border-radius: var(--radius-md); display: flex; justify-content: center; }
+.modal { display: flex; flex-direction: column; width: 480px; max-height: 80vh; background: var(--color-surface); color: var(--color-on-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); box-shadow: var(--shadow-4); overflow: hidden; }
+.modal-sm { width: 400px; }
+.modal-header { display: flex; align-items: center; justify-content: space-between; padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--color-border); }
+.modal-title { font-family: var(--font-heading); font-size: var(--font-size-h4); font-weight: var(--font-weight-h4); line-height: var(--line-height-h4); margin: 0; }
+.modal-close { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; min-width: 32px; border: none; background: transparent; color: var(--color-muted-foreground); border-radius: var(--radius-sm); cursor: pointer; transition: background .15s, color .15s; flex-shrink: 0; }
+.modal-close svg { width: 16px; height: 16px; }
+.modal-close:hover { background: var(--color-secondary-container); color: var(--color-on-surface); }
+.modal-body { padding: var(--space-5); overflow: auto; }
+.modal-body p { margin: 0; color: var(--color-muted-foreground); font-size: var(--font-size-body); line-height: var(--line-height-body); }
+.modal-footer { display: flex; justify-content: flex-end; gap: var(--space-3); padding: var(--space-4) var(--space-5); border-top: 1px solid var(--color-border); }
+.modal-field { display: flex; flex-direction: column; gap: var(--space-2); margin-bottom: var(--space-4); }
+.modal-field:last-child { margin-bottom: 0; }
+.modal-field-label { font-size: var(--font-size-caption); color: var(--color-muted-foreground); }
+.modal-input, .modal-select { height: var(--size-input); padding: 0 var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-on-surface); font-family: var(--font-body); font-size: var(--font-size-body); transition: border-color .15s; }
+.modal-input::placeholder { color: var(--color-muted-foreground); }
+.modal-input:hover, .modal-select:hover { border-color: var(--color-primary); }
+.modal-input:focus, .modal-select:focus { outline: 2px solid var(--ring); outline-offset: -1px; border-color: var(--color-primary); }
+.modal-select { appearance: none; -webkit-appearance: none; padding-right: var(--space-5); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23868E96' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right var(--space-3) center; }
+
+/* ── Navigation ────────────────────────────────────────────── */
+/* @anatomy
+   <span class="label">侧边导航</span> <nav class="nav-sidebar" aria-label="侧边导航" data-evidence-sample="Sidebar Navigation"> <a class="nav-item active" href="#"><i data-lucide="layout-dashboard"></i><span>仪表盘</span></a> <a class="nav-item" href="#"><i data-lucide="bar-chart"></i><span>数据分析</span></a> <a class="nav-item" href="#"><i data-lucide="users"></i><span>用户管理</span></a> <a class="nav-item disab...
+*/
+/* Component definitions — extracted to components.css by deterministic script */
+.nav-sidebar { width: 220px; background: var(--color-surface); border-right: 1px solid var(--color-border); padding: var(--space-4) 0; display: flex; flex-direction: column; gap: var(--space-1); flex-shrink: 0; }
+.nav-item { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-4); color: var(--color-muted-foreground); font-size: var(--font-size-body); cursor: pointer; border-left: 3px solid transparent; text-decoration: none; white-space: nowrap; transition: background .15s, color .15s; }
+.nav-item i { width: var(--size-icon-md); height: var(--size-icon-md); flex-shrink: 0; }
+.nav-item:hover:not(.disabled):not(.active) { background: var(--color-surface-container); }
+.nav-item.active { color: var(--color-primary); background: var(--color-primary-container); border-left-color: var(--color-primary); }
+.nav-item.disabled { color: var(--color-muted-foreground); opacity: .5; cursor: not-allowed; }
+.nav-user { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3) var(--space-4); margin-top: var(--space-3); border-top: 1px solid var(--color-border); }
+.nav-avatar { width: 28px; height: 28px; border-radius: var(--radius-full); background: var(--color-primary); color: var(--color-on-primary); display: inline-flex; align-items: center; justify-content: center; font-size: var(--font-size-caption); font-weight: 600; flex-shrink: 0; }
+.nav-user-name { color: var(--color-foreground); font-size: var(--font-size-body); }
+.nav-topbar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); height: var(--nav-height); padding: 0 var(--space-5); background: var(--color-surface); border-bottom: 1px solid var(--color-border); border-radius: var(--radius-md); flex: 1; min-width: 0; }
+.breadcrumb { display: flex; align-items: center; gap: var(--space-2); font-size: var(--font-size-body); min-width: 0; }
+.crumb-parent { color: var(--color-muted-foreground); }
+.crumb-sep { color: var(--color-muted-foreground); }
+.crumb-current { color: var(--color-foreground); font-weight: 500; }
+.nav-search { display: flex; align-items: center; height: var(--size-button-sm); padding: 0 var(--space-3); background: var(--color-surface-container); border: 1px solid var(--color-border); border-radius: var(--radius-md); min-width: 160px; flex-shrink: 0; }
+.nav-search input { border: none; background: transparent; outline: none; font-size: var(--font-size-body); color: var(--color-on-surface); width: 100%; min-width: 0; }
+.nav-search input::placeholder { color: var(--color-muted-foreground); }
+.nav-actions { display: flex; align-items: center; gap: var(--space-3); flex-shrink: 0; }
+.nav-btn { display: inline-flex; align-items: center; height: var(--size-button-sm); min-width: var(--size-button-sm); padding: 0 var(--space-3); background: transparent; border: 1px solid var(--color-border); border-radius: var(--radius-md); color: var(--color-foreground); font-size: var(--font-size-body); cursor: pointer; white-space: nowrap; transition: background .15s; }
+.nav-btn:hover { background: var(--color-surface-container); }
+.nav-tabs { display: flex; align-items: center; gap: var(--space-1); background: transparent; border-bottom: 1px solid var(--color-border); flex: 1; min-width: 0; }
+.tab-item { display: inline-flex; align-items: center; padding: var(--space-3) var(--space-4); color: var(--color-muted-foreground); font-size: var(--font-size-body); cursor: pointer; border-bottom: 2px solid transparent; text-decoration: none; white-space: nowrap; transition: background .15s, color .15s, border-color .15s; }
+.tab-item:hover:not(.active) { background: var(--color-surface-container-low); }
+.tab-item.active { color: var(--color-primary); border-bottom-color: var(--color-primary); }
+
+/* ── Table ─────────────────────────────────────────────────── */
+/* @anatomy
+   <span class="label">默认表格</span>
+*/
+.maimai-table { width: 100%; border-collapse: collapse; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); overflow: hidden; font-family: var(--font-body); }
+  .maimai-table thead th { background: var(--color-surface-container-low); padding: var(--space-2) var(--space-4); font-size: var(--font-size-caption); font-weight: 500; color: var(--color-muted-foreground); text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; text-align: left; border-bottom: 1px solid var(--color-border); }
+  .maimai-table tbody td { padding: var(--space-2) var(--space-4); font-size: var(--font-size-body); color: var(--color-foreground); border-bottom: 1px solid var(--color-border); vertical-align: middle; }
+  .maimai-table tbody tr:last-child td { border-bottom: none; }
+  .maimai-table tbody tr:hover { background: var(--color-surface-container-low); }
+  .maimai-table .cell-mono { font-family: var(--font-mono); font-size: var(--font-size-body); }
+  .maimai-table .cell-actions { white-space: nowrap; }
+  .maimai-tag { display: inline-flex; align-items: center; padding: 2px var(--space-2); font-size: var(--font-size-caption); border-radius: var(--radius-sm); line-height: 1.4; }
+  .maimai-tag--active { background: rgba(232,89,12,.12); color: var(--color-primary); }
+  .maimai-tag--done { background: rgba(47,158,68,.12); color: var(--color-success); }
+  .maimai-tag--draft { background: var(--color-secondary-container); color: var(--color-muted-foreground); }
+  .maimai-action { display: inline-flex; align-items: center; border: none; background: transparent; color: var(--color-primary); font-size: var(--font-size-caption); font-family: var(--font-body); cursor: pointer; padding: 4px var(--space-2); border-radius: var(--radius-sm); }
+  .maimai-action:hover { background: var(--color-primary-container); }
+  .maimai-action--danger { color: var(--color-error); }
+  .maimai-action--danger:hover { background: rgba(250,82,82,.12); }
+  .maimai-table .empty-cell { text-align: center; color: var(--color-muted-foreground); padding: var(--space-6) var(--space-4); font-size: var(--font-size-body); }
+
+/* ── Tag ───────────────────────────────────────────────────── */
+/* @anatomy
+   <span class="label">状态</span> <span class="tag tag-default">草稿</span> <span class="tag tag-primary">活跃</span> <span class="tag tag-success">已完成</span>
+*/
+/* Component definitions — extracted to components.css by deterministic script */
+.tag { display: inline-flex; align-items: center; gap: var(--space-1); flex-shrink: 0; box-sizing: border-box; padding: 2px var(--space-2); font-size: var(--font-size-caption); font-weight: 500; line-height: 1.4; white-space: nowrap; border: none; border-radius: var(--radius-sm); min-width: 24px; }
+.tag-default { background: var(--color-secondary-container); color: var(--color-muted-foreground); }
+.tag-primary { background: rgba(232, 89, 12, 0.12); color: var(--color-primary); }
+.tag-success { background: rgba(34, 197, 94, 0.12); color: var(--color-success); }
+.tag-chip { padding: 2px var(--space-2) 2px var(--space-3); background: var(--color-secondary-container); color: var(--color-foreground); border: 1px solid var(--color-border); border-radius: var(--radius-full); }
+.tag-close { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; padding: 0; border: none; background: transparent; color: var(--color-muted-foreground); cursor: pointer; border-radius: var(--radius-sm); transition: background .15s, color .15s; }
+.tag-close:hover { background: var(--color-surface-variant); color: var(--color-foreground); }
+.tag-close svg { width: 12px; height: 12px; display: block; }

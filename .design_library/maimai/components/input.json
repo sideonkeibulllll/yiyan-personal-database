@@ -1,0 +1,108 @@
+{
+  "slug": "input",
+  "schemaVersion": 2,
+  "name": "Input",
+  "category": "Forms",
+  "sourceKind": "from-scratch",
+  "confidence": "medium",
+  "semanticTypeCandidates": [
+    {"candidate": "text-input", "evidence": "Standard text field for forms and search"},
+    {"candidate": "search-input", "evidence": "Search field with leading icon in dashboard header"}
+  ],
+  "variantDimensions": [
+    {"dimension": "variant", "values": ["text", "search", "password", "textarea"]},
+    {"dimension": "state", "values": ["default", "focus", "error", "disabled"]},
+    {"dimension": "size", "values": ["sm", "md"]}
+  ],
+  "representativeVariants": [
+    {
+      "name": "Text Input (default)",
+      "whySelected": "Core form input — flat dark surface with subtle border",
+      "traits": {
+        "background": "var(--color-background)",
+        "color": "var(--color-foreground)",
+        "border": "1px solid var(--color-border)",
+        "border-radius": "var(--radius-sm)",
+        "padding": "0 var(--space-3)",
+        "height": "var(--size-input-md)",
+        "font-family": "var(--font-family-base)",
+        "font-size": "var(--font-size-body)",
+        "box-shadow": "none"
+      },
+      "childrenDigest": "Label above: '用户名'; Placeholder text: '请输入用户名'"
+    },
+    {
+      "name": "Text Input (focus)",
+      "whySelected": "Focus state with warm orange ring — the brand accent on interaction",
+      "traits": {
+        "background": "var(--color-background)",
+        "color": "var(--color-foreground)",
+        "border": "1px solid var(--color-primary)",
+        "border-radius": "var(--radius-sm)",
+        "padding": "0 var(--space-3)",
+        "height": "var(--size-input-md)",
+        "font-size": "var(--font-size-body)",
+        "box-shadow": "0 0 0 2px rgba(232, 89, 12, 0.2)"
+      },
+      "childrenDigest": "Label above: '用户名'; Input value: 'admin'"
+    },
+    {
+      "name": "Search Input",
+      "whySelected": "Search variant with leading magnifier icon — common in dashboard top nav",
+      "traits": {
+        "background": "var(--color-background)",
+        "color": "var(--color-muted-foreground)",
+        "border": "1px solid var(--color-border)",
+        "border-radius": "var(--radius-sm)",
+        "padding": "0 var(--space-3) 0 var(--space-8)",
+        "height": "var(--size-input-md)",
+        "font-size": "var(--font-size-body)",
+        "box-shadow": "none"
+      },
+      "childrenDigest": "Leading icon: search (16px); Placeholder: '搜索...'"
+    },
+    {
+      "name": "Text Input (error)",
+      "whySelected": "Error state with red border and helper text — form validation feedback",
+      "traits": {
+        "background": "var(--color-background)",
+        "color": "var(--color-foreground)",
+        "border": "1px solid var(--color-error)",
+        "border-radius": "var(--radius-sm)",
+        "padding": "0 var(--space-3)",
+        "height": "var(--size-input-md)",
+        "font-size": "var(--font-size-body)",
+        "box-shadow": "none"
+      },
+      "childrenDigest": "Label: '邮箱'; Input value: 'invalid'; Helper text below in error color: '请输入有效的邮箱地址'"
+    }
+  ],
+  "anatomy": [
+    {"part": "label", "description": "Optional text label above input, font-size caption, color muted-foreground"},
+    {"part": "field", "description": "Rectangular input field, flat background, 1px border, sharp 4px radius"},
+    {"part": "helper", "description": "Optional helper text below field, font-size caption"}
+  ],
+  "structurePatterns": [
+    "Flex column container for label + field + helper",
+    "Field: relative positioned for leading/trailing icon overlay",
+    "Icon: absolute positioned, 16px, left or right var(--space-3)"
+  ],
+  "usageHints": {
+    "priorityHint": "high",
+    "bestPractices": [
+      "Always show label for form inputs",
+      "Use search variant in top navigation bar",
+      "Orange focus ring (2px rgba) for all interactive inputs",
+      "Error state: red border + helper text, no shadow"
+    ]
+  },
+  "doNotInvent": [
+    "Icon-only inputs without placeholder (accessibility)",
+    "Rounded pill inputs (brand uses sharp 4px radius)",
+    "Filled background inputs (brand uses border style)"
+  ],
+  "unknowns": [
+    "Exact focus ring opacity — infer 20% alpha of primary color"
+  ],
+  "keyInsightSeed": "Flat input with orange focus ring, sharp corners"
+}

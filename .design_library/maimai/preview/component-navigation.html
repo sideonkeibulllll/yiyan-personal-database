@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Navigation — maimai</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<script src="https://unpkg.com/lucide@1.8.0/dist/umd/lucide.min.js"></script>
+<style>
+/* Page scaffold — NOT extracted */
+body { margin: 0; padding: var(--space-3); background: var(--color-background); font-family: var(--font-family-base); color: var(--color-on-surface); font-size: var(--font-size-body); }
+.row { display: flex; gap: var(--space-2); align-items: center; margin-bottom: var(--space-2); flex-wrap: wrap; }
+.label { display: inline-flex; align-items: center; width: 92px; flex-shrink: 0; font-size: var(--font-size-caption); color: var(--color-muted-foreground); text-transform: uppercase; letter-spacing: .04em; }
+.divider { border: none; border-top: 1px solid var(--color-border); margin: var(--space-3) 0; }
+
+/* @component-css-start */
+/* Component definitions — extracted to components.css by deterministic script */
+.nav-sidebar { width: 220px; background: var(--color-surface); border-right: 1px solid var(--color-border); padding: var(--space-4) 0; display: flex; flex-direction: column; gap: var(--space-1); flex-shrink: 0; }
+.nav-item { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-4); color: var(--color-muted-foreground); font-size: var(--font-size-body); cursor: pointer; border-left: 3px solid transparent; text-decoration: none; white-space: nowrap; transition: background .15s, color .15s; }
+.nav-item i { width: var(--size-icon-md); height: var(--size-icon-md); flex-shrink: 0; }
+.nav-item:hover:not(.disabled):not(.active) { background: var(--color-surface-container); }
+.nav-item.active { color: var(--color-primary); background: var(--color-primary-container); border-left-color: var(--color-primary); }
+.nav-item.disabled { color: var(--color-muted-foreground); opacity: .5; cursor: not-allowed; }
+.nav-user { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3) var(--space-4); margin-top: var(--space-3); border-top: 1px solid var(--color-border); }
+.nav-avatar { width: 28px; height: 28px; border-radius: var(--radius-full); background: var(--color-primary); color: var(--color-on-primary); display: inline-flex; align-items: center; justify-content: center; font-size: var(--font-size-caption); font-weight: 600; flex-shrink: 0; }
+.nav-user-name { color: var(--color-foreground); font-size: var(--font-size-body); }
+.nav-topbar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); height: var(--nav-height); padding: 0 var(--space-5); background: var(--color-surface); border-bottom: 1px solid var(--color-border); border-radius: var(--radius-md); flex: 1; min-width: 0; }
+.breadcrumb { display: flex; align-items: center; gap: var(--space-2); font-size: var(--font-size-body); min-width: 0; }
+.crumb-parent { color: var(--color-muted-foreground); }
+.crumb-sep { color: var(--color-muted-foreground); }
+.crumb-current { color: var(--color-foreground); font-weight: 500; }
+.nav-search { display: flex; align-items: center; height: var(--size-button-sm); padding: 0 var(--space-3); background: var(--color-surface-container); border: 1px solid var(--color-border); border-radius: var(--radius-md); min-width: 160px; flex-shrink: 0; }
+.nav-search input { border: none; background: transparent; outline: none; font-size: var(--font-size-body); color: var(--color-on-surface); width: 100%; min-width: 0; }
+.nav-search input::placeholder { color: var(--color-muted-foreground); }
+.nav-actions { display: flex; align-items: center; gap: var(--space-3); flex-shrink: 0; }
+.nav-btn { display: inline-flex; align-items: center; height: var(--size-button-sm); min-width: var(--size-button-sm); padding: 0 var(--space-3); background: transparent; border: 1px solid var(--color-border); border-radius: var(--radius-md); color: var(--color-foreground); font-size: var(--font-size-body); cursor: pointer; white-space: nowrap; transition: background .15s; }
+.nav-btn:hover { background: var(--color-surface-container); }
+.nav-tabs { display: flex; align-items: center; gap: var(--space-1); background: transparent; border-bottom: 1px solid var(--color-border); flex: 1; min-width: 0; }
+.tab-item { display: inline-flex; align-items: center; padding: var(--space-3) var(--space-4); color: var(--color-muted-foreground); font-size: var(--font-size-body); cursor: pointer; border-bottom: 2px solid transparent; text-decoration: none; white-space: nowrap; transition: background .15s, color .15s, border-color .15s; }
+.tab-item:hover:not(.active) { background: var(--color-surface-container-low); }
+.tab-item.active { color: var(--color-primary); border-bottom-color: var(--color-primary); }
+/* @component-css-end */
+</style>
+</head>
+<body>
+<div class="row">
+  <span class="label">侧边导航</span>
+  <nav class="nav-sidebar" aria-label="侧边导航" data-evidence-sample="Sidebar Navigation">
+    <a class="nav-item active" href="#"><i data-lucide="layout-dashboard"></i><span>仪表盘</span></a>
+    <a class="nav-item" href="#"><i data-lucide="bar-chart"></i><span>数据分析</span></a>
+    <a class="nav-item" href="#"><i data-lucide="users"></i><span>用户管理</span></a>
+    <a class="nav-item disabled" aria-disabled="true" href="#"><i data-lucide="settings"></i><span>系统设置</span></a>
+    <div class="nav-user">
+      <span class="nav-avatar" aria-label="用户头像">M</span>
+      <span class="nav-user-name">我的账户</span>
+    </div>
+  </nav>
+</div>
+<hr class="divider">
+<div class="row">
+  <span class="label">顶部导航栏</span>
+  <header class="nav-topbar" data-evidence-sample="Top Navigation Bar">
+    <nav class="breadcrumb" aria-label="面包屑"><span class="crumb-parent">仪表盘</span><span class="crumb-sep">/</span><span class="crumb-current">数据分析</span></nav>
+    <div class="nav-search"><input type="search" placeholder="搜索…" aria-label="搜索"></div>
+    <div class="nav-actions">
+      <button class="nav-btn" type="button">导出报告</button>
+      <span class="nav-avatar" aria-label="用户头像">M</span>
+    </div>
+  </header>
+</div>
+<div class="row">
+  <span class="label">标签页导航</span>
+  <nav class="nav-tabs" aria-label="标签页" data-evidence-sample="Tab Navigation">
+    <a class="tab-item active" href="#">概览</a>
+    <a class="tab-item" href="#">明细</a>
+    <a class="tab-item" href="#">趋势</a>
+    <a class="tab-item" href="#">设置</a>
+  </nav>
+</div>
+<script>lucide.createIcons();</script>
+</body>
+</html>

@@ -37,6 +37,11 @@ export function TagManagePage() {
   const [editName, setEditName] = useState('');
   const [searchKeyword, setSearchKeyword] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
+  // 标签合并状态
+  const [mergeMode, setMergeMode] = useState(false);
+  const [sourceTagId, setSourceTagId] = useState<string | null>(null);
+  const [targetTagId, setTargetTagId] = useState<string | null>(null);
+  const [isMerging, setIsMerging] = useState(false);
 
   // 过滤标签
   const filteredTags = tags.filter(tag =>
@@ -70,6 +75,35 @@ export function TagManagePage() {
     setShowDeleteConfirm(null);
   }, [removeTag]);
 
+  // 合并标签：将 sourceTag 上的所有条目引用转移到 targetTag，然后删除 sourceTag
+  const handleMergeTags = useCallback(async () => {
+    if (!sourceTagId || !targetTagId || sourceTagId === targetTagId) return;
+    setIsMerging(true);
+    try {
+      const { getDatabase } = await import('@/services/database');
+      const db = await getDatabase();
+      // 获取源标签下所有条目
+      const sourceEntries = await db.getEntriesByTagId(sourceTagId);
+      for (const entry of sourceEntries) {
+        const currentTagIds = (entry.tags || []).map((t: any) => t.id);
+        if (!currentTagIds.includes(targetTagId)) {
+          await db.addTagToEntry(entry.id, targetTagId);
+        }
+        await db.removeTagFromEntry(entry.id, sourceTagId);
+      }
+      // 删除源标签
+      await removeTag(sourceTagId);
+      // 重置状态
+      setMergeMode(false);
+      setSourceTagId(null);
+      setTargetTagId(null);
+    } catch (e) {
+      alert('合并失败: ' + (e as Error).message);
+    } finally {
+      setIsMerging(false);
+    }
+  }, [sourceTagId, targetTagId, removeTag]);
+
   return (
     <div className="tag-manage-page">
       <header className="page-header">
@@ -91,11 +125,58 @@ export function TagManagePage() {
           />
         </div>
 
+        {/* 合并模式切换 */}
+        <button
+          className={`merge-toggle-btn ${mergeMode ? 'active' : ''}`}
+          onClick={() => {
+            setMergeMode(!mergeMode);
+            setSourceTagId(null);
+            setTargetTagId(null);
+          }}
+        >
+          {mergeMode ? '取消合并' : '标签合并模式'}
+        </button>
+
+        {mergeMode && (
+          <div className="merge-hint glass">
+            <p>选择两个标签进行合并：</p>
+            <p>1. 点击源标签（将被删除）</p>
+            <p>2. 点击目标标签（保留）</p>
+            {sourceTagId && targetTagId && (
+              <div className="merge-preview">
+                <span>将 #{tags.find(t => t.id === sourceTagId)?.name} 合并到 #{tags.find(t => t.id === targetTagId)?.name}</span>
+                <button
+                  className="merge-confirm-btn"
+                  onClick={handleMergeTags}
+                  disabled={isMerging}
+                >
+                  {isMerging ? '合并中...' : '确认合并'}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* 标签列表 */}
         <div className="tags-container">
           {filteredTags.length > 0 ? (
             filteredTags.map(tag => (
-              <div key={tag.id} className="tag-row glass">
+              <div
+                key={tag.id}
+                className={`tag-row glass ${mergeMode ? 'merge-selectable' : ''} ${sourceTagId === tag.id ? 'merge-source' : ''} ${targetTagId === tag.id ? 'merge-target' : ''}`}
+                onClick={() => {
+                  if (!mergeMode) return;
+                  if (!sourceTagId) {
+                    setSourceTagId(tag.id);
+                  } else if (!targetTagId && tag.id !== sourceTagId) {
+                    setTargetTagId(tag.id);
+                  } else if (tag.id === sourceTagId) {
+                    setSourceTagId(null);
+                  } else if (tag.id === targetTagId) {
+                    setTargetTagId(null);
+                  }
+                }}
+              >
                 {editingId === tag.id ? (
                   <div className="edit-form">
                     <input
@@ -120,20 +201,22 @@ export function TagManagePage() {
                         {new Date(tag.createdAt).toLocaleDateString('zh-CN')}
                       </span>
                     </div>
-                    <div className="tag-actions">
-                      <button
-                        className="action-btn"
-                        onClick={() => handleStartEdit(tag)}
-                      >
-                        重命名
-                      </button>
-                      <button
-                        className="action-btn danger"
-                        onClick={() => setShowDeleteConfirm(tag.id)}
-                      >
-                        删除
-                      </button>
-                    </div>
+                    {!mergeMode && (
+                      <div className="tag-actions">
+                        <button
+                          className="action-btn"
+                          onClick={() => handleStartEdit(tag)}
+                        >
+                          重命名
+                        </button>
+                        <button
+                          className="action-btn danger"
+                          onClick={() => setShowDeleteConfirm(tag.id)}
+                        >
+                          删除
+                        </button>
+                      </div>
+                    )}
                   </>
                 )}
               </div>

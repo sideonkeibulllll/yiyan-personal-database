@@ -258,3 +258,76 @@
   color: white;
   background: var(--color-error);
 }
+
+/* 标签合并模式 */
+.merge-toggle-btn {
+  display: block;
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-primary);
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  text-align: center;
+}
+
+.merge-toggle-btn.active {
+  background: var(--color-error);
+  color: white;
+  border-color: var(--color-error);
+}
+
+.merge-hint {
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.merge-hint p {
+  margin-bottom: var(--space-1);
+}
+
+.merge-preview {
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border-primary);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.merge-confirm-btn {
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-xs);
+  background: var(--color-accent);
+  color: white;
+  border: none;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.merge-confirm-btn:disabled {
+  opacity: 0.5;
+}
+
+.tag-row.merge-selectable {
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out);
+}
+
+.tag-row.merge-source {
+  border-color: var(--color-error);
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.tag-row.merge-target {
+  border-color: var(--color-success);
+  background: rgba(34, 197, 94, 0.1);
+}

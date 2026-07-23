@@ -83,15 +83,16 @@ class WebDatabaseService implements IDatabaseService {
 
   // ==================== 标签操作 ====================
 
-  async createTag(name: string): Promise<Tag> {
+  async createTag(name: string, options?: { isSmart?: boolean; searchCriteria?: { keyword?: string; tagIds?: string[]; isStarred?: boolean } }): Promise<Tag> {
     const tags = this.getTagsFromStorage();
-    const existing = tags.find(t => t.name === name);
-    if (existing) return existing;
+    const existing = tags.find(t => t.name === name && !t.isSmart && !options?.isSmart);
+    if (existing && !options?.isSmart) return existing;
 
     const tag: Tag = {
       id: this.generateId(),
       name,
       createdAt: Date.now(),
+      ...(options?.isSmart ? { isSmart: true, searchCriteria: options.searchCriteria } : {}),
     };
     tags.unshift(tag);
     this.saveTagsToStorage(tags);

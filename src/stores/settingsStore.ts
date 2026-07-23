@@ -15,6 +15,7 @@ interface SettingsStore {
   updateContextConfig: (config: Partial<Settings['context']>) => void;
   updatePushConfig: (config: Partial<Settings['push']>) => void;
   updateRandomConfig: (config: Partial<Settings['random']>) => void;
+  updateTodoConfig: (config: Partial<Settings['todo']>) => void;
   resetSettings: () => void;
 }
 
@@ -113,6 +114,16 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     const settings = {
       ...get().settings,
       random: { ...get().settings.random, ...config },
+    };
+    saveToLocalStorage(settings);
+    saveToDatabase(settings);
+    set({ settings });
+  },
+
+  updateTodoConfig: (config) => {
+    const settings = {
+      ...get().settings,
+      todo: { ...get().settings.todo, ...config },
     };
     saveToLocalStorage(settings);
     saveToDatabase(settings);

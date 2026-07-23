@@ -1,0 +1,98 @@
+{
+  "slug": "menu",
+  "schemaVersion": 2,
+  "name": "Menu",
+  "category": "Overlays",
+  "sourceKind": "from-scratch",
+  "confidence": "medium",
+  "semanticTypeCandidates": [
+    {"candidate": "dropdown-menu", "evidence": "Contextual menu triggered by button or icon, used for row-level actions and overflow options"},
+    {"candidate": "context-menu", "evidence": "Right-click or overflow-triggered menu with item list and dividers"},
+    {"candidate": "select-menu", "evidence": "Menu used as select dropdown alternative with checkmark on selected item"}
+  ],
+  "variantDimensions": [
+    {"dimension": "variant", "values": ["default", "with-icons", "with-dividers"]},
+    {"dimension": "state", "values": ["default", "hover", "selected", "disabled"]},
+    {"dimension": "size", "values": ["sm", "md"]}
+  ],
+  "representativeVariants": [
+    {
+      "name": "Default Dropdown Menu",
+      "whySelected": "Core menu pattern — flat surface with hairline border, orange selected state, shadow-3 elevation",
+      "traits": {
+        "background": "var(--color-surface)",
+        "color": "var(--color-foreground)",
+        "border": "1px solid var(--color-border)",
+        "border-radius": "var(--radius-md)",
+        "box-shadow": "var(--shadow-3)",
+        "padding": "var(--space-1) 0",
+        "min-width": "160px"
+      },
+      "childrenDigest": "Menu items (vertical list, each padding var(--space-2) var(--space-4)): 编辑 (default hover state), 复制, 删除 (danger color). Each item 32px height."
+    },
+    {
+      "name": "Menu with Icons",
+      "whySelected": "Icon-led menu items — common in dashboard overflow menus and row actions",
+      "traits": {
+        "background": "var(--color-surface)",
+        "color": "var(--color-foreground)",
+        "border": "1px solid var(--color-border)",
+        "border-radius": "var(--radius-md)",
+        "box-shadow": "var(--shadow-3)",
+        "padding": "var(--space-1) 0",
+        "min-width": "180px"
+      },
+      "childrenDigest": "Menu items with leading 16px icon + label: 导出 (download icon), 导入 (upload icon), divider, 设置 (settings icon), 禁用 item (disabled style)"
+    },
+    {
+      "name": "Menu with Selected State",
+      "whySelected": "Selected/checked menu item — orange accent for active option, used as select replacement",
+      "traits": {
+        "background": "var(--color-surface)",
+        "color": "var(--color-foreground)",
+        "border": "1px solid var(--color-border)",
+        "border-radius": "var(--radius-md)",
+        "box-shadow": "var(--shadow-3)",
+        "padding": "var(--space-1) 0",
+        "min-width": "160px"
+      },
+      "childrenDigest": "Menu items where selected item shows orange text + primary-container background: 全部 (default), 活跃 (selected: orange text, primary-container bg, check icon right), 草稿, 已完成"
+    }
+  ],
+  "anatomy": [
+    {"part": "container", "description": "Flat surface with 1px hairline border, radius-md, shadow-3 elevation, min-width 160px"},
+    {"part": "item", "description": "Single-line menu item, 32px height, padding var(--space-2) var(--space-4), flex row with optional leading icon"},
+    {"part": "divider", "description": "1px hairline divider between item groups, margin var(--space-1) 0"},
+    {"part": "selected-indicator", "description": "Check icon (16px) on right side for selected items, or primary-container background + orange text"}
+  ],
+  "structurePatterns": [
+    "Container: flex column, padding var(--space-1) 0, overflow hidden",
+    "Item: flex row, align center, gap var(--space-3), height 32px, padding 0 var(--space-4)",
+    "Item hover: background var(--color-surface-container)",
+    "Item selected: color var(--color-primary), background var(--color-primary-container)",
+    "Item disabled: opacity .5, cursor not-allowed",
+    "Divider: border-top 1px solid var(--color-border), margin var(--space-1) 0",
+    "Danger item: color var(--color-error)"
+  ],
+  "usageHints": {
+    "priorityHint": "medium",
+    "bestPractices": [
+      "Trigger via button click, overflow icon, or right-click",
+      "Use dividers to separate action groups (view vs. destructive)",
+      "Selected state for filter/select menus — orange accent signals active option",
+      "Danger items (delete) use error color, place at bottom after divider",
+      "Close on outside click or Escape key"
+    ]
+  },
+  "doNotInvent": [
+    "Multi-level nested submenus (not in spec — keep single level)",
+    "Search/filter input inside menu (not in spec)",
+    "Heavy shadows beyond shadow-3 (menus float, not modal)",
+    "Animations or transitions beyond background .15s"
+  ],
+  "unknowns": [
+    "Menu width is content-driven — min-width 160px, max-width 280px",
+    "Position relative to trigger — render as inline static preview"
+  ],
+  "keyInsightSeed": "Flat dropdown with hairline border and shadow-3, orange selected state via primary-container tint"
+}

@@ -1,10 +1,21 @@
 /**
  * 底部导航栏
+ *
+ * 说明：
+ * - 「搜索」入口已从底栏永久移除（用户通过首页快捷入口进入搜索）。
+ * - 新增「待办」入口，底栏共 5 项：录入 / 随机 / 待办 / Chat / 设置。
+ * - 搜索页 `/search` 仍展示底栏（不含搜索项），方便用户跳转到其他页面。
  */
 import { useLocation, useNavigate } from 'react-router-dom';
 import './BottomNav.css';
 
-const navItems = [
+type NavItem = {
+  path: string;
+  label: string;
+  icon: JSX.Element;
+};
+
+const NAV_ITEMS: NavItem[] = [
   {
     path: '/',
     label: '录入',
@@ -26,12 +37,12 @@ const navItems = [
     ),
   },
   {
-    path: '/search',
-    label: '搜索',
+    path: '/todo',
+    label: '待办',
     icon: (
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="11" cy="11" r="8" />
-        <line x1="21" y1="21" x2="16.65" y2="16.65" />
+        <path d="M9 11l3 3L22 4" />
+        <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
       </svg>
     ),
   },
@@ -62,7 +73,7 @@ export function BottomNav() {
 
   return (
     <nav className="bottom-nav glass">
-      {navItems.map(item => (
+      {NAV_ITEMS.map(item => (
         <button
           key={item.path}
           className={`nav-item ${location.pathname === item.path ? 'active' : ''}`}

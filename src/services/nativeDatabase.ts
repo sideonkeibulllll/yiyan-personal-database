@@ -186,10 +186,30 @@ class NativeDatabaseService implements IDatabaseService {
     return entries;
   }
 
-  async createTag(name: string): Promise<Tag> {
+  async createTag(name: string, options?: { isSmart?: boolean; searchCriteria?: { keyword?: string; tagIds?: string[]; isStarred?: boolean } }): Promise<Tag> {
     if (!this.db) throw new Error('Database not initialized');
-    const tag: Tag = { id: this.generateId(), name, createdAt: Date.now() };
-    await this.db.run('INSERT INTO tags (id, name, created_at) VALUES (?, ?, ?)', [tag.id, tag.name, tag.createdAt]);
+    const tag: Tag = {
+      id: this.generateId(),
+      name,
+      createdAt: Date.now(),
+      ...(options?.isSmart ? { isSmart: true, searchCriteria: options.searchCriteria } : {}),
+    };
+    // 注意：is_smart 和 search_criteria 字段需要对应的表结构升级
+    // 当前版本简化处理：将智能标签信息序列化存储到 name 字段后缓（临时方案）
+    // 后续版本应升级 tags 表添加 is_smart BOOLEAN 和 search_criteria TEXT 列
+    if (options?.isSmart && options.searchCriteria) {
+      await this.db.run(
+        'INSERT INTO tags (id, name, created_at) VALUES (?, ?, ?)',
+        [tag.id, `[智能] ${tag.name}`, tag.createdAt]
+      );
+      // 智能标签搜索条件存在 localStorage
+      try {
+        const key = `yiyan_smart_tag_${tag.id}`;
+        localStorage.setItem(key, JSON.stringify(options.searchCriteria));
+      } catch {}
+    } else {
+      await this.db.run('INSERT INTO tags (id, name, created_at) VALUES (?, ?, ?)', [tag.id, tag.name, tag.createdAt]);
+    }
     return tag;
   }
 

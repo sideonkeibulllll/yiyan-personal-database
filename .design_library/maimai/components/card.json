@@ -1,0 +1,85 @@
+{
+  "slug": "card",
+  "schemaVersion": 2,
+  "name": "Card",
+  "category": "Containers",
+  "sourceKind": "from-scratch",
+  "confidence": "medium",
+  "semanticTypeCandidates": [
+    {"candidate": "content-container", "evidence": "Modular surface for grouping related information"},
+    {"candidate": "data-panel", "evidence": "Dashboard-style panel with header and metric body"}
+  ],
+  "variantDimensions": [
+    {"dimension": "variant", "values": ["default", "outlined", "elevated"]},
+    {"dimension": "structure", "values": ["header-body", "body-only", "header-body-footer"]}
+  ],
+  "representativeVariants": [
+    {
+      "name": "Default Card with Header",
+      "whySelected": "Primary card pattern — dark surface with header separator and content body",
+      "traits": {
+        "background": "var(--color-surface)",
+        "color": "var(--color-foreground)",
+        "border": "1px solid var(--color-border)",
+        "border-radius": "var(--radius-md)",
+        "padding": "var(--space-5)",
+        "box-shadow": "none"
+      },
+      "childrenDigest": "Header row: title '数据分析' (font-weight semibold, font-size h4) + ghost button '导出报告'; Body: two stat rows with label '总访问量' value '12,847' and label '活跃用户' value '3,421'"
+    },
+    {
+      "name": "Outlined Card (body only)",
+      "whySelected": "Minimal card — border only, no header, for compact content slots",
+      "traits": {
+        "background": "var(--color-surface)",
+        "color": "var(--color-foreground)",
+        "border": "1px solid var(--color-border)",
+        "border-radius": "var(--radius-md)",
+        "padding": "var(--space-4)",
+        "box-shadow": "none"
+      },
+      "childrenDigest": "Single paragraph: '系统运行正常，所有服务可用。' with small timestamp '更新于 2 分钟前' in muted color"
+    },
+    {
+      "name": "Elevated Card",
+      "whySelected": "Card with subtle shadow for modal-like emphasis in content flow",
+      "traits": {
+        "background": "var(--color-surface)",
+        "color": "var(--color-foreground)",
+        "border": "1px solid var(--color-border)",
+        "border-radius": "var(--radius-md)",
+        "padding": "var(--space-5)",
+        "box-shadow": "var(--shadow-2)"
+      },
+      "childrenDigest": "Header: title '用户管理' + tag '活跃'; Body: 3-row user list with avatar circle, name, and role label"
+    }
+  ],
+  "anatomy": [
+    {"part": "header", "description": "Optional top section with title and actions, separated by 1px border-bottom"},
+    {"part": "body", "description": "Main content area, padded"},
+    {"part": "footer", "description": "Optional bottom section for actions, separated by 1px border-top"}
+  ],
+  "structurePatterns": [
+    "Flex column container",
+    "Header: flex row, justify between, align center, padding-bottom var(--space-3), border-bottom 1px solid var(--color-border)",
+    "Body: padding var(--space-4) or var(--space-5)",
+    "Footer: flex row, justify end, gap var(--space-3), padding-top var(--space-3), border-top 1px solid var(--color-border)"
+  ],
+  "usageHints": {
+    "priorityHint": "high",
+    "bestPractices": [
+      "Default card for dashboard panels and data groupings",
+      "Use header-body-footer for actionable cards with footer buttons",
+      "Elevated variant sparingly for emphasis — brand prefers flat"
+    ]
+  },
+  "doNotInvent": [
+    "Gradient backgrounds (brand is flat)",
+    "Heavy shadows (max shadow-2 for elevated variant)",
+    "Rounded corners beyond var(--radius-md)"
+  ],
+  "unknowns": [
+    "Card width is flexible — determined by grid context"
+  ],
+  "keyInsightSeed": "Dark surface container with subtle border, modular content zones"
+}

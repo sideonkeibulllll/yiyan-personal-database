@@ -1,0 +1,78 @@
+{
+  "slug": "modal",
+  "schemaVersion": 2,
+  "name": "Modal",
+  "category": "Overlays",
+  "sourceKind": "from-scratch",
+  "confidence": "medium",
+  "semanticTypeCandidates": [
+    {"candidate": "dialog", "evidence": "Centered overlay dialog for confirmations and forms"},
+    {"candidate": "confirmation-dialog", "evidence": "Destructive action confirmation with danger button"}
+  ],
+  "variantDimensions": [
+    {"dimension": "variant", "values": ["default", "confirmation"]},
+    {"dimension": "size", "values": ["sm", "md"]}
+  ],
+  "representativeVariants": [
+    {
+      "name": "Default Modal",
+      "whySelected": "Standard dialog — dark overlay, elevated surface, header + body + footer",
+      "traits": {
+        "overlay-background": "rgba(0, 0, 0, 0.6)",
+        "modal-background": "var(--color-surface)",
+        "modal-color": "var(--color-foreground)",
+        "modal-border": "1px solid var(--color-border)",
+        "modal-border-radius": "var(--radius-md)",
+        "modal-width": "480px",
+        "modal-box-shadow": "var(--shadow-4)",
+        "modal-padding": "0"
+      },
+      "childrenDigest": "Header: title '编辑用户' (font-size h4, font-weight semibold) + close button (ghost, x icon); Body: form with '用户名' input and '角色' select, padding var(--space-5); Footer: secondary button '取消' + primary button '保存', gap var(--space-3), justify end, border-top 1px solid var(--color-border), padding var(--space-4) var(--space-5)"
+    },
+    {
+      "name": "Confirmation Modal",
+      "whySelected": "Destructive confirmation — compact dialog with danger button",
+      "traits": {
+        "overlay-background": "rgba(0, 0, 0, 0.6)",
+        "modal-background": "var(--color-surface)",
+        "modal-color": "var(--color-foreground)",
+        "modal-border": "1px solid var(--color-border)",
+        "modal-border-radius": "var(--radius-md)",
+        "modal-width": "400px",
+        "modal-box-shadow": "var(--shadow-4)",
+        "modal-padding": "0"
+      },
+      "childrenDigest": "Header: title '确认删除'; Body: text '确定要删除该用户吗？此操作无法撤销。' (color var(--color-muted-foreground)); Footer: secondary button '取消' + danger button '删除', gap var(--space-3), justify end"
+    }
+  ],
+  "anatomy": [
+    {"part": "overlay", "description": "Full-screen semi-transparent dark backdrop, fixed position, center modal"},
+    {"part": "header", "description": "Title + close button, padding var(--space-4) var(--space-5), border-bottom 1px solid var(--color-border)"},
+    {"part": "body", "description": "Content area, padding var(--space-5)"},
+    {"part": "footer", "description": "Action buttons, padding var(--space-4) var(--space-5), border-top 1px solid var(--color-border), justify end"}
+  ],
+  "structurePatterns": [
+    "Overlay: fixed inset 0, flex center, z-index 1000",
+    "Modal: flex column, max-height 80vh, overflow auto on body",
+    "Header: flex row, justify between, align center",
+    "Footer: flex row, justify end, gap var(--space-3)"
+  ],
+  "usageHints": {
+    "priorityHint": "medium",
+    "bestPractices": [
+      "Modal width sm (400px) for confirmations, md (480px) for forms",
+      "Always include close button in header",
+      "Footer actions: secondary left, primary/danger right",
+      "Overlay click should dismiss modal"
+    ]
+  },
+  "doNotInvent": [
+    "Drawer/slide-over panel (not in spec — use modal)",
+    "Full-screen modal (not in spec)",
+    "Toast notifications (separate component)"
+  ],
+  "unknowns": [
+    "Animation/transition — render static, no animation"
+  ],
+  "keyInsightSeed": "Dark overlay with elevated surface, sharp header separator"
+}

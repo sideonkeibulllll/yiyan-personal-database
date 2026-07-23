@@ -54,6 +54,12 @@ const IconShuffle = () => (
   </svg>
 );
 
+const IconClipboard = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <rect width="8" height="4" x="8" y="2" rx="1" ry="1" /><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" /><path d="M9 14l2 2 4-4" />
+  </svg>
+);
+
 const IconChevronUp = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
     <path d="m18 15-6-6-6 6" />
@@ -77,9 +83,14 @@ export function SettingsPage() {
   const settings = useSettingsStore(state => state.settings);
   const updateAIConfig = useSettingsStore(state => state.updateAIConfig);
   const updateRandomConfig = useSettingsStore(state => state.updateRandomConfig);
+  const updateTodoConfig = useSettingsStore(state => state.updateTodoConfig);
+  const updateContextConfig = useSettingsStore(state => state.updateContextConfig);
+  const updatePushConfig = useSettingsStore(state => state.updatePushConfig);
   const entries = useEntryStore(state => state.entries);
   const [showAIConfig, setShowAIConfig] = useState(false);
   const [showRandomConfig, setShowRandomConfig] = useState(false);
+  const [showTodoConfig, setShowTodoConfig] = useState(false);
+  const [showContextConfig, setShowContextConfig] = useState(false);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [importing, setImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -284,6 +295,61 @@ export function SettingsPage() {
                 <span className="form-hint">变量: {`{recentTags}`} = 最近标签列表, {`{content}`} = 当前条目内容</span>
               </div>
 
+              {/* 上下文范围配置 */}
+              <div className="settings-subsection-title">上下文范围</div>
+              <div className="form-group">
+                <label className="form-label">近期条目数量</label>
+                <input
+                  type="number"
+                  className="form-input glass"
+                  value={settings.context.recentWindow}
+                  onChange={e => updateContextConfig({ recentWindow: Math.max(1, Math.min(200, parseInt(e.target.value) || 20)) })}
+                  min="1"
+                  max="200"
+                  step="1"
+                />
+                <span className="form-hint">AI 对话时参考的最近条目数（越大上下文越丰富，但耗 token）</span>
+              </div>
+              <div className="form-group">
+                <label className="form-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={settings.context.enableLongTermMemory ?? false}
+                    onChange={e => updateContextConfig({ enableLongTermMemory: e.target.checked })}
+                  />
+                  <span>启用长期记忆</span>
+                </label>
+                <span className="form-hint">启用后 AI 会参考更多历史条目，耗 token 更多</span>
+              </div>
+
+              {/* 主动推送配置 */}
+              <div className="settings-subsection-title">主动推送</div>
+              <div className="form-group">
+                <label className="form-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={settings.push?.enabled ?? false}
+                    onChange={e => updatePushConfig({ enabled: e.target.checked })}
+                  />
+                  <span>启用主动推送</span>
+                </label>
+                <span className="form-hint">录入新条目时，AI 自动推送相关历史条目</span>
+              </div>
+              <div className="form-group">
+                <label className="form-label">相似度阈值</label>
+                <input
+                  type="range"
+                  className="form-input"
+                  style={{ padding: 0 }}
+                  value={settings.push?.similarityThreshold ?? 0.7}
+                  onChange={e => updatePushConfig({ similarityThreshold: parseFloat(e.target.value) })}
+                  min="0.3"
+                  max="1"
+                  step="0.05"
+                />
+                <span className="form-hint">值越高要求越严格（当前: {(settings.push?.similarityThreshold ?? 0.7).toFixed(2)}）</span>
+              </div>
+
               {/* 提示词配置 */}
               <div className="settings-subsection-title">提示词配置</div>
               {(['tagSuggestion', 'relationSuggestion', 'dialogueContext', 'autoLink'] as const).map(key => (
@@ -317,6 +383,125 @@ export function SettingsPage() {
                   重置提示词为默认
                 </button>
               </div>
+            </div>
+          )}
+        </section>
+
+        {/* 待办配置 */}
+        <section className="settings-section">
+          <button
+            className="settings-item glass"
+            onClick={() => setShowTodoConfig(!showTodoConfig)}
+          >
+            <div className="item-left">
+              <span className="item-icon"><IconClipboard /></span>
+              <div>
+                <span className="item-title">待办配置</span>
+                <span className="item-desc">
+                  {settings.todo?.showCountdown ? '倒计时已开启' : '倒计时已关闭'}
+                </span>
+              </div>
+            </div>
+            <span className="item-arrow">{showTodoConfig ? <IconChevronUp /> : <IconChevronDown />}</span>
+          </button>
+
+          {showTodoConfig && (
+            <div className="settings-detail glass">
+              {/* 倒计时配置 */}
+              <div className="settings-subsection-title">倒计时</div>
+              <div className="form-group">
+                <label className="form-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={settings.todo?.showCountdown ?? true}
+                    onChange={e => updateTodoConfig({ showCountdown: e.target.checked })}
+                  />
+                  <span>显示倒计时条</span>
+                </label>
+              </div>
+              <div className="form-group">
+                <label className="form-label">倒计时格式</label>
+                <select
+                  className="form-input glass"
+                  value={settings.todo?.countdownFormat ?? 'full'}
+                  onChange={e => updateTodoConfig({ countdownFormat: e.target.value as 'full' | 'compact' | 'daysOnly' })}
+                >
+                  <option value="full">完整格式 (天时分秒)</option>
+                  <option value="compact">简洁格式 (天时分)</option>
+                  <option value="daysOnly">仅天数</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label">倒计时位置</label>
+                <select
+                  className="form-input glass"
+                  value={settings.todo?.countdownPosition ?? 'aboveBottomNav'}
+                  onChange={e => updateTodoConfig({ countdownPosition: e.target.value as 'aboveBottomNav' | 'pageTop' | 'floating' })}
+                >
+                  <option value="aboveBottomNav">底栏上方</option>
+                  <option value="pageTop">页面顶部</option>
+                  <option value="floating">悬浮窗</option>
+                </select>
+              </div>
+
+              {/* 其他配置 */}
+              <div className="settings-subsection-title">其他</div>
+              <div className="form-group">
+                <label className="form-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={settings.todo?.confirmDelete ?? true}
+                    onChange={e => updateTodoConfig({ confirmDelete: e.target.checked })}
+                  />
+                  <span>删除前确认</span>
+                </label>
+              </div>
+              <div className="form-group">
+                <label className="form-label">回收站保留天数</label>
+                <input
+                  type="number"
+                  className="form-input glass"
+                  value={settings.todo?.recycleBinRetentionDays ?? 30}
+                  onChange={e => updateTodoConfig({ recycleBinRetentionDays: Math.max(1, parseInt(e.target.value) || 30) })}
+                  min="1"
+                  max="365"
+                  step="1"
+                />
+                <span className="form-hint">超过此天数的已删除待办将自动清除</span>
+              </div>
+
+              {/* 入口到待办管理器和模板 */}
+              <div className="settings-subsection-title">高级</div>
+              <button
+                className="settings-item glass"
+                onClick={() => navigate('/todo/manager')}
+              >
+                <div className="item-left">
+                  <span className="item-title">待办管理器</span>
+                  <span className="item-desc">时间轴视图 · 批量操作</span>
+                </div>
+                <span className="item-arrow"><IconChevronRight /></span>
+              </button>
+              <button
+                className="settings-item glass"
+                onClick={() => navigate('/todo/templates')}
+              >
+                <div className="item-left">
+                  <span className="item-title">模板管理</span>
+                  <span className="item-desc">创建和应用待办模板</span>
+                </div>
+                <span className="item-arrow"><IconChevronRight /></span>
+              </button>
+              <button
+                className="settings-item glass"
+                onClick={() => navigate('/todo/recycle-bin')}
+              >
+                <div className="item-left">
+                  <span className="item-title">回收站</span>
+                  <span className="item-desc">恢复或彻底删除待办</span>
+                </div>
+                <span className="item-arrow"><IconChevronRight /></span>
+              </button>
             </div>
           )}
         </section>

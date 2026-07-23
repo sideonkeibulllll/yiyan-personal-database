@@ -1,0 +1,84 @@
+{
+  "components": [
+    {
+      "slug": "button",
+      "name": "Button",
+      "category": "Actions",
+      "sourceKind": "from-scratch",
+      "confidence": "medium",
+      "variantCount": 4,
+      "priorityHint": "high",
+      "keyInsightSeed": "Warm orange primary CTA, flat dark secondary, no shadows"
+    },
+    {
+      "slug": "card",
+      "name": "Card",
+      "category": "Containers",
+      "sourceKind": "from-scratch",
+      "confidence": "medium",
+      "variantCount": 3,
+      "priorityHint": "high",
+      "keyInsightSeed": "Dark surface container with subtle border, modular content zones"
+    },
+    {
+      "slug": "input",
+      "name": "Input",
+      "category": "Forms",
+      "sourceKind": "from-scratch",
+      "confidence": "medium",
+      "variantCount": 4,
+      "priorityHint": "high",
+      "keyInsightSeed": "Flat input with orange focus ring, sharp corners"
+    },
+    {
+      "slug": "navigation",
+      "name": "Navigation",
+      "category": "Navigation",
+      "sourceKind": "from-scratch",
+      "confidence": "medium",
+      "variantCount": 3,
+      "priorityHint": "medium",
+      "keyInsightSeed": "Left sidebar + top bar modular layout, orange active states"
+    },
+    {
+      "slug": "modal",
+      "name": "Modal",
+      "category": "Overlays",
+      "sourceKind": "from-scratch",
+      "confidence": "medium",
+      "variantCount": 2,
+      "priorityHint": "medium",
+      "keyInsightSeed": "Dark overlay with elevated surface, sharp header separator"
+    },
+    {
+      "slug": "tag",
+      "name": "Tag",
+      "category": "Display",
+      "sourceKind": "from-scratch",
+      "confidence": "medium",
+      "variantCount": 4,
+      "priorityHint": "medium",
+      "keyInsightSeed": "Small flat labels, pill radius for chips, orange variant for highlights"
+    },
+    {
+      "slug": "menu",
+      "name": "Menu",
+      "category": "Overlays",
+      "sourceKind": "from-scratch",
+      "confidence": "medium",
+      "variantCount": 3,
+      "priorityHint": "medium",
+      "keyInsightSeed": "Flat dropdown with hairline border and shadow-3, orange selected state via primary-container tint"
+    },
+    {
+      "slug": "table",
+      "name": "Table",
+      "category": "Data Display",
+      "sourceKind": "from-scratch",
+      "confidence": "medium",
+      "variantCount": 3,
+      "priorityHint": "high",
+      "keyInsightSeed": "Flat data table with hairline borders, 40px rows, mono numerics, hover tint via surface-container-low"
+    }
+  ]
+}

@@ -3,10 +3,13 @@
  * 全文搜索 + 结果列表 + 一键复制
  */
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useEntryStore } from '@/stores/entryStore';
 import { useTagStore } from '@/stores/tagStore';
+import { useTodoStore } from '@/stores/todoStore';
 import { BottomNav } from '@/components/BottomNav';
-import type { Entry } from '@/types';
+import { QuickMenu } from '@/features/random/QuickMenu';
+import type { Entry, Todo, TodoSearchTimeFilter } from '@/types';
 import './SearchPage.css';
 
 /** SVG icons (stroke-based, viewBox="0 0 24 24", strokeWidth="1.5") */
@@ -48,10 +51,19 @@ export function SearchPage() {
   const [showToast, setShowToast] = useState(false);
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [filterStarred, setFilterStarred] = useState<boolean | undefined>(undefined);
+  const [todoMode, setTodoMode] = useState(false);
+  const [todoResults, setTodoResults] = useState<Todo[]>([]);
+  const [todoTimeFilter, setTodoTimeFilter] = useState<TodoSearchTimeFilter>('future');
+  const [menuEntry, setMenuEntry] = useState<Entry | null>(null);
+  const [showMenu, setShowMenu] = useState(false);
+  const longPressTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
   const search = useEntryStore(state => state.search);
   const markAsUsed = useEntryStore(state => state.markAsUsed);
   const tags = useTagStore(state => state.tags);
+  const searchTodos = useTodoStore(state => state.searchTodos);
 
   // 自动聚焦
   useEffect(() => {
@@ -60,6 +72,21 @@ export function SearchPage() {
 
   // 执行搜索
   const handleSearch = useCallback(async () => {
+    if (todoMode) {
+      if (!keyword.trim()) {
+        setTodoResults([]);
+        return;
+      }
+      setIsSearching(true);
+      try {
+        const todoSearchResults = await searchTodos(keyword.trim(), todoTimeFilter);
+        setTodoResults(todoSearchResults);
+      } finally {
+        setIsSearching(false);
+      }
+      return;
+    }
+
     if (!keyword.trim() && selectedTagIds.length === 0 && filterStarred === undefined) {
       setResults([]);
       return;
@@ -75,7 +102,7 @@ export function SearchPage() {
     } finally {
       setIsSearching(false);
     }
-  }, [keyword, selectedTagIds, filterStarred, search]);
+  }, [keyword, selectedTagIds, filterStarred, search, todoMode, todoTimeFilter, searchTodos]);
 
   // 防抖搜索
   useEffect(() => {
@@ -118,6 +145,50 @@ export function SearchPage() {
     setFilterStarred(prev => prev === undefined ? true : prev === true ? false : undefined);
   }, []);
 
+  // 长按结果项
+  const handlePressStart = useCallback((entry: Entry) => {
+    const timer = setTimeout(() => {
+      setMenuEntry(entry);
+      setShowMenu(true);
+    }, 500);
+    longPressTimersRef.current.set(entry.id, timer);
+  }, []);
+
+  const handlePressEnd = useCallback((entryId: string) => {
+    const timer = longPressTimersRef.current.get(entryId);
+    if (timer) {
+      clearTimeout(timer);
+      longPressTimersRef.current.delete(entryId);
+    }
+  }, []);
+
+  useEffect(() => () => {
+    longPressTimersRef.current.forEach(t => clearTimeout(t));
+    longPressTimersRef.current.clear();
+  }, []);
+
+  // 保存为智能标签
+  const [showSaveSmartTag, setShowSaveSmartTag] = useState(false);
+  const [smartTagName, setSmartTagName] = useState('');
+
+  const handleSaveSmartTag = useCallback(async () => {
+    if (!smartTagName.trim()) return;
+    const { getDatabase } = await import('@/services/database');
+    const db = await getDatabase();
+    await db.createTag(smartTagName.trim(), {
+      isSmart: true,
+      searchCriteria: {
+        keyword: keyword.trim() || undefined,
+        tagIds: selectedTagIds.length > 0 ? selectedTagIds : undefined,
+        isStarred: filterStarred,
+      },
+    });
+    setSmartTagName('');
+    setShowSaveSmartTag(false);
+    setShowToast(true);
+    setTimeout(() => setShowToast(false), 1500);
+  }, [smartTagName, keyword, selectedTagIds, filterStarred]);
+
   return (
     <div className="search-page">
       <main className="page-content">
@@ -128,7 +199,7 @@ export function SearchPage() {
             ref={inputRef}
             type="text"
             className="search-input"
-            placeholder="搜索内容..."
+            placeholder={todoMode ? "搜索待办..." : "搜索内容..."}
             value={keyword}
             onChange={e => setKeyword(e.target.value)}
           />
@@ -137,26 +208,76 @@ export function SearchPage() {
           )}
         </div>
 
-        {/* 筛选栏 */}
-        <div className="filter-bar">
+        {/* 模式切换 */}
+        <div className="search-mode-tabs">
           <button
-            className={`filter-chip ${filterStarred !== undefined ? 'active' : ''}`}
-            onClick={toggleStarFilter}
+            className={`search-mode-tab ${!todoMode ? 'active' : ''}`}
+            onClick={() => { setTodoMode(false); setTodoResults([]); }}
           >
-            <span>{filterStarred === false ? <StarOutlineIcon /> : <StarFilledIcon />}</span>
-            <span>{filterStarred === false ? '未星标' : filterStarred ? '已星标' : '全部'}</span>
+            笔记搜索
           </button>
-
-          {tags.map(tag => (
-            <button
-              key={tag.id}
-              className={`filter-chip ${selectedTagIds.includes(tag.id) ? 'active' : ''}`}
-              onClick={() => toggleTagFilter(tag.id)}
-            >
-              #{tag.name}
-            </button>
-          ))}
+          <button
+            className={`search-mode-tab ${todoMode ? 'active' : ''}`}
+            onClick={() => { setTodoMode(true); setResults([]); }}
+          >
+            待办搜索
+          </button>
         </div>
+
+        {/* 待办搜索筛选 */}
+        {todoMode ? (
+          <div className="filter-bar">
+            <button
+              className={`filter-chip ${todoTimeFilter === 'future' ? 'active' : ''}`}
+              onClick={() => setTodoTimeFilter('future')}
+            >
+              <span>未来待办</span>
+            </button>
+            <button
+              className={`filter-chip ${todoTimeFilter === 'expired' ? 'active' : ''}`}
+              onClick={() => setTodoTimeFilter('expired')}
+            >
+              <span>已过期</span>
+            </button>
+            <button
+              className={`filter-chip ${todoTimeFilter === 'expiredOverMonth' ? 'active' : ''}`}
+              onClick={() => setTodoTimeFilter('expiredOverMonth')}
+            >
+              <span>回收站(30天+)</span>
+            </button>
+          </div>
+        ) : (
+          /* 笔记筛选栏 */
+          <div className="filter-bar">
+            <button
+              className={`filter-chip ${filterStarred !== undefined ? 'active' : ''}`}
+              onClick={toggleStarFilter}
+            >
+              <span>{filterStarred === false ? <StarOutlineIcon /> : <StarFilledIcon />}</span>
+              <span>{filterStarred === false ? '未星标' : filterStarred ? '已星标' : '全部'}</span>
+            </button>
+
+            {tags.map(tag => (
+              <button
+                key={tag.id}
+                className={`filter-chip ${selectedTagIds.includes(tag.id) ? 'active' : ''}`}
+                onClick={() => toggleTagFilter(tag.id)}
+              >
+                #{tag.name}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* 保存为智能标签 */}
+        {!todoMode && (keyword || selectedTagIds.length > 0 || filterStarred !== undefined) && (
+          <button
+            className="save-smart-tag-btn"
+            onClick={() => setShowSaveSmartTag(true)}
+          >
+            保存为智能标签
+          </button>
+        )}
 
         {/* 搜索结果 */}
         <div className="search-results">
@@ -164,12 +285,51 @@ export function SearchPage() {
             <div className="search-loading">
               <div className="loading-spinner small" />
             </div>
+          ) : todoMode ? (
+            /* 待办搜索结果 */
+            todoResults.length > 0 ? (
+              todoResults.map(todo => (
+                <div
+                  key={todo.id}
+                  className="result-item glass todo-search-result"
+                >
+                  <div className="result-content">
+                    <span className={`todo-status-badge ${todo.status}`}>●</span>
+                    {todo.title}
+                  </div>
+                  <div className="result-meta">
+                    {todo.folderDate && (
+                      <span className="meta-time">{todo.folderDate}</span>
+                    )}
+                    {todo.deletedAt && (
+                      <span className="meta-deleted">已删除</span>
+                    )}
+                  </div>
+                </div>
+              ))
+            ) : keyword ? (
+              <div className="empty-results">
+                <span className="empty-icon"><SearchIcon /></span>
+                <p className="empty-text">没有找到相关待办</p>
+              </div>
+            ) : (
+              <div className="search-hint">
+                <span className="hint-icon"><LightbulbIcon /></span>
+                <p>输入关键词搜索待办</p>
+                <p className="hint-sub">可筛选未来/已过期/回收站</p>
+              </div>
+            )
           ) : results.length > 0 ? (
             results.map(entry => (
               <div
                 key={entry.id}
                 className="result-item glass"
                 onClick={() => handleCopy(entry)}
+                onMouseDown={() => handlePressStart(entry)}
+                onMouseUp={() => handlePressEnd(entry.id)}
+                onMouseLeave={() => handlePressEnd(entry.id)}
+                onTouchStart={() => handlePressStart(entry)}
+                onTouchEnd={() => handlePressEnd(entry.id)}
               >
                 <div className="result-content">
                   {entry.content}
@@ -204,6 +364,60 @@ export function SearchPage() {
       {showToast && (
         <div className="toast glass">
           <span>已复制</span>
+        </div>
+      )}
+
+      {/* 长按菜单 */}
+      {showMenu && menuEntry && (
+        <QuickMenu
+          entry={menuEntry}
+          onClose={() => setShowMenu(false)}
+          onToggleStar={() => {
+            // 简单调用 store
+            const { toggleStar } = useEntryStore.getState();
+            toggleStar(menuEntry.id);
+            setShowMenu(false);
+          }}
+          onViewLinks={() => {
+            setShowMenu(false);
+            navigate(`/links/${menuEntry.id}`);
+          }}
+          onEditTags={() => {
+            setShowMenu(false);
+            navigate(`/entry/${menuEntry.id}/edit`);
+          }}
+          onAIChat={(entryId) => {
+            setShowMenu(false);
+            navigate(`/chat?entryId=${entryId}&from=/search`);
+          }}
+        />
+      )}
+
+      {/* 保存为智能标签弹窗 */}
+      {showSaveSmartTag && (
+        <div className="confirm-overlay" onClick={() => setShowSaveSmartTag(false)}>
+          <div className="confirm-dialog glass" onClick={e => e.stopPropagation()}>
+            <h3>保存为智能标签</h3>
+            <p>当前搜索条件将被保存为一个智能标签</p>
+            <input
+              type="text"
+              className="smart-tag-input"
+              placeholder="智能标签名称..."
+              value={smartTagName}
+              onChange={e => setSmartTagName(e.target.value)}
+              autoFocus
+            />
+            <div className="confirm-actions">
+              <button onClick={() => setShowSaveSmartTag(false)}>取消</button>
+              <button
+                className="primary"
+                onClick={handleSaveSmartTag}
+                disabled={!smartTagName.trim()}
+              >
+                保存
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

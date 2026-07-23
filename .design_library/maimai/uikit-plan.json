@@ -1,0 +1,137 @@
+{
+  "schemaVersion": 1,
+  "headBoilerplate": "<link rel=\"stylesheet\" href=\"../../colors_and_type.css\">\n<link rel=\"stylesheet\" href=\"../../components.css\">",
+  "corePreviewComponents": [
+    {
+      "slug": "button",
+      "reason": "fixed slot \"button\"; semantic=button:0.75; policy=fixed-slots-first",
+      "evidenceFile": "components/button.json",
+      "priority": 1,
+      "slot": "button"
+    },
+    {
+      "slug": "navigation",
+      "reason": "fixed slot \"navigation\"; semantic=navigation:0.75; policy=fixed-slots-first",
+      "evidenceFile": "components/navigation.json",
+      "priority": 2,
+      "slot": "navigation"
+    },
+    {
+      "slug": "card",
+      "reason": "fixed slot \"card\"; semantic=card:0.75; policy=fixed-slots-first",
+      "evidenceFile": "components/card.json",
+      "priority": 3,
+      "slot": "card"
+    },
+    {
+      "slug": "table",
+      "reason": "fixed slot \"table\"; semantic=table:0.75; policy=fixed-slots-first",
+      "evidenceFile": "components/table.json",
+      "priority": 4,
+      "slot": "table"
+    },
+    {
+      "slug": "tag",
+      "reason": "fixed slot \"tag\"; semantic=tag:0.75; policy=fixed-slots-first",
+      "evidenceFile": "components/tag.json",
+      "priority": 5,
+      "slot": "tag"
+    },
+    {
+      "slug": "menu",
+      "reason": "fixed slot \"menu\"; semantic=menu:0.75; policy=fixed-slots-first",
+      "evidenceFile": "components/menu.json",
+      "priority": 6,
+      "slot": "menu"
+    },
+    {
+      "slug": "input",
+      "reason": "fallback after fixed slots; semantic=input:0.75; policy=fixed-slots-first",
+      "evidenceFile": "components/input.json",
+      "priority": 7
+    },
+    {
+      "slug": "modal",
+      "reason": "fallback after fixed slots; semantic=modal:0.75; policy=fixed-slots-first",
+      "evidenceFile": "components/modal.json",
+      "priority": 8
+    }
+  ],
+  "supportEvidenceComponents": [],
+  "allowedComponents": [
+    "button",
+    "navigation",
+    "card",
+    "table",
+    "tag",
+    "menu",
+    "input",
+    "modal"
+  ],
+  "screenBlueprints": [
+    {
+      "name": "仪表盘概览",
+      "componentSlugs": ["navigation", "card", "button", "tag", "input"],
+      "role": "primary"
+    },
+    {
+      "name": "数据分析",
+      "componentSlugs": ["navigation", "table", "tag", "card", "button"],
+      "role": "secondary"
+    },
+    {
+      "name": "用户管理",
+      "componentSlugs": ["navigation", "table", "modal", "menu", "button"],
+      "role": "secondary"
+    }
+  ],
+  "productContext": {
+    "kitType": "dashboard",
+    "productType": "General Web Application",
+    "dominantCopy": ["仪表盘", "数据分析", "用户管理", "系统设置", "导出报告", "编辑用户"],
+    "pageNames": ["仪表盘概览", "数据分析", "用户管理"],
+    "selectedFrameNames": []
+  },
+  "selectionPolicy": "fixed-slots-first",
+  "slotAssignments": [
+    {
+      "slot": "button",
+      "slug": "button",
+      "reason": "semantic"
+    },
+    {
+      "slot": "navigation",
+      "slug": "navigation",
+      "reason": "semantic"
+    },
+    {
+      "slot": "card",
+      "slug": "card",
+      "reason": "semantic"
+    },
+    {
+      "slot": "table",
+      "slug": "table",
+      "reason": "semantic"
+    },
+    {
+      "slot": "tag",
+      "slug": "tag",
+      "reason": "semantic"
+    },
+    {
+      "slot": "menu",
+      "slug": "menu",
+      "reason": "semantic"
+    }
+  ],
+  "missingFixedSlots": [],
+  "fallbackComponents": [
+    "input",
+    "modal"
+  ],
+  "needsNarrative": false,
+  "forbiddenInventedComponents": [],
+  "lowConfidence": false,
+  "warnings": []
+}

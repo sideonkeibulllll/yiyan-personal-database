@@ -1,0 +1,85 @@
+{
+  "slug": "navigation",
+  "schemaVersion": 2,
+  "name": "Navigation",
+  "category": "Navigation",
+  "sourceKind": "from-scratch",
+  "confidence": "medium",
+  "semanticTypeCandidates": [
+    {"candidate": "sidebar-nav", "evidence": "Left vertical menu with icon+label items and active state"},
+    {"candidate": "top-bar", "evidence": "Horizontal top bar with breadcrumb and actions"},
+    {"candidate": "tab-bar", "evidence": "Horizontal tabs for content section switching"}
+  ],
+  "variantDimensions": [
+    {"dimension": "variant", "values": ["sidebar", "topbar", "tabs"]},
+    {"dimension": "state", "values": ["default", "active", "hover", "disabled"]}
+  ],
+  "representativeVariants": [
+    {
+      "name": "Sidebar Navigation",
+      "whySelected": "Core layout element — left vertical menu with orange active state",
+      "traits": {
+        "background": "var(--color-surface)",
+        "color": "var(--color-muted-foreground)",
+        "border-right": "1px solid var(--color-border)",
+        "width": "220px",
+        "padding": "var(--space-4) 0",
+        "box-shadow": "none"
+      },
+      "childrenDigest": "Menu items (vertical list, each with icon 20px + label): 仪表盘 (active state: color var(--color-primary), background var(--color-primary) at 10% alpha, left 3px orange border), 数据分析, 用户管理, 系统设置. Bottom: user avatar + name."
+    },
+    {
+      "name": "Top Navigation Bar",
+      "whySelected": "Horizontal bar above content — breadcrumb + search + actions",
+      "traits": {
+        "background": "var(--color-surface)",
+        "color": "var(--color-foreground)",
+        "border-bottom": "1px solid var(--color-border)",
+        "height": "56px",
+        "padding": "0 var(--space-5)",
+        "box-shadow": "none"
+      },
+      "childrenDigest": "Left: breadcrumb '仪表盘 / 数据分析' (muted-foreground for parent, foreground for current); Center: search input (sm); Right: ghost button '导出报告' + avatar circle"
+    },
+    {
+      "name": "Tab Navigation",
+      "whySelected": "Horizontal tabs for content section switching — orange underline active state",
+      "traits": {
+        "background": "transparent",
+        "color": "var(--color-muted-foreground)",
+        "border-bottom": "1px solid var(--color-border)",
+        "padding": "0",
+        "box-shadow": "none"
+      },
+      "childrenDigest": "Tab items (horizontal row, each padding var(--space-3) var(--space-4)): 概览 (active: color var(--color-primary), border-bottom 2px solid var(--color-primary)), 明细, 趋势, 设置"
+    }
+  ],
+  "anatomy": [
+    {"part": "sidebar", "description": "Vertical menu, 220px wide, icon+label items, active item has orange accent"},
+    {"part": "topbar", "description": "Horizontal bar, 56px tall, breadcrumb + search + actions"},
+    {"part": "tabs", "description": "Horizontal tab strip with orange underline on active tab"}
+  ],
+  "structurePatterns": [
+    "Sidebar: flex column, fixed width, each item flex row with gap var(--space-3)",
+    "Topbar: flex row, justify between, align center",
+    "Tabs: flex row, gap var(--space-1), each tab inline-flex column with label + border-bottom indicator"
+  ],
+  "usageHints": {
+    "priorityHint": "medium",
+    "bestPractices": [
+      "Sidebar + topbar form the standard dashboard shell layout",
+      "Only one active item at a time in sidebar",
+      "Tabs for switching views within a page, not for navigation",
+      "Active state always uses warm orange accent"
+    ]
+  },
+  "doNotInvent": [
+    "Collapsible/collapsed sidebar (not in spec)",
+    "Mega menu or dropdown navigation (not in spec)",
+    "Mobile bottom navigation (desktop-first design)"
+  ],
+  "unknowns": [
+    "Sidebar collapse behavior — render expanded only"
+  ],
+  "keyInsightSeed": "Left sidebar + top bar modular layout, orange active states"
+}

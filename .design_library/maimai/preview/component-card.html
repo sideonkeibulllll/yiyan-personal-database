@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Card 预览</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+body { margin: 0; padding: 12px; background: var(--color-surface-container-low); font-family: var(--font-body); color: var(--color-on-surface); font-size: var(--font-size-body); }
+.row { display: grid; grid-template-columns: 92px 1fr; gap: 8px; align-items: start; margin-bottom: 8px; }
+.label { font-size: var(--font-size-caption); color: var(--color-muted-foreground); text-transform: uppercase; letter-spacing: .04em; padding-top: 4px; white-space: nowrap; }
+.divider { border: none; border-top: 1px solid var(--color-border); margin: 6px 0; }
+
+/* @component-css-start */
+.card { background: var(--color-surface); color: var(--color-foreground); border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: var(--space-5); min-width: 0; }
+.card.outlined { padding: var(--space-4); }
+.card.elevated { box-shadow: var(--shadow-2); }
+.card-header { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); padding-bottom: var(--space-3); border-bottom: 1px solid var(--color-border); margin-bottom: var(--space-4); }
+.card-title { font-family: var(--font-heading); font-size: var(--font-size-h4); font-weight: var(--font-weight-h4); line-height: var(--line-height-h4); color: var(--color-foreground); word-break: keep-all; overflow-wrap: break-word; }
+.card-ghost-btn { background: transparent; border: none; color: var(--color-primary); font-family: var(--font-body); font-size: var(--font-size-body); cursor: pointer; padding: 4px 8px; border-radius: var(--radius-sm); white-space: nowrap; transition: background .15s; }
+.card-ghost-btn:hover { background: var(--color-primary-container); }
+.card-tag { display: inline-flex; align-items: center; background: var(--color-primary-container); color: var(--color-on-primary-container); font-size: var(--font-size-caption); padding: 2px 8px; border-radius: var(--radius-full); white-space: nowrap; }
+.stat-row { display: flex; justify-content: space-between; align-items: baseline; gap: var(--space-3); padding: var(--space-2) 0; }
+.stat-label { color: var(--color-muted-foreground); font-size: var(--font-size-body); }
+.stat-value { font-family: var(--font-mono); font-size: var(--font-size-h4); font-weight: var(--font-weight-h4); color: var(--color-foreground); }
+.card-note { color: var(--color-foreground); font-size: var(--font-size-body); line-height: var(--line-height-body); margin: 0 0 var(--space-2); overflow-wrap: break-word; }
+.card-time { color: var(--color-muted-foreground); font-size: var(--font-size-caption); }
+.user-row { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) 0; }
+.avatar { width: 32px; height: 32px; border-radius: var(--radius-full); background: var(--color-secondary-container); color: var(--color-on-secondary-container); display: inline-flex; align-items: center; justify-content: center; font-size: var(--font-size-caption); font-weight: var(--font-weight-h4); flex-shrink: 0; }
+.user-name { color: var(--color-foreground); font-size: var(--font-size-body); }
+.user-role { color: var(--color-muted-foreground); font-size: var(--font-size-caption); }
+/* @component-css-end */
+</style>
+</head>
+<body>
+<div class="row"><span class="label">默认</span><div class="card" data-evidence-sample="Default Card with Header"><div class="card-header"><span class="card-title">数据分析</span><button class="card-ghost-btn" type="button">导出报告</button></div><div class="stat-row"><span class="stat-label">总访问量</span><span class="stat-value">12,847</span></div><div class="stat-row"><span class="stat-label">活跃用户</span><span class="stat-value">3,421</span></div></div></div>
+<div class="row"><span class="label">描边</span><div class="card outlined" data-evidence-sample="Outlined Card (body only)"><p class="card-note">系统运行正常，所有服务可用。</p><span class="card-time">更新于 2 分钟前</span></div></div>
+<hr class="divider">
+<div class="row"><span class="label">高亮</span><div class="card elevated" data-evidence-sample="Elevated Card"><div class="card-header"><span class="card-title">用户管理</span><span class="card-tag">活跃</span></div><div class="user-row"><span class="avatar">李</span><span class="user-name">李明</span><span class="user-role">管理员</span></div><div class="user-row"><span class="avatar">王</span><span class="user-name">王芳</span><span class="user-role">编辑</span></div><div class="user-row"><span class="avatar">赵</span><span class="user-name">赵磊</span><span class="user-role">访客</span></div></div></div>
+</body>
+</html>

@@ -17,6 +17,10 @@ interface QuickMenuProps {
   onEditTags?: () => void;
   /** AI 对话回调：跳转到 chat 页面并携带条目信息 */
   onAIChat?: (entryId: string) => void;
+  /** 转为待办回调 */
+  onConvertToTodo?: (entry: Entry) => void;
+  /** 编辑详情回调 */
+  onEditInfo?: (entry: Entry) => void;
 }
 
 type PanelMode = 'menu' | 'detail' | 'group' | 'ai-chat';
@@ -74,6 +78,12 @@ const ClockIcon = () => (
   </svg>
 );
 
+const CheckCircleIcon = () => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" />
+  </svg>
+);
+
 const CloseIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
     <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
@@ -109,6 +119,8 @@ export function QuickMenu({
   onViewLinks,
   onEditTags,
   onAIChat,
+  onConvertToTodo,
+  onEditInfo,
 }: QuickMenuProps) {
   const [panel, setPanel] = useState<PanelMode>('menu');
   const [groups, setGroups] = useState<Group[]>([]);
@@ -199,6 +211,8 @@ export function QuickMenu({
     { icon: <PaperclipIcon />, label: '组标签', action: () => setPanel('group') },
     { icon: <LinkIcon />, label: '查看连线', action: onViewLinks },
     { icon: <MessageCircleIcon />, label: 'AI 对话', action: () => setPanel('ai-chat') },
+    ...(onConvertToTodo ? [{ icon: <CheckCircleIcon />, label: '转为待办', action: () => { onConvertToTodo(entry); onClose(); } }] : []),
+    ...(onEditInfo ? [{ icon: <FileTextIcon />, label: '编辑详情', action: () => { onEditInfo(entry); onClose(); } }] : []),
   ];
 
   return (

@@ -16,6 +16,11 @@ const ExportPage = lazy(() => import('@/features/settings/ExportPage').then(m =>
 const DataManagerPage = lazy(() => import('@/features/datamanager/DataManagerPage').then(m => ({ default: m.DataManagerPage })));
 const EntryEditPage = lazy(() => import('@/features/entry/EntryEditPage').then(m => ({ default: m.EntryEditPage })));
 const ChatPage = lazy(() => import('@/features/chat/ChatPage').then(m => ({ default: m.ChatPage })));
+const TodoPage = lazy(() => import('@/features/todo/TodoPage').then(m => ({ default: m.TodoPage })));
+const TodoEditPage = lazy(() => import('@/features/todo/TodoEditPage').then(m => ({ default: m.TodoEditPage })));
+const TodoManagerPage = lazy(() => import('@/features/todo/TodoManagerPage').then(m => ({ default: m.TodoManagerPage })));
+const TodoTemplatePage = lazy(() => import('@/features/todo/TodoTemplatePage').then(m => ({ default: m.TodoTemplatePage })));
+const TodoRecycleBinPage = lazy(() => import('@/features/todo/TodoRecycleBinPage').then(m => ({ default: m.TodoRecycleBinPage })));
 
 const router = createHashRouter([
   {
@@ -111,6 +116,54 @@ const router = createHashRouter([
     element: (
       <Suspense fallback={<Loading />}>
         <ChatPage />
+      </Suspense>
+    ),
+  },
+  {
+    path: '/todo',
+    element: (
+      <Suspense fallback={<Loading />}>
+        <TodoPage />
+      </Suspense>
+    ),
+  },
+  {
+    path: '/todo/new',
+    element: (
+      <Suspense fallback={<Loading />}>
+        <TodoEditPage />
+      </Suspense>
+    ),
+  },
+  {
+    path: '/todo/:id/edit',
+    element: (
+      <Suspense fallback={<Loading />}>
+        <TodoEditPage />
+      </Suspense>
+    ),
+  },
+  {
+    path: '/todo/manager',
+    element: (
+      <Suspense fallback={<Loading />}>
+        <TodoManagerPage />
+      </Suspense>
+    ),
+  },
+  {
+    path: '/todo/templates',
+    element: (
+      <Suspense fallback={<Loading />}>
+        <TodoTemplatePage />
+      </Suspense>
+    ),
+  },
+  {
+    path: '/todo/recycle-bin',
+    element: (
+      <Suspense fallback={<Loading />}>
+        <TodoRecycleBinPage />
       </Suspense>
     ),
   },

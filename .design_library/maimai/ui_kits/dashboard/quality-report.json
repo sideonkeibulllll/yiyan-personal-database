@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "kitType": "dashboard",
+  "productType": "General Web Application",
+  "screensGenerated": 3,
+  "screenNames": ["仪表盘概览", "数据分析", "用户管理"],
+  "componentsUsed": ["navigation", "card", "button", "table", "tag", "menu", "input", "modal"],
+  "inventedComponents": [],
+  "interactiveStatesRendered": ["hover", "disabled", "selected", "active", "sidebar-navigation", "tab-switching", "modal-toggle", "menu-dropdown", "delete-confirmation"],
+  "primaryActionPerScreen": {
+    "仪表盘概览": "导出报告",
+    "数据分析": "查看明细",
+    "用户管理": "编辑用户"
+  },
+  "interactivity": {
+    "sidebarNavigation": true,
+    "tabSwitching": true,
+    "modalToggle": true,
+    "menuDropdown": true,
+    "deleteConfirmation": true
+  },
+  "responsiveGuards": {
+    "layoutGuardMarker": "data-layout-guard=\"uikit-v1\"",
+    "shellOverflow": true,
+    "textTruncate": true,
+    "nowrapGuard": true,
+    "tableWrap": true,
+    "responsiveGrid": "minmax(0, 1fr)",
+    "breakpoint900": true,
+    "breakpoint640": true,
+    "mainMinWidth": true,
+    "toolbarMinWidth": true,
+    "actionCellMaxWidth": true,
+    "actionEllipsis": true
+  },
+  "cssLinks": ["../../colors_and_type.css", "../../components.css"],
+  "techStack": "React 18 (CDN) + Babel Standalone + Lucide Icons",
+  "language": "zh-CN",
+  "warnings": []
+}

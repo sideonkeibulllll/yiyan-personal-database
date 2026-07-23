@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>maimai 设计系统 · 仪表盘 UI Kit</title>
+
+  <!-- Design system tokens + components (mandatory relative links) -->
+  <link rel="stylesheet" href="../../colors_and_type.css">
+  <link rel="stylesheet" href="../../components.css">
+
+  <!-- Lucide icons -->
+  <script src="https://unpkg.com/lucide@1.8.0/dist/umd/lucide.min.js"></script>
+
+  <!-- Page-specific layout glue ONLY (app-shell, grid, overrides for this kit) -->
+  <style>
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      background: var(--color-surface-container-low);
+      font-family: var(--font-body);
+      color: var(--color-on-surface);
+      font-size: var(--font-size-body);
+      height: 100vh;
+      overflow: hidden;
+    }
+    .uikit-shell { width: 100%; max-width: 1184px; margin: 0 auto; display: flex; height: 100vh; overflow: hidden; }
+    .nav-sidebar { position: sticky; top: 0; height: 100vh; overflow-y: auto; flex-shrink: 0; }
+    .uikit-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+    .uikit-main > .nav-topbar {
+      position: sticky; top: 0; flex-shrink: 0; z-index: 90;
+      border-radius: 0; flex: none;
+    }
+    .uikit-main > .nav-tabs { flex: none; padding: 0 var(--space-5); }
+    .app-content {
+      flex: 1; overflow-y: auto; padding: var(--space-5);
+      display: flex; flex-direction: column; gap: var(--space-5);
+    }
+    .screen { display: flex; flex-direction: column; gap: var(--space-5); min-width: 0; }
+    .topbar-right { display: flex; align-items: center; gap: var(--space-4); }
+    .uikit-responsive-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+      gap: var(--space-5);
+    }
+    .user-meta { display: flex; flex-direction: column; line-height: 1.3; }
+    .user-cell { display: flex; align-items: center; gap: var(--space-3); }
+    .uikit-toolbar {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: var(--space-4); min-width: 0;
+    }
+    .toolbar-title {
+      font-family: var(--font-heading); font-size: var(--font-size-h4);
+      font-weight: var(--font-weight-h4); color: var(--color-foreground);
+    }
+    .uikit-menu-host { position: relative; }
+    .uikit-menu-host > .menu {
+      position: absolute; top: calc(100% + 4px); right: 0; z-index: 200;
+    }
+    .uikit-menu-backdrop { position: fixed; inset: 0; z-index: 150; }
+    .uikit-modal-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,.6);
+      display: flex; align-items: center; justify-content: center; z-index: 1000;
+    }
+    .nav-search input { flex: 1 1 0; min-width: 0; }
+    .nav-btn { gap: var(--space-2); }
+    .uikit-truncate { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .uikit-nowrap { white-space: nowrap; flex-shrink: 0; }
+    .uikit-table-wrap { width: 100%; max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; }
+    .uikit-action-cell { max-width: 160px; white-space: nowrap; }
+    .uikit-action { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    @media (max-width: 900px) {
+      .uikit-responsive-grid { grid-template-columns: 1fr; }
+      .nav-sidebar { display: none; }
+      .uikit-shell { flex-direction: column; }
+    }
+    @media (max-width: 640px) {
+      .uikit-toolbar { flex-direction: column; align-items: stretch; }
+      .nav-search { display: none; }
+      .app-content { padding: var(--space-4); }
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- React 18 + Babel -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <script type="text/babel" data-presets="react">
+    const { useState, useEffect, memo } = React;
+
+    const NAV_ITEMS = [
+      { key: 'dashboard', label: '仪表盘', icon: 'layout-dashboard' },
+      { key: 'analytics', label: '数据分析', icon: 'bar-chart-2' },
+      { key: 'users', label: '用户管理', icon: 'users' },
+      { key: 'settings', label: '系统设置', icon: 'settings', disabled: true },
+    ];
+    const TABS = ['概览', '明细', '趋势', '设置'];
+    const DEFAULT_TAB = { dashboard: '概览', analytics: '明细', users: '明细' };
+    const CRUMB = { dashboard: '概览', analytics: '数据分析', users: '用户管理' };
+
+    // Icon: memoized so React bails out on re-render, keeping lucide-replaced <svg> stable.
+    const Icon = memo(function Icon({ name, size, className }) {
+      const style = size ? { width: size + 'px', height: size + 'px' } : undefined;
+      return <i data-lucide={name} className={className} style={style} />;
+    });
+
+    function Sidebar({ active, onSelect }) {
+      return (
+        <nav className="nav-sidebar" aria-label="侧边导航">
+          {NAV_ITEMS.map(item => (
+            <a
+              key={item.key}
+              className={'nav-item' + (active === item.key ? ' active' : '') + (item.disabled ? ' disabled' : '')}
+              onClick={() => !item.disabled && onSelect(item.key)}
+            >
+              <Icon name={item.icon} size={20} />
+              <span>{item.label}</span>
+            </a>
+          ))}
+          <div className="nav-user">
+            <div className="nav-avatar">M</div>
+            <span className="nav-user-name">我的账户</span>
+          </div>
+        </nav>
+      );
+    }
+
+    function Topbar({ crumb, menuOpen, onToggleMenu, onCloseMenu }) {
+      return (
+        <div className="nav-topbar">
+          <div className="breadcrumb">
+            <span className="crumb-parent">仪表盘</span>
+            <span className="crumb-sep">/</span>
+            <span className="crumb-current">{crumb}</span>
+          </div>
+          <div className="topbar-right">
+            <div className="nav-search">
+              <Icon name="search" size={14} />
+              <input placeholder="搜索…" />
+            </div>
+            <div className="nav-actions">
+              <button className="nav-btn" type="button">
+                <Icon name="download" size={14} />
+                <span>导出报告</span>
+              </button>
+              <div className="uikit-menu-host">
+                <button className="nav-btn" type="button" onClick={onToggleMenu} aria-label="更多">
+                  <Icon name="more-horizontal" size={14} />
+                </button>
+                <div className="menu" style={{ display: menuOpen ? 'flex' : 'none' }}>
+                  <div className="menu-item" onClick={onCloseMenu}>
+                    <Icon name="edit" className="menu-item__icon" size={16} />
+                    <span className="menu-item__label">编辑</span>
+                  </div>
+                  <div className="menu-item" onClick={onCloseMenu}>
+                    <Icon name="copy" className="menu-item__icon" size={16} />
+                    <span className="menu-item__label">复制</span>
+                  </div>
+                  <div className="menu-item" onClick={onCloseMenu}>
+                    <Icon name="download" className="menu-item__icon" size={16} />
+                    <span className="menu-item__label">导出</span>
+                  </div>
+                  <hr className="menu-divider" />
+                  <div className="menu-item" onClick={onCloseMenu}>
+                    <Icon name="settings" className="menu-item__icon" size={16} />
+                    <span className="menu-item__label">设置</span>
+                  </div>
+                  <div className="menu-item menu-item--danger" onClick={onCloseMenu}>
+                    <Icon name="trash-2" className="menu-item__icon" size={16} />
+                    <span className="menu-item__label">删除</span>
+                  </div>
+                </div>
+              </div>
+              <div className="nav-avatar">M</div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function Tabs({ active, onSelect }) {
+      return (
+        <div className="nav-tabs">
+          {TABS.map(t => (
+            <a key={t} className={'tab-item' + (active === t ? ' active' : '')} onClick={() => onSelect(t)}>
+              <span>{t}</span>
+            </a>
+          ))}
+        </div>
+      );
+    }
+
+    function OverviewScreen() {
+      return (
+        <>
+          <div className="uikit-responsive-grid">
+            <div className="card">
+              <div className="card-header">
+                <span className="card-title">数据分析</span>
+                <button className="card-ghost-btn" type="button">导出报告</button>
+              </div>
+              <div className="stat-row">
+                <span className="stat-label">总访问量</span>
+                <span className="stat-value">12,847</span>
+              </div>
+              <div className="stat-row">
+                <span className="stat-label">活跃用户</span>
+                <span className="stat-value">3,421</span>
+              </div>
+            </div>
+            <div className="card">
+              <div className="card-header">
+                <span className="card-title">用户管理</span>
+                <span className="card-tag">活跃</span>
+              </div>
+              <div className="user-row">
+                <div className="avatar">李</div>
+                <div className="user-meta">
+                  <div className="user-name">李明</div>
+                  <div className="user-role">管理员</div>
+                </div>
+              </div>
+              <div className="user-row">
+                <div className="avatar">王</div>
+                <div className="user-meta">
+                  <div className="user-name">王芳</div>
+                  <div className="user-role">编辑</div>
+                </div>
+              </div>
+              <div className="user-row">
+                <div className="avatar">赵</div>
+                <div className="user-meta">
+                  <div className="user-name">赵磊</div>
+                  <div className="user-role">访客</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="card outlined">
+            <p className="card-note">系统运行正常，所有服务可用。</p>
+            <span className="card-time">更新于 2 分钟前</span>
+          </div>
+        </>
+      );
+    }
+
+    function AnalyticsScreen() {
+      const rows = [
+        { name: '数据分析面板', visits: '12,847', status: '已完成', tag: 'maimai-tag--done', time: '2分钟前' },
+        { name: '用户管理模块', visits: '3,421', status: '活跃', tag: 'maimai-tag--active', time: '1小时前' },
+        { name: '报告导出功能', visits: '856', status: '草稿', tag: 'maimai-tag--draft', time: '3天前' },
+      ];
+      return (
+        <div className="uikit-table-wrap">
+        <table className="maimai-table">
+          <thead>
+            <tr>
+              <th>项目名称</th>
+              <th>访问量</th>
+              <th>状态</th>
+              <th>更新时间</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(r => (
+              <tr key={r.name}>
+                <td className="uikit-truncate">{r.name}</td>
+                <td className="cell-mono uikit-nowrap">{r.visits}</td>
+                <td><span className={'maimai-tag ' + r.tag}>{r.status}</span></td>
+                <td className="uikit-nowrap">{r.time}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        </div>
+      );
+    }
+
+    function UsersScreen({ onEdit, onDelete }) {
+      const users = [
+        { name: '李明', initial: '李', role: '管理员', status: '活跃', tag: 'maimai-tag--active' },
+        { name: '王芳', initial: '王', role: '编辑', status: '活跃', tag: 'maimai-tag--active' },
+        { name: '赵磊', initial: '赵', role: '访客', status: '草稿', tag: 'maimai-tag--draft' },
+      ];
+      return (
+        <>
+          <div className="uikit-toolbar">
+            <span className="toolbar-title">用户列表</span>
+            <button className="btn btn-primary" type="button" onClick={onEdit}>
+              <Icon name="edit" size={14} />
+              <span>编辑用户</span>
+            </button>
+          </div>
+          <div className="uikit-table-wrap">
+          <table className="maimai-table">
+            <thead>
+              <tr>
+                <th>用户名</th>
+                <th>角色</th>
+                <th>状态</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {users.map(u => (
+                <tr key={u.name}>
+                  <td>
+                    <div className="user-cell">
+                      <div className="avatar">{u.initial}</div>
+                      <span className="user-name">{u.name}</span>
+                    </div>
+                  </td>
+                  <td>{u.role}</td>
+                  <td><span className={'maimai-tag ' + u.tag}>{u.status}</span></td>
+                  <td className="cell-actions uikit-action-cell">
+                    <button className="maimai-action uikit-action" type="button" onClick={onEdit}>编辑</button>
+                    <button className="maimai-action maimai-action--danger uikit-action" type="button" onClick={onDelete}>删除</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          </div>
+        </>
+      );
+    }
+
+    function EditModal({ open, onClose }) {
+      return (
+        <div className="uikit-modal-overlay" style={{ display: open ? 'flex' : 'none' }} onClick={onClose}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">编辑用户</h3>
+              <button className="modal-close" type="button" aria-label="关闭" onClick={onClose}>
+                <Icon name="x" size={16} />
+              </button>
+            </div>
+            <div className="modal-body">
+              <div className="modal-field">
+                <span className="modal-field-label">用户名</span>
+                <input className="modal-input" type="text" placeholder="请输入用户名" defaultValue="李明" />
+              </div>
+              <div className="modal-field">
+                <span className="modal-field-label">角色</span>
+                <select className="modal-select" defaultValue="">
+                  <option value="" disabled>请选择角色</option>
+                  <option value="admin">管理员</option>
+                  <option value="editor">编辑者</option>
+                  <option value="viewer">查看者</option>
+                </select>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" type="button" onClick={onClose}>取消</button>
+              <button className="btn btn-primary" type="button" onClick={onClose}>保存</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function DeleteModal({ open, onClose }) {
+      return (
+        <div className="uikit-modal-overlay" style={{ display: open ? 'flex' : 'none' }} onClick={onClose}>
+          <div className="modal modal-sm" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">确认删除</h3>
+              <button className="modal-close" type="button" aria-label="关闭" onClick={onClose}>
+                <Icon name="x" size={16} />
+              </button>
+            </div>
+            <div className="modal-body">
+              <p>确定要删除该用户吗？此操作无法撤销。</p>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" type="button" onClick={onClose}>取消</button>
+              <button className="btn btn-danger" type="button" onClick={onClose}>删除</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function App() {
+      const [activeScreen, setActiveScreen] = useState('dashboard');
+      const [activeTab, setActiveTab] = useState('概览');
+      const [menuOpen, setMenuOpen] = useState(false);
+      const [editOpen, setEditOpen] = useState(false);
+      const [deleteOpen, setDeleteOpen] = useState(false);
+
+      // Re-create lucide icons after every React render.
+      useEffect(() => {
+        if (window.lucide && typeof window.lucide.createIcons === 'function') {
+          window.lucide.createIcons();
+        }
+      });
+
+      const handleSelectScreen = (key) => {
+        setActiveScreen(key);
+        setActiveTab(DEFAULT_TAB[key]);
+        setMenuOpen(false);
+      };
+
+      return (
+        <div className="uikit-shell" data-layout-guard="uikit-v1">
+          <Sidebar active={activeScreen} onSelect={handleSelectScreen} />
+          <div className="uikit-main">
+            <Topbar
+              crumb={CRUMB[activeScreen]}
+              menuOpen={menuOpen}
+              onToggleMenu={() => setMenuOpen(v => !v)}
+              onCloseMenu={() => setMenuOpen(false)}
+            />
+            <Tabs active={activeTab} onSelect={setActiveTab} />
+            <div className="app-content">
+              <div className="screen" style={{ display: activeScreen === 'dashboard' ? 'flex' : 'none' }}>
+                <OverviewScreen />
+              </div>
+              <div className="screen" style={{ display: activeScreen === 'analytics' ? 'flex' : 'none' }}>
+                <AnalyticsScreen />
+              </div>
+              <div className="screen" style={{ display: activeScreen === 'users' ? 'flex' : 'none' }}>
+                <UsersScreen
+                  onEdit={() => setEditOpen(true)}
+                  onDelete={() => setDeleteOpen(true)}
+                />
+              </div>
+            </div>
+          </div>
+          <div
+            className="uikit-menu-backdrop"
+            style={{ display: menuOpen ? 'block' : 'none' }}
+            onClick={() => setMenuOpen(false)}
+          />
+          <EditModal open={editOpen} onClose={() => setEditOpen(false)} />
+          <DeleteModal open={deleteOpen} onClose={() => setDeleteOpen(false)} />
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>

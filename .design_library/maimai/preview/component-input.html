@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Input · maimai</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+body { margin: 0; padding: var(--space-3); background: var(--color-background); font-family: var(--font-family-base); color: var(--color-on-surface); font-size: var(--font-size-body); }
+.row { display: flex; align-items: flex-start; gap: var(--space-3); margin-bottom: var(--space-3); }
+.label { display: inline-block; width: 92px; flex-shrink: 0; padding-top: 2px; font-size: var(--font-size-caption); color: var(--color-muted-foreground); line-height: var(--line-height-caption); }
+.divider { border: none; border-top: 1px solid var(--color-border); margin: var(--space-4) 0; }
+
+/* @component-css-start */
+/* Component definitions — extracted to components.css by deterministic script */
+.field-wrap { display: flex; flex-direction: column; gap: var(--space-1); }
+.field-label { font-size: var(--font-size-caption); color: var(--color-muted-foreground); line-height: var(--line-height-caption); }
+.field { display: block; width: 240px; height: var(--size-input); padding: 0 var(--space-3); background: var(--color-background); color: var(--color-foreground); border: 1px solid var(--color-border); border-radius: var(--radius-md); font-family: var(--font-family-base); font-size: var(--font-size-body); line-height: var(--line-height-body); box-sizing: border-box; outline: none; appearance: none; -webkit-appearance: none; transition: border-color .15s, box-shadow .15s; }
+.field::placeholder { color: var(--color-muted-foreground); }
+.field:focus { border-color: var(--color-primary); box-shadow: 0 0 0 2px rgba(232,89,12,.2); }
+.field.is-error { border-color: var(--color-error); }
+.field:disabled { background: var(--color-surface-container-low); color: var(--color-muted-foreground); cursor: not-allowed; }
+.field-helper { font-size: var(--font-size-caption); color: var(--color-muted-foreground); line-height: var(--line-height-caption); }
+.field-helper.is-error { color: var(--color-error); }
+.field-host { position: relative; display: inline-block; }
+.search-field { padding-left: var(--space-8); }
+.search-icon { position: absolute; left: var(--space-3); top: 50%; transform: translateY(-50%); width: 16px; height: 16px; pointer-events: none; opacity: .55; }
+/* @component-css-end */
+</style>
+</head>
+<body>
+<div class="row"><span class="label">默认</span><div class="field-wrap" data-evidence-sample="text-input-default"><span class="field-label">用户名</span><input class="field" type="text" placeholder="请输入用户名"></div></div>
+<div class="row"><span class="label">错误</span><div class="field-wrap" data-evidence-sample="text-input-error"><span class="field-label">邮箱</span><input class="field is-error" type="text" value="invalid"><span class="field-helper is-error">请输入有效的邮箱地址</span></div></div>
+<div class="row"><span class="label">禁用</span><div class="field-wrap" data-evidence-sample="text-input-disabled"><span class="field-label">用户名</span><input class="field" type="text" placeholder="请输入用户名" disabled></div></div>
+<hr class="divider">
+<div class="row"><span class="label">搜索</span><div class="field-host" data-evidence-sample="search-input"><img class="search-icon" src="https://cdn.jsdelivr.net/npm/lucide-static@1.8.0/icons/search.svg" width="16" height="16" alt="搜索"><input class="field search-field" type="search" placeholder="搜索..."></div></div>
+</body>
+</html>

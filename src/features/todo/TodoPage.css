@@ -1,0 +1,310 @@
+.todo-page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  padding-bottom: calc(80px + var(--safe-bottom));
+}
+
+.page-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 0 var(--space-5);
+  gap: var(--space-4);
+}
+
+/* === 日期选择器 === */
+.date-selector {
+  display: flex;
+  gap: var(--space-2);
+  overflow-x: auto;
+  padding: var(--space-4) 0;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.date-selector::-webkit-scrollbar {
+  display: none;
+}
+
+.date-chip {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-primary);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+  min-width: 60px;
+}
+
+.date-chip.active {
+  background: var(--color-accent-subtle);
+  border-color: var(--color-border-accent);
+  color: var(--color-accent-primary);
+}
+
+.date-label {
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+}
+
+.date-chip.active .date-label {
+  color: var(--color-accent-primary);
+}
+
+.date-day {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.date-chip.active .date-day {
+  color: var(--color-accent-primary);
+}
+
+/* === 待办列表 === */
+.todo-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.todo-loading {
+  padding: var(--space-8);
+  text-align: center;
+  color: var(--color-text-tertiary);
+}
+
+.todo-empty {
+  padding: var(--space-12) var(--space-4);
+  text-align: center;
+  color: var(--color-text-tertiary);
+}
+
+.todo-empty-hint {
+  font-size: var(--text-xs);
+  margin-top: var(--space-2);
+  color: var(--color-text-disabled);
+}
+
+/* === 待办项 === */
+.todo-item {
+  position: relative;
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-primary);
+  cursor: pointer;
+  transition: transform var(--duration-fast) var(--ease-out),
+              opacity var(--duration-fast) var(--ease-out);
+  overflow: hidden;
+}
+
+.todo-item.done {
+  opacity: 0.5;
+}
+
+.todo-item.done .todo-item-title {
+  text-decoration: line-through;
+  color: var(--color-text-tertiary);
+}
+
+.todo-item.is-today {
+  border-left: 3px solid var(--color-accent-primary);
+}
+
+.todo-item-main {
+  position: relative;
+  z-index: 1;
+}
+
+.todo-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.todo-item-title {
+  font-size: var(--text-base);
+  color: var(--color-text-primary);
+  font-weight: 500;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.todo-countdown {
+  font-size: var(--text-sm);
+  color: var(--color-ochre-primary);
+  font-family: var(--font-mono);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.todo-time-display {
+  font-size: var(--text-sm);
+  color: var(--color-text-tertiary);
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+}
+
+.todo-item-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+
+.todo-time {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  font-family: var(--font-mono);
+}
+
+.todo-today-badge {
+  font-size: var(--text-xs);
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-full);
+  background: var(--color-accent-subtle);
+  color: var(--color-accent-primary);
+}
+
+.todo-item-note {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  margin-top: var(--space-2);
+  line-height: 1.5;
+}
+
+/* === 滑动背景 === */
+.todo-swipe-left,
+.todo-swipe-right {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 var(--space-5);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  z-index: 0;
+}
+
+.todo-swipe-left {
+  left: 0;
+  background: var(--color-success);
+  color: white;
+  justify-content: flex-start;
+}
+
+.todo-swipe-right {
+  right: 0;
+  background: var(--color-error);
+  color: white;
+  justify-content: flex-end;
+}
+
+/* === 快捷菜单 === */
+.todo-quick-menu {
+  position: absolute;
+  right: var(--space-3);
+  top: var(--space-3);
+  background: var(--color-bg-float);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 120px;
+}
+
+.todo-quick-menu button {
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  background: none;
+  border: none;
+}
+
+.todo-quick-menu button:hover {
+  background: var(--color-bg-elevated);
+  color: var(--color-text-primary);
+}
+
+.todo-quick-menu button:first-child {
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+}
+
+.todo-quick-menu button:last-child {
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+}
+
+/* === 从模板导入按钮 === */
+.todo-import-btn {
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  text-align: center;
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.todo-import-btn:active {
+  transform: scale(0.98);
+}
+
+/* === 底部倒计时条 === */
+.countdown-bar {
+  position: fixed;
+  bottom: calc(80px + var(--safe-bottom));
+  left: var(--space-4);
+  right: var(--space-4);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  display: flex;
+  gap: var(--space-4);
+  overflow-x: auto;
+  scrollbar-width: none;
+  z-index: 100;
+  animation: slideUp var(--duration-normal) var(--ease-out);
+}
+
+.countdown-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.countdown-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.countdown-title {
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.countdown-time {
+  font-size: var(--text-sm);
+  color: var(--color-ochre-primary);
+  font-family: var(--font-mono);
+  font-weight: 600;
+}

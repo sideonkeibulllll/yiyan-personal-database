@@ -7,10 +7,12 @@ import { useNavigate } from 'react-router-dom';
 import { useEntryStore } from '@/stores/entryStore';
 import { useTagStore } from '@/stores/tagStore';
 import { useSettingsStore } from '@/stores/settingsStore';
+import { useTodoStore } from '@/stores/todoStore';
 import { weightedRandomSelect, filterEntries } from '@/services/random';
 import { BottomNav } from '@/components/BottomNav';
 import { QuickMenu } from './QuickMenu';
 import { TagSelector } from '@/components/TagSelector';
+import { AIChatPanel } from '@/components/AIChatPanel';
 import type { Entry } from '@/types';
 import './RandomPage.css';
 
@@ -75,6 +77,8 @@ export function RandomPage() {
   const [showFilter, setShowFilter] = useState(false);
   const [showTagSelector, setShowTagSelector] = useState(false);
   const [tagSelectorEntry, setTagSelectorEntry] = useState<Entry | null>(null);
+  const [showAIChat, setShowAIChat] = useState(false);
+  const [chatEntry, setChatEntry] = useState<Entry | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   // 每张卡片的长按计时器
@@ -168,6 +172,19 @@ export function RandomPage() {
       markAsUsed(entry.id);
     }
   }, [markAsUsed]);
+
+  const addTodo = useTodoStore(state => state.addTodo);
+
+  // 转为待办
+  const handleConvertToTodo = useCallback(async (e: Entry) => {
+    const today = new Date();
+    const folderDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    await addTodo({
+      title: e.content.slice(0, 80) + (e.content.length > 80 ? '...' : ''),
+      folderDate,
+      isToday: true,
+    });
+  }, [addTodo]);
 
   // 长按开始
   const handlePressStart = useCallback((entryId: string) => {
@@ -380,9 +397,31 @@ export function RandomPage() {
             setShowTagSelector(true);
           }}
           onAIChat={(entryId) => {
-            navigate(`/chat?entryId=${entryId}&from=/random`);
+            setShowMenu(false);
+            const e = currentEntries.find(x => x.id === entryId);
+            if (e) {
+              setChatEntry(e);
+              setShowAIChat(true);
+            }
+          }}
+          onConvertToTodo={handleConvertToTodo}
+          onEditInfo={(entry) => {
+            setShowMenu(false);
+            navigate(`/entry/${entry.id}/edit`);
           }}
         />
+      )}
+
+      {/* AI 对话面板 */}
+      {showAIChat && chatEntry && (
+        <div className="ai-chat-overlay" onClick={() => setShowAIChat(false)}>
+          <div className="ai-chat-container" onClick={e => e.stopPropagation()}>
+            <AIChatPanel
+              entry={chatEntry}
+              onClose={() => setShowAIChat(false)}
+            />
+          </div>
+        </div>
       )}
 
       {/* 筛选面板 */}

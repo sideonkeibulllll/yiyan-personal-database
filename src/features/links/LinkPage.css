@@ -189,3 +189,194 @@
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+
+/* 添加连线面板 */
+.add-link-btn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.add-link-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 200;
+}
+
+.add-link-panel {
+  width: 100%;
+  max-width: 600px;
+  max-height: 80dvh;
+  overflow-y: auto;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  padding: var(--space-5);
+  animation: slideUp var(--duration-normal) var(--ease-out);
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-4);
+}
+
+.panel-header h3 {
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+
+.panel-header button {
+  width: 32px;
+  height: 32px;
+  font-size: var(--text-xl);
+  background: none;
+  border: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.link-search-input {
+  width: 100%;
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-primary);
+  color: var(--color-text-primary);
+  font-size: var(--text-base);
+  margin-bottom: var(--space-3);
+}
+
+.link-search-results {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.link-search-item {
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-primary);
+  color: var(--color-text-primary);
+  text-align: left;
+  cursor: pointer;
+  font-size: var(--text-sm);
+}
+
+.link-search-item:hover {
+  background: var(--color-bg-hover);
+}
+
+.empty-search {
+  text-align: center;
+  color: var(--color-text-tertiary);
+  padding: var(--space-4);
+}
+
+.link-target-preview {
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-elevated);
+  margin-bottom: var(--space-3);
+}
+
+.target-label {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+}
+
+.target-content {
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+}
+
+.link-desc-input {
+  width: 100%;
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-primary);
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+  font-family: inherit;
+  resize: vertical;
+  margin-bottom: var(--space-3);
+}
+
+.ai-desc-suggestion {
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-elevated);
+  margin-bottom: var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.ai-label {
+  color: var(--color-text-tertiary);
+  font-size: var(--text-xs);
+}
+
+.ai-desc-suggestion button {
+  margin-top: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-xs);
+  background: var(--color-accent);
+  color: white;
+  border: none;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.link-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.link-ai-btn, .link-save-btn {
+  flex: 1;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+}
+
+.link-ai-btn {
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-primary);
+  color: var(--color-text-secondary);
+}
+
+.link-save-btn {
+  background: var(--color-accent);
+  color: white;
+  border: none;
+}
+
+.link-save-btn:disabled {
+  opacity: 0.5;
+}
+
+.link-back-btn {
+  width: 100%;
+  padding: var(--space-2);
+  background: none;
+  border: none;
+  color: var(--color-text-tertiary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}

@@ -7,11 +7,46 @@ import { useNavigate } from 'react-router-dom';
 import { Clipboard } from '@capacitor/clipboard';
 import { useEntryStore } from '@/stores/entryStore';
 import { useTagStore } from '@/stores/tagStore';
+import { useTodoStore } from '@/stores/todoStore';
 import { TagSelector } from '@/components/TagSelector/TagSelector';
 import { BottomNav } from '@/components/BottomNav';
 import './HomePage.css';
 
 type InputMode = 'input' | 'tag' | 'info';
+
+/** 快捷时间预设（分钟后当前时间）*/
+const QUICK_TIME_PRESETS: { label: string; offsetMinutes: number }[] = [
+  { label: '+30分钟', offsetMinutes: 30 },
+  { label: '+1小时', offsetMinutes: 60 },
+  { label: '+2小时', offsetMinutes: 120 },
+  { label: '+4小时', offsetMinutes: 240 },
+  { label: '今天18点', offsetMinutes: -1 }, // 特殊值，实际计算在函数里
+  { label: '明天12点', offsetMinutes: -2 },
+];
+
+/** 获取当天指定小时的时间戳 */
+function getTodayAtHour(hour: number): number {
+  const now = new Date();
+  now.setHours(hour, 0, 0, 0);
+  return now.getTime();
+}
+
+/** 获取明天指定小时的时间戳 */
+function getTomorrowAtHour(hour: number): number {
+  const now = new Date();
+  now.setDate(now.getDate() + 1);
+  now.setHours(hour, 0, 0, 0);
+  return now.getTime();
+}
+
+/** 将时间戳转为 YYYY-MM-DD */
+function timestampToFolderDate(ts: number): string {
+  const d = new Date(ts);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
 
 /** Clipboard SVG icon */
 const ClipboardIcon = (
@@ -69,6 +104,12 @@ export function HomePage() {
   const [lastEntryContent, setLastEntryContent] = useState<string | null>(null);
   const [showTagSelector, setShowTagSelector] = useState(false);
   const [pendingTagIds, setPendingTagIds] = useState<string[]>([]);
+  const [isTodoMode, setIsTodoMode] = useState(false);
+  const [todoStartTime, setTodoStartTime] = useState<number | undefined>(undefined);
+  const [todoEndTime, setTodoEndTime] = useState<number | undefined>(undefined);
+  const [todoIsToday, setTodoIsToday] = useState(true);
+  const [showTodoAdvanced, setShowTodoAdvanced] = useState(false);
+  const [lastTodoId, setLastTodoId] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const modeTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const navigate = useNavigate();
@@ -76,6 +117,7 @@ export function HomePage() {
   const addTagToEntry = useTagStore(state => state.addTagToEntry);
   const removeTagFromEntry = useTagStore(state => state.removeTagFromEntry);
   const getTagsByEntryId = useTagStore(state => state.getTagsByEntryId);
+  const addTodo = useTodoStore(state => state.addTodo);
 
   // 自动聚焦
   useEffect(() => {
@@ -110,6 +152,36 @@ export function HomePage() {
   const handleSend = useCallback(async () => {
     if (!content.trim()) return;
 
+    if (isTodoMode) {
+      // 待办模式：创建待办
+      const now = Date.now();
+      const startTime = todoStartTime;
+      const endTime = todoEndTime;
+      // folderDate 以开始时间为准，没开始时间则用当天
+      const refTime = startTime || now;
+      const folderDate = timestampToFolderDate(refTime);
+      const todo = await addTodo({
+        title: content.trim(),
+        startTime,
+        endTime,
+        isToday: todoIsToday,
+        folderDate,
+      });
+      setLastTodoId(todo.id);
+      setContent('');
+      showToastMessage('待办已创建');
+
+      // 3秒后弹出「添加更多信息」提示
+      if (modeTimerRef.current) {
+        clearTimeout(modeTimerRef.current);
+      }
+      // 快速提示后重置高级选项
+      setTodoStartTime(undefined);
+      setTodoEndTime(undefined);
+      setShowTodoAdvanced(false);
+      return;
+    }
+
     const entry = await addEntry(content.trim());
     setLastEntryId(entry.id);
     setLastEntryContent(content.trim());
@@ -126,7 +198,7 @@ export function HomePage() {
     modeTimerRef.current = setTimeout(() => {
       setMode('input');
     }, 3000);
-  }, [content, addEntry, showToastMessage]);
+  }, [content, addEntry, showToastMessage, isTodoMode, todoStartTime, todoEndTime, todoIsToday, addTodo]);
 
   // 处理键盘事件
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -197,6 +269,23 @@ export function HomePage() {
     navigate(`/entry/${lastEntryId}/edit`);
   }, [lastEntryId, navigate, showToastMessage]);
 
+  // 处理快捷时间预设
+  const handleQuickTime = useCallback((preset: typeof QUICK_TIME_PRESETS[0], target: 'start' | 'end') => {
+    let ts: number;
+    if (preset.offsetMinutes === -1) {
+      ts = getTodayAtHour(18);
+    } else if (preset.offsetMinutes === -2) {
+      ts = getTomorrowAtHour(12);
+    } else {
+      ts = Date.now() + preset.offsetMinutes * 60 * 1000;
+    }
+    if (target === 'start') {
+      setTodoStartTime(ts);
+    } else {
+      setTodoEndTime(ts);
+    }
+  }, []);
+
   return (
     <div className="home-page">
       <main className="page-content">
@@ -210,10 +299,96 @@ export function HomePage() {
                 value={content}
                 onChange={e => setContent(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="记录你的想法..."
+                placeholder={isTodoMode ? '开始你的规划...' : '记录你的想法...'}
                 rows={4}
               />
             </div>
+
+            {/* 待办模式切换 */}
+            <label className="todo-mode-toggle">
+              <input
+                type="checkbox"
+                checked={isTodoMode}
+                onChange={e => {
+                  setIsTodoMode(e.target.checked);
+                  if (!e.target.checked) {
+                    setShowTodoAdvanced(false);
+                    setTodoStartTime(undefined);
+                    setTodoEndTime(undefined);
+                  }
+                }}
+              />
+              <span>待办模式</span>
+            </label>
+
+            {/* 待办高级选项 */}
+            {isTodoMode && (
+              <div className="todo-advanced">
+                <button
+                  className="todo-advanced-toggle"
+                  onClick={() => setShowTodoAdvanced(!showTodoAdvanced)}
+                >
+                  <span>{showTodoAdvanced ? '收起选项' : '高级选项'}</span>
+                </button>
+                {showTodoAdvanced && (
+                  <div className="todo-advanced-body glass">
+                    {/* 开始时间 */}
+                    <div className="todo-time-group">
+                      <label className="todo-time-label">开始时间</label>
+                      <div className="todo-time-presets">
+                        {QUICK_TIME_PRESETS.map(preset => (
+                          <button
+                            key={preset.label}
+                            className={`todo-preset-chip ${todoStartTime && preset.label === 'test' ? 'active' : ''}`}
+                            onClick={() => handleQuickTime(preset, 'start')}
+                          >
+                            {preset.label}
+                          </button>
+                        ))}
+                      </div>
+                      <input
+                        type="datetime-local"
+                        className="todo-time-input glass"
+                        value={todoStartTime ? new Date(todoStartTime).toISOString().slice(0, 16) : ''}
+                        onChange={e => setTodoStartTime(e.target.value ? new Date(e.target.value).getTime() : undefined)}
+                      />
+                    </div>
+
+                    {/* 结束时间 */}
+                    <div className="todo-time-group">
+                      <label className="todo-time-label">结束时间</label>
+                      <div className="todo-time-presets">
+                        {QUICK_TIME_PRESETS.map(preset => (
+                          <button
+                            key={preset.label}
+                            className="todo-preset-chip"
+                            onClick={() => handleQuickTime(preset, 'end')}
+                          >
+                            {preset.label}
+                          </button>
+                        ))}
+                      </div>
+                      <input
+                        type="datetime-local"
+                        className="todo-time-input glass"
+                        value={todoEndTime ? new Date(todoEndTime).toISOString().slice(0, 16) : ''}
+                        onChange={e => setTodoEndTime(e.target.value ? new Date(e.target.value).getTime() : undefined)}
+                      />
+                    </div>
+
+                    {/* 今日处理 */}
+                    <label className="todo-mode-toggle">
+                      <input
+                        type="checkbox"
+                        checked={todoIsToday}
+                        onChange={e => setTodoIsToday(e.target.checked)}
+                      />
+                      <span>今日处理</span>
+                    </label>
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="input-actions">
               <button className="action-btn secondary" onClick={readClipboard}>

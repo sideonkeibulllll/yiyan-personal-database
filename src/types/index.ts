@@ -20,6 +20,14 @@ export interface Tag {
   id: string;
   name: string;
   createdAt: number;
+  /** 智能标签：保存的搜索条件 */
+  isSmart?: boolean;
+  /** 智能标签的搜索条件 */
+  searchCriteria?: {
+    keyword?: string;
+    tagIds?: string[];
+    isStarred?: boolean;
+  };
 }
 
 export interface Group {
@@ -41,11 +49,107 @@ export interface RandomConfig {
   cardsPerPage: number;
 }
 
+// ==================== 待办相关类型 ====================
+
+/** 待办状态 */
+export type TodoStatus = 'pending' | 'done';
+
+/** 待办搜索时间筛选 */
+export type TodoSearchTimeFilter = 'future' | 'expired' | 'expiredOverMonth';
+
+/** 待办项 */
+export interface Todo {
+  id: string;
+  title: string;
+  note?: string;
+  status: TodoStatus;
+  startTime?: number;
+  endTime?: number;
+  /** 今日处理（代替星标） */
+  isToday: boolean;
+  /** 标签 ID 列表 */
+  tagIds?: string[];
+  /** 创建时间 */
+  createdAt: number;
+  /** 更新时间 */
+  updatedAt: number;
+  /** 完成时间 */
+  completedAt?: number;
+  /** 软删除时间（回收站） */
+  deletedAt?: number;
+  /** 日期文件夹（YYYY-MM-DD） */
+  folderDate: string;
+}
+
+/** 待办标签（独立标签池） */
+export interface TodoTag {
+  id: string;
+  name: string;
+  /** 标签颜色（hex 或 CSS 颜色名） */
+  color?: string;
+  createdAt: number;
+}
+
+/** 待办模板 */
+export interface TodoTemplate {
+  id: string;
+  name: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** 模板中的待办项 */
+export interface TodoTemplateItem {
+  id: string;
+  templateId: string;
+  title: string;
+  note?: string;
+  /** 相对开始时间（分钟偏移，0 = 模板应用的当天 0 点） */
+  startTime?: number;
+  /** 相对结束时间（分钟偏移） */
+  endTime?: number;
+  isToday: boolean;
+  /** 标签 ID 列表（JSON 字符串） */
+  tagIds?: string;
+  sortOrder: number;
+}
+
+/** 倒计时显示格式 */
+export type CountdownFormat = 'full' | 'compact' | 'daysOnly';
+
+/** 倒计时显示位置 */
+export type CountdownPosition = 'aboveBottomNav' | 'pageTop' | 'floating';
+
+/** 待办配置 */
+export interface TodoConfig {
+  /** 是否显示倒计时条 */
+  showCountdown: boolean;
+  /** 倒计时格式 */
+  countdownFormat: CountdownFormat;
+  /** 倒计时位置 */
+  countdownPosition: CountdownPosition;
+  /** 删除前确认 */
+  confirmDelete: boolean;
+  /** 回收站自动清理天数 */
+  recycleBinRetentionDays: number;
+}
+
+/** 待办默认配置 */
+export const DEFAULT_TODO_CONFIG: TodoConfig = {
+  showCountdown: true,
+  countdownFormat: 'full',
+  countdownPosition: 'aboveBottomNav',
+  confirmDelete: true,
+  recycleBinRetentionDays: 30,
+};
+
 export interface Settings {
   ai: AIConfig;
   context: ContextConfig;
   push: PushConfig;
   random: RandomConfig;
+  /** 待办配置 */
+  todo: TodoConfig;
 }
 
 export interface AIConfig {
@@ -182,4 +286,5 @@ export const DEFAULT_SETTINGS: Settings = {
   random: {
     cardsPerPage: 7,
   },
+  todo: DEFAULT_TODO_CONFIG,
 };
