@@ -110,6 +110,7 @@ export function TodoPage() {
   const deleteTodo = useTodoStore(state => state.deleteTodo);
   const isLoading = useTodoStore(state => state.isLoading);
   const settings = useSettingsStore(state => state.settings);
+  const loadTodoTags = useTodoTagStore(state => state.loadTags);
 
   const dateOptions = useMemo(() => buildDateOptions(pendingFolderDates), [pendingFolderDates]);
   const timerRef = useRef<ReturnType<typeof setInterval>>();
@@ -117,7 +118,8 @@ export function TodoPage() {
   // 加载当前选中日期的待办
   useEffect(() => {
     loadTodosByDate(selectedDate);
-  }, [selectedDate, loadTodosByDate]);
+    loadTodoTags();
+  }, [selectedDate, loadTodosByDate, loadTodoTags]);
 
   // 加载所有未完成待办的 folderDate，用于动态生成日期选项
   // 依赖 selectedDate：切换日期或增删待办后回到本页时会刷新
@@ -281,6 +283,7 @@ interface TodoItemProps {
 }
 
 function TodoItem({ todo, index, now, onToggleDone, onDelete, onEdit }: TodoItemProps) {
+  const allTags = useTodoTagStore(state => state.tags);
   const [showMenu, setShowMenu] = useState(false);
   // 菜单 fixed 定位（相对视口）：右对齐到卡片右侧
   const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
@@ -375,8 +378,14 @@ function TodoItem({ todo, index, now, onToggleDone, onDelete, onEdit }: TodoItem
   const isDone = todo.status === 'done';
 
   // 获取卡片颜色：取最后一个标签的颜色，无标签则轮换暖色调色板
-  const tagColor = todo.tags && todo.tags.length > 0 ? todo.tags[todo.tags.length - 1].color : undefined;
-  const cardColor = tagColor || WARM_PALETTE[index % WARM_PALETTE.length];
+  const cardColor = useMemo(() => {
+    if (todo.tagIds && todo.tagIds.length > 0) {
+      const lastTagId = todo.tagIds[todo.tagIds.length - 1];
+      const tag = allTags.find(t => t.id === lastTagId);
+      if (tag?.color) return tag.color;
+    }
+    return WARM_PALETTE[index % WARM_PALETTE.length];
+  }, [todo.tagIds, allTags, index]);
 
   // 复制内容
   const handleCopy = useCallback(async (e: React.MouseEvent) => {
@@ -445,19 +454,19 @@ function TodoItem({ todo, index, now, onToggleDone, onDelete, onEdit }: TodoItem
       onClick={handleCardClick}
       onContextMenu={e => e.preventDefault()}
       style={(() => {
-        // 进行中：暖色背景从右往左缩短，右侧露出暗色底
+        // 进行中：颜色背景从右往左缩短，右侧露出暗色底
         const isOngoing = todo.startTime && todo.endTime && todo.status === 'pending' && now >= todo.startTime && now < todo.endTime;
         if (isOngoing) {
           const pct = ((todo.endTime! - now) / (todo.endTime! - todo.startTime!)) * 100;
           return {
             transform: `translateX(${swipeOffset}px)`,
-            background: `linear-gradient(to right, ${cardColor} ${pct}%, var(--color-bg-elevated) ${pct}%)`,
+            background: `linear-gradient(to right, ${cardColor}88 ${pct}%, var(--color-bg-elevated) ${pct}%)`,
             borderLeft: `3px solid ${cardColor}`,
           };
         }
         return {
           transform: `translateX(${swipeOffset}px)`,
-          background: cardColor,
+          background: `${cardColor}44`,
           borderLeft: `3px solid ${cardColor}`,
         };
       })()}

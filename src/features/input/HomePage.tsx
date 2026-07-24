@@ -654,12 +654,17 @@ export function HomePage() {
                 <div
                   className={`home-todo-card timed phase-${phase}`}
                   style={progressPct !== null ? {
-                    background: `linear-gradient(to right, ${cardColor}cc ${progressPct}%, var(--color-surface-2) ${progressPct}%)`,
+                    background: `linear-gradient(to right, ${cardColor}88 ${progressPct}%, var(--color-surface-2) ${progressPct}%)`,
                     borderLeftColor: cardColor,
                   } : phase === 'before' ? {
+                    background: `${cardColor}44`,
+                    borderLeftColor: cardColor,
+                  } : phase === 'ended' ? {
                     background: `${cardColor}22`,
                     borderLeftColor: cardColor,
+                    opacity: 0.6,
                   } : {
+                    background: `${cardColor}44`,
                     borderLeftColor: cardColor,
                   }}
                   onClick={() => navigate(`/todo/${timedCard.id}/edit`)}
@@ -692,7 +697,7 @@ export function HomePage() {
                 <div
                   className="home-todo-card untimed"
                   style={{
-                    background: `${cardColor}22`,
+                    background: `${cardColor}44`,
                     borderLeftColor: cardColor,
                   }}
                   onClick={() => navigate(`/todo/${untimedCard.id}/edit`)}
