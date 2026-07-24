@@ -374,8 +374,8 @@ function TodoItem({ todo, index, now, onToggleDone, onDelete, onEdit }: TodoItem
 
   const isDone = todo.status === 'done';
 
-  // 获取卡片颜色：标签色优先，无标签则轮换暖色调色板
-  const tagColor = todo.tags && todo.tags.length > 0 ? todo.tags[0].color : undefined;
+  // 获取卡片颜色：取最后一个标签的颜色，无标签则轮换暖色调色板
+  const tagColor = todo.tags && todo.tags.length > 0 ? todo.tags[todo.tags.length - 1].color : undefined;
   const cardColor = tagColor || WARM_PALETTE[index % WARM_PALETTE.length];
 
   // 复制内容
@@ -444,26 +444,26 @@ function TodoItem({ todo, index, now, onToggleDone, onDelete, onEdit }: TodoItem
       onMouseLeave={handleMouseLeave}
       onClick={handleCardClick}
       onContextMenu={e => e.preventDefault()}
-      style={{
-        transform: `translateX(${swipeOffset}px)`,
-        background: cardColor,
-        borderLeft: `3px solid ${cardColor}`,
-      }}
+      style={(() => {
+        // 进行中：暖色背景从右往左缩短，右侧露出暗色底
+        const isOngoing = todo.startTime && todo.endTime && todo.status === 'pending' && now >= todo.startTime && now < todo.endTime;
+        if (isOngoing) {
+          const pct = ((todo.endTime! - now) / (todo.endTime! - todo.startTime!)) * 100;
+          return {
+            transform: `translateX(${swipeOffset}px)`,
+            background: `linear-gradient(to right, ${cardColor} ${pct}%, var(--color-bg-elevated) ${pct}%)`,
+            borderLeft: `3px solid ${cardColor}`,
+          };
+        }
+        return {
+          transform: `translateX(${swipeOffset}px)`,
+          background: cardColor,
+          borderLeft: `3px solid ${cardColor}`,
+        };
+      })()}
     >
       {/* 半透明隔膜层，确保文字可读 */}
       <div className="todo-item-overlay" />
-
-      {/* 2: 进度条 — 已开始且未结束的待办，从右往左减少 */}
-      {todo.startTime && todo.endTime && todo.status === 'pending' && now >= todo.startTime && now < todo.endTime && (
-        <div
-          className="todo-item-progress"
-          style={{
-            width: `${((todo.endTime - now) / (todo.endTime - todo.startTime)) * 100}%`,
-            background: cardColor,
-            opacity: 0.35,
-          }}
-        />
-      )}
 
       <div className="todo-item-main">
         <div className="todo-item-header">

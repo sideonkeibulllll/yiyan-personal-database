@@ -76,8 +76,10 @@ export function TodoManagerPage() {
 
   // 为待办分配颜色
   const getTodoColor = useCallback((todo: Todo, index: number): string => {
+    // 取最后一个标签的颜色，没有标签才用默认调色板
     if (todo.tagIds && todo.tagIds.length > 0) {
-      const tag = tags.find(t => t.id === todo.tagIds![0]);
+      const lastTagId = todo.tagIds[todo.tagIds.length - 1];
+      const tag = tags.find(t => t.id === lastTagId);
       if (tag?.color) return tag.color;
     }
     return COLOR_PALETTE[index % COLOR_PALETTE.length];

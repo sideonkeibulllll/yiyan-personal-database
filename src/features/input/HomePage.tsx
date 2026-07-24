@@ -9,6 +9,7 @@ import { Capacitor } from '@capacitor/core';
 import { useEntryStore } from '@/stores/entryStore';
 import { useTagStore } from '@/stores/tagStore';
 import { useTodoStore } from '@/stores/todoStore';
+import { useTodoTagStore } from '@/stores/todoTagStore';
 import type { Todo } from '@/types';
 import { TagSelector } from '@/components/TagSelector/TagSelector';
 import { BottomNav } from '@/components/BottomNav';
@@ -18,6 +19,18 @@ import { isElectron } from '@/services/electronAdapter';
 import './HomePage.css';
 
 type InputMode = 'input' | 'tag' | 'info';
+
+/** 暖色调色板（8 种交替分配，与待办管理器/待办页一致） */
+const COLOR_PALETTE = [
+  '#f76707', // 鲜橙
+  '#f59f00', // 琥珀金
+  '#fa5252', // 珊瑚红
+  '#e67700', // 暗琥珀
+  '#d6336c', // 暖玫瑰
+  '#f08c00', // 金橙
+  '#c04509', // 深铜
+  '#e8590c', // 焦橙
+];
 
 /** 快捷时间预设
  * type: 'relative' = 基于已选时间递增/递减 (e.g. -10min, +30min)
@@ -199,6 +212,7 @@ export function HomePage() {
   const removeTagFromEntry = useTagStore(state => state.removeTagFromEntry);
   const getTagsByEntryId = useTagStore(state => state.getTagsByEntryId);
   const addTodo = useTodoStore(state => state.addTodo);
+  const todoTags = useTodoTagStore(state => state.tags);
 
   // 显示轻提示（提前定义，供后续 useEffect/回调使用）
   const showToastMessage = useCallback((message: string) => {
@@ -237,6 +251,8 @@ export function HomePage() {
   }, [showToastMessage]);
 
   // 加载所有待办 + 每秒 tick（倒计时 + 周期性 reload 同步完成/删除状态）
+  // 同时加载待办标签（用于卡片颜色）
+  const loadTodoTags = useTodoTagStore(state => state.loadTags);
   useEffect(() => {
     let tick = 0;
     const loadAll = async () => {
@@ -250,6 +266,7 @@ export function HomePage() {
       }
     };
     loadAll();
+    loadTodoTags();
     const timer = setInterval(() => {
       setNow(Date.now());
       tick++;
@@ -279,6 +296,19 @@ export function HomePage() {
       setPinnedUntimedId(null);
     }
   }, [pinnedUntimedId, allTodos]);
+
+  // === 顶部卡片颜色获取 ===
+  // 取最后一个标签的颜色，无标签则用 COLOR_PALETTE 轮换（基于 createdAt 哈希，分配后不变）
+  const getTodoCardColor = useCallback((todo: Todo): string => {
+    if (todo.tagIds && todo.tagIds.length > 0) {
+      const lastTagId = todo.tagIds[todo.tagIds.length - 1];
+      const tag = todoTags.find(t => t.id === lastTagId);
+      if (tag?.color) return tag.color;
+    }
+    // 无标签：用 createdAt 哈希取调色板，确保分配后不变
+    const hash = Math.floor(todo.createdAt / 1000) % COLOR_PALETTE.length;
+    return COLOR_PALETTE[hash];
+  }, [todoTags]);
 
   // === 顶部卡片选取算法 ===
   // timed slot：pin 优先；失效则 auto 选取
@@ -613,47 +643,70 @@ export function HomePage() {
         <div className="home-todo-cards">
           {/* timed 卡片（有 startTime/endTime，带倒计时） */}
           {timedCard ? (
-            <div
-              className={`home-todo-card timed phase-${now < (timedCard.startTime ?? 0) ? 'before' : now < (timedCard.endTime ?? Infinity) ? 'ongoing' : 'ended'}`}
-              onClick={() => navigate(`/todo/${timedCard.id}/edit`)}
-            >
-              {/* 2: 进度条 — 进行中时从右往左减少 */}
-              {timedCard.startTime && timedCard.endTime && now >= timedCard.startTime && now < timedCard.endTime && (
+            (() => {
+              const phase = now < (timedCard.startTime ?? 0) ? 'before' : now < (timedCard.endTime ?? Infinity) ? 'ongoing' : 'ended';
+              const cardColor = getTodoCardColor(timedCard);
+              // 进行中：颜色背景从右往左缩短，右侧露出暗色底
+              const progressPct = (phase === 'ongoing' && timedCard.startTime && timedCard.endTime)
+                ? ((timedCard.endTime - now) / (timedCard.endTime - timedCard.startTime)) * 100
+                : null;
+              return (
                 <div
-                  className="home-todo-card-progress"
-                  style={{
-                    width: `${((timedCard.endTime - now) / (timedCard.endTime - timedCard.startTime)) * 100}%`,
+                  className={`home-todo-card timed phase-${phase}`}
+                  style={progressPct !== null ? {
+                    background: `linear-gradient(to right, ${cardColor}cc ${progressPct}%, var(--color-surface-2) ${progressPct}%)`,
+                    borderLeftColor: cardColor,
+                  } : phase === 'before' ? {
+                    background: `${cardColor}22`,
+                    borderLeftColor: cardColor,
+                  } : {
+                    borderLeftColor: cardColor,
                   }}
-                />
-              )}
-              <div className="home-todo-card-main">
-                <span className="home-todo-card-title">{timedCard.title}</span>
-                <span className="home-todo-card-time">{formatTimeShort(timedCard.startTime)} - {formatTimeShort(timedCard.endTime)}</span>
-              </div>
-              <span className="home-todo-card-countdown">
-                {now < (timedCard.startTime ?? 0)
-                  ? `${formatCountdownCompact((timedCard.startTime ?? 0) - now)} 后开始`
-                  : now < (timedCard.endTime ?? Infinity)
-                    ? `${formatCountdownCompact((timedCard.endTime ?? 0) - now)} 后结束`
-                    : '已结束'}
-              </span>
-            </div>
+                  onClick={() => navigate(`/todo/${timedCard.id}/edit`)}
+                >
+                  {/* 文字遮罩层，确保文字可读 */}
+                  <div className="home-todo-card-overlay" />
+                  <div className="home-todo-card-main">
+                    <span className="home-todo-card-title">{timedCard.title}</span>
+                    <span className="home-todo-card-time">{formatTimeShort(timedCard.startTime)} - {formatTimeShort(timedCard.endTime)}</span>
+                  </div>
+                  <span className="home-todo-card-countdown">
+                    {now < (timedCard.startTime ?? 0)
+                      ? `${formatCountdownCompact((timedCard.startTime ?? 0) - now)} 后开始`
+                      : now < (timedCard.endTime ?? Infinity)
+                        ? `${formatCountdownCompact((timedCard.endTime ?? 0) - now)} 后结束`
+                        : '已结束'}
+                  </span>
+                </div>
+              );
+            })()
           ) : (
             <div className="home-todo-card empty"><span className="home-todo-card-placeholder">暂无定时待办</span></div>
           )}
 
           {/* untimed 卡片（无时间，待处理） */}
           {untimedCard ? (
-            <div
-              className="home-todo-card untimed"
-              onClick={() => navigate(`/todo/${untimedCard.id}/edit`)}
-            >
-              <div className="home-todo-card-main">
-                <span className="home-todo-card-title">{untimedCard.title}</span>
-                <span className="home-todo-card-time">待处理</span>
-              </div>
-              <span className="home-todo-card-countdown">无截止</span>
-            </div>
+            (() => {
+              const cardColor = getTodoCardColor(untimedCard);
+              return (
+                <div
+                  className="home-todo-card untimed"
+                  style={{
+                    background: `${cardColor}22`,
+                    borderLeftColor: cardColor,
+                  }}
+                  onClick={() => navigate(`/todo/${untimedCard.id}/edit`)}
+                >
+                  {/* 文字遮罩层，确保文字可读 */}
+                  <div className="home-todo-card-overlay" />
+                  <div className="home-todo-card-main">
+                    <span className="home-todo-card-title">{untimedCard.title}</span>
+                    <span className="home-todo-card-time">待处理</span>
+                  </div>
+                  <span className="home-todo-card-countdown">无截止</span>
+                </div>
+              );
+            })()
           ) : (
             <div className="home-todo-card empty"><span className="home-todo-card-placeholder">暂无待办事项</span></div>
           )}

@@ -41,6 +41,7 @@
 }
 
 .home-todo-card {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -53,22 +54,11 @@
   transition: transform var(--duration-fast) var(--ease-out),
               background var(--duration-fast) var(--ease-out);
   min-height: 44px;
+  overflow: hidden;
 }
 
 .home-todo-card:active {
   transform: scale(0.98);
-}
-
-/* 2: 进度条 — 进行中时从右往左减少 */
-.home-todo-card-progress {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(247, 103, 7, 0.25);
-  pointer-events: none;
-  transition: width 1s linear;
-  z-index: 0;
 }
 
 .home-todo-card.timed {
@@ -79,13 +69,31 @@
   border-left-color: var(--color-accent-tertiary);
 }
 
-/* 阶段配色：进行中高亮 */
-.home-todo-card.phase-ongoing {
-  background: rgba(247, 103, 7, 0.12);
+/* 文字遮罩层：确保背景色上文字可读 */
+.home-todo-card-overlay {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: rgba(0, 0, 0, 0.08);
+  pointer-events: none;
+  z-index: 0;
 }
 
+/* 确保文字在遮罩层之上 */
+.home-todo-card > .home-todo-card-main,
+.home-todo-card > .home-todo-card-countdown,
+.home-todo-card > .home-todo-card-placeholder {
+  position: relative;
+  z-index: 1;
+}
+
+/* 阶段配色 */
 .home-todo-card.phase-before {
-  background: rgba(245, 159, 0, 0.08);
+  /* background 由 inline style 控制 */
+}
+
+.home-todo-card.phase-ongoing {
+  /* background 由 inline style (gradient) 控制 */
 }
 
 .home-todo-card.phase-ended {
