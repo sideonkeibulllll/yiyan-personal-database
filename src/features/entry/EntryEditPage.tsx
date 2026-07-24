@@ -102,6 +102,24 @@ export function EntryEditPage() {
   const loadTags = useTagStore(state => state.loadTags);
   const updateEntry = useEntryStore(state => state.updateEntry);
   const loadEntries = useEntryStore(state => state.loadEntries);
+  const deleteEntry = useEntryStore(state => state.deleteEntry);
+
+  // 删除整条数据
+  const handleDelete = useCallback(async () => {
+    if (!id || id === 'new' || !entry) return;
+    if (!confirm('确定删除这条数据吗？删除后不可恢复。')) return;
+    try {
+      // 先删除附件文件
+      for (const att of attachments) {
+        try { await deleteAttachmentFiles(att); } catch { /* ignore */ }
+      }
+      await deleteEntry(id);
+      navigate(-1);
+    } catch (err) {
+      console.error('删除失败:', err);
+      alert('删除失败: ' + (err instanceof Error ? err.message : '未知错误'));
+    }
+  }, [id, entry, attachments, deleteEntry, navigate]);
 
   // 加载数据
   useEffect(() => {
@@ -457,6 +475,17 @@ export function EntryEditPage() {
 
       {/* 底部保存按钮 */}
       <footer className="entry-edit-footer">
+        {id && id !== 'new' && (
+          <button
+            className="entry-edit-delete-btn"
+            onClick={handleDelete}
+            disabled={saving}
+            title="删除此条数据"
+          >
+            <IconTrash />
+            <span>删除</span>
+          </button>
+        )}
         <button
           className="entry-edit-save"
           onClick={handleSave}

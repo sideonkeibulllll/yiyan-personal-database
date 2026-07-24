@@ -47,6 +47,7 @@ export function TodoEditPage() {
 
   const updateTodo = useTodoStore(state => state.updateTodo);
   const addTodo = useTodoStore(state => state.addTodo);
+  const deleteTodo = useTodoStore(state => state.deleteTodo);
   const tags = useTodoTagStore(state => state.tags);
   const loadTags = useTodoTagStore(state => state.loadTags);
   const createTag = useTodoTagStore(state => state.createTag);
@@ -132,6 +133,19 @@ export function TodoEditPage() {
     else setEndTime(ts);
   }, []);
 
+  // 删除整条待办
+  const handleDelete = useCallback(async () => {
+    if (isNew || !id) return;
+    if (!confirm('确定删除这条待办吗？')) return;
+    try {
+      await deleteTodo(id);
+      navigate('/todo');
+    } catch (err) {
+      console.error('删除失败:', err);
+      alert('删除失败: ' + (err instanceof Error ? err.message : '未知错误'));
+    }
+  }, [isNew, id, deleteTodo, navigate]);
+
   // 创建新标签
   const handleCreateTag = useCallback(async () => {
     if (!newTagName.trim()) return;
@@ -158,6 +172,15 @@ export function TodoEditPage() {
         <div className="todo-edit-header">
           <button className="todo-edit-back" onClick={() => navigate('/todo')}>←</button>
           <h2>{isNew ? '新建待办' : '编辑待办'}</h2>
+          {!isNew && (
+            <button
+              className="todo-edit-delete-btn"
+              onClick={handleDelete}
+              title="删除此待办"
+            >
+              删除
+            </button>
+          )}
           <button
             className="todo-edit-save"
             onClick={handleSave}

@@ -342,10 +342,35 @@
   padding-bottom: calc(var(--space-3) + var(--safe-bottom));
   background: var(--color-bg-secondary);
   border-top: 1px solid var(--color-border-primary);
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.entry-edit-delete-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: var(--space-3) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: 1px solid var(--color-border-primary);
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: all var(--duration-fast);
+  min-height: 44px;
+  white-space: nowrap;
+}
+
+.entry-edit-delete-btn:active {
+  opacity: 0.7;
+  background: var(--color-danger);
+  color: var(--color-text-white);
 }
 
 .entry-edit-save {
-  width: 100%;
+  flex: 1;
   padding: var(--space-3) var(--space-4);
   border-radius: var(--radius-sm);
   background: var(--color-accent-primary);

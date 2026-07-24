@@ -121,12 +121,15 @@
   align-items: center;
   gap: 2px;
   opacity: 0;
+  pointer-events: none;
   transition: opacity var(--duration-fast) var(--ease-out);
   flex-shrink: 0;
 }
 
-.history-item:hover .history-item-actions {
+.history-item:hover .history-item-actions,
+.history-item.active .history-item-actions {
   opacity: 1;
+  pointer-events: auto;
 }
 
 .history-item-action {

@@ -10,7 +10,7 @@
  * - addListener('request') 接收请求 → 调用方处理 → respond() 返回响应
  * - 收到的 body 可能是 bodyText / bodyBase64 / bodyFilePath 三种形式
  */
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import { isElectron } from './electronAdapter';
 
 /** 插件类型定义（与 @cantoo/capacitor-http-server 接口一致） */
@@ -95,12 +95,11 @@ async function getPlugin(): Promise<HttpServerPlugin | null> {
   if (platform !== 'android' && platform !== 'ios') return null;
 
   try {
-    // 动态导入插件（如果未安装则降级返回 null）
-    const mod = await import('@cantoo/capacitor-http-server');
-    pluginInstance = (mod as any).HttpServer as HttpServerPlugin;
-  } catch {
-    // 插件未安装：返回 null，调用方降级到"原生平台不支持"提示
-    console.warn('[capacitorHttpServer] 插件未安装，原生接收服务不可用');
+    // 使用 registerPlugin 获取原生插件实例（与插件源码一致的方式）
+    pluginInstance = registerPlugin<HttpServerPlugin>('HttpServer');
+    console.log('[capacitorHttpServer] 插件加载成功', typeof pluginInstance);
+  } catch (err) {
+    console.warn('[capacitorHttpServer] 插件注册失败:', err);
     pluginInstance = null;
   }
 
