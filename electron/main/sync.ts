@@ -233,7 +233,12 @@ function startBroadcast(port: number): void {
   }
 }
 
-/** 停止服务端和广播 */
+/** 停止服务端和广播
+ *
+ * 关键修复：server.close() 会等待所有现有连接关闭才回调，如果还有挂起的
+ * HTTPS 长连接，会一直卡住导致应用无法退出（NSIS 升级时反复提示关闭）。
+ * 这里先 closeAllConnections 强制断开，再 close，并加 1 秒超时保底。
+ */
 export async function stopServer(): Promise<void> {
   if (bonjour) {
     try { bonjour.unpublishAll(); } catch { /* ignore */ }
@@ -241,10 +246,19 @@ export async function stopServer(): Promise<void> {
     bonjour = null;
   }
   if (server) {
-    await new Promise<void>((resolve) => {
-      server!.close(() => resolve());
-    });
+    const srv = server;
     server = null;
+    try {
+      // Node 18.2+ 提供 closeAllConnections，强制断开所有 keep-alive 连接
+      (srv as any).closeAllConnections?.();
+    } catch { /* ignore */ }
+    await new Promise<void>((resolve) => {
+      let done = false;
+      const finish = () => { if (!done) { done = true; resolve(); } };
+      srv.close(() => finish());
+      // 超时保底，避免 close 永远不回调
+      setTimeout(finish, 1000);
+    });
   }
   currentPort = 0;
   currentReceiveHandler = null;

@@ -42,10 +42,14 @@ const ATTACHMENT_DIR = 'attachments';
  * - Android：优先用 @capacitor/camera（动态 import，未装则回退到 input）
  * - Win/Electron/Web：用 <input type="file" multiple accept="image/*">
  *
+ * 注意：Android 上 Camera.pickImages 与 input 回退只能二选一，
+ * 不能先试 Camera 再“回退”到 input——因为 Camera 的取消会触发 resolve([])，
+ * 之后又弹 input 会造成“跳出 2 次”。
+ *
  * @param limit 最多选几张（仅 Android Camera 有效）
  */
 export async function pickImages(limit = 9): Promise<SelectedImage[]> {
-  // Android 优先用原生 Camera 插件
+  // Android：用原生 Camera 插件，不再回退到 input
   if (!isElectron() && Capacitor.getPlatform() === 'android') {
     try {
       const { Camera } = await import('@capacitor/camera');
@@ -55,19 +59,19 @@ export async function pickImages(limit = 9): Promise<SelectedImage[]> {
       });
       const result: SelectedImage[] = [];
       for (const p of photo.photos ?? []) {
-        // Capacitor 返回的 webPath/dataUrl/路径，需要读取为 base64
         const base64 = await readUriAsBase64(p.webPath || p.path || '');
         if (base64) {
           result.push(base64);
         }
       }
-      if (result.length > 0) return result;
-      // 没选到图，回退
+      return result;
     } catch (err) {
-      console.warn('[attachment] Camera.pickImages 失败，回退到 input:', err);
+      // Camera 插件取消或失败，直接返回空，不再回退到 input（避免双重弹出）
+      console.warn('[attachment] Camera.pickImages 失败或取消:', err);
+      return [];
     }
   }
-  // 其他平台或回退：用 input
+  // 其他平台：用 input
   return pickImagesViaInput(true);
 }
 
@@ -109,6 +113,13 @@ function pickImagesViaInput(multiple: boolean): Promise<SelectedImage[]> {
     input.style.display = 'none';
     document.body.appendChild(input);
 
+    let resolved = false;
+    const cleanup = () => {
+      if (resolved) return;
+      resolved = true;
+      try { document.body.removeChild(input); } catch {}
+    };
+
     input.onchange = async () => {
       const files = input.files ? Array.from(input.files) : [];
       const result: SelectedImage[] = [];
@@ -116,23 +127,28 @@ function pickImagesViaInput(multiple: boolean): Promise<SelectedImage[]> {
         const base64 = await fileToBase64(file);
         result.push(base64);
       }
-      document.body.removeChild(input);
+      cleanup();
       resolve(result);
     };
 
-    // 用户取消：change 不触发，这里靠 focus 回检测
-    // 简化处理：直接 click，5 秒内无响应视为取消（避免 input 阻塞）
-    input.onclick = () => {
-      // 监听窗口重新聚焦，如果没选文件则清理
-      window.addEventListener('focus', () => {
-        setTimeout(() => {
-          if (!input.files || input.files.length === 0) {
-            try { document.body.removeChild(input); } catch {}
-            resolve([]);
-          }
-        }, 500);
-      }, { once: true });
-    };
+    // 用户取消：window focus 后检查，如果没选文件则清理
+    // 加超时保底，避免永远不 resolve
+    const cancelTimeout = setTimeout(() => {
+      if (!resolved && (!input.files || input.files.length === 0)) {
+        cleanup();
+        resolve([]);
+      }
+    }, 10000);
+
+    window.addEventListener('focus', () => {
+      setTimeout(() => {
+        if (!resolved && (!input.files || input.files.length === 0)) {
+          clearTimeout(cancelTimeout);
+          cleanup();
+          resolve([]);
+        }
+      }, 300);
+    }, { once: true });
 
     input.click();
   });

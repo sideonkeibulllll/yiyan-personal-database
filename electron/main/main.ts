@@ -98,14 +98,26 @@ app.on('window-all-closed', () => {
   }
 });
 
-/** 应用退出前清理资源 */
-app.on('before-quit', async (event) => {
+/** 应用退出前清理资源
+ *
+ * 关键修复：必须设置超时强制退出。
+ * 之前用 event.preventDefault + await closeAll/stopServer，如果 stopServer
+ * 里的 server.close() 因还有 HTTPS 连接而卡住，app.exit(0) 永远不会执行，
+ * 导致进程残留，NSIS 安装器升级时会反复提示"请关闭 记忆库 后更新"。
+ */
+let isQuitting = false;
+app.on('before-quit', (event) => {
+  if (isQuitting) return; // 已在退出流程中，放行
+  isQuitting = true;
   event.preventDefault();
-  try {
-    await closeAll();
-    await stopServer();
-  } catch {
-    // ignore
-  }
-  app.exit(0);
+
+  // 2 秒超时强制退出，避免清理卡住导致进程残留
+  const forceExitTimer = setTimeout(() => {
+    process.exit(0);
+  }, 2000);
+
+  Promise.allSettled([closeAll(), stopServer()]).then(() => {
+    clearTimeout(forceExitTimer);
+    app.exit(0);
+  });
 });

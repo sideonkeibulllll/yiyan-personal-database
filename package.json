@@ -1,7 +1,7 @@
 {
   "name": "yiyan-personal-database",
   "private": true,
-  "version": "1.7.1",
+  "version": "1.7.2",
   "type": "module",
   "main": "dist-electron/main/main.js",
   "scripts": {
@@ -59,6 +59,8 @@
     "directories": {
       "output": "release-electron"
     },
+    "compression": "normal",
+    "differentialPackage": false,
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
@@ -85,7 +87,8 @@
       "shortcutName": "记忆库",
       "installerIcon": "electron/build/icon.ico",
       "uninstallerIcon": "electron/build/icon.ico",
-      "uninstallDisplayName": "记忆库"
+      "uninstallDisplayName": "记忆库",
+      "include": "electron/build/installer.nsh"
     }
   }
 }

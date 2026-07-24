@@ -79,9 +79,19 @@ function EntryCard({
   const [expanded, setExpanded] = useState(false);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const startLongPress = () => {
+  // 用 passively 监听 touchstart，避免 onTouchStart 与 onClick 冲突
+  // onTouchStart 在 React 中是 passive=false 的合成事件，可能阻止 click。
+  // 改为只在 touchstart 中启动计时器，touchend/move 中取消，
+  // 如果计时器触发→展开；否则让 click 正常触发选中。
+  const startLongPress = (e: React.TouchEvent | React.MouseEvent) => {
+    // 不阻止默认行为，让 click 能正常触发
     longPressTimer.current = setTimeout(() => {
       setExpanded(prev => !prev);
+      // 长按触发后，标记本次 touch 已处理，阻止后续 click 选中
+      (e.currentTarget as HTMLElement).dataset.longPressTriggered = '1';
+      setTimeout(() => {
+        delete (e.currentTarget as HTMLElement).dataset.longPressTriggered;
+      }, 300);
     }, 500);
   };
 
@@ -95,7 +105,13 @@ function EntryCard({
   return (
     <div
       className={`ep-card ${isSelected ? 'selected' : ''} ${expanded ? 'expanded' : ''}`}
-      onClick={onToggle}
+      onClick={(e) => {
+        // 如果是长按触发的展开/收起，跳过选中逻辑
+        if ((e.currentTarget as HTMLElement).dataset.longPressTriggered === '1') {
+          return;
+        }
+        onToggle();
+      }}
       onTouchStart={startLongPress}
       onTouchEnd={cancelLongPress}
       onTouchMove={cancelLongPress}

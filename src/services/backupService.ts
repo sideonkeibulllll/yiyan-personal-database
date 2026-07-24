@@ -133,6 +133,10 @@ export async function createBackup(
   const db = await getDatabase();
   const todoDb = await getTodoDatabase();
 
+  // 确保数据库连接健康（手机端 Capacitor SQLite 连接可能不稳定）
+  await (db as any).ensureConnection?.();
+  await (todoDb as any).ensureConnection?.();
+
   // 收集所有数据
   const [entries, tags, groups, settings, allTodos, allTodoTags, allTemplates, allAttachments] = await Promise.all([
     db.getAllEntries(),
@@ -244,6 +248,10 @@ export async function exportToDownload(type: BackupType = 'manual'): Promise<Bac
   const ts = Date.now();
   const db = await getDatabase();
   const todoDb = await getTodoDatabase();
+
+  // 确保数据库连接健康（手机端 Capacitor SQLite 连接可能不稳定）
+  await (db as any).ensureConnection?.();
+  await (todoDb as any).ensureConnection?.();
 
   const [entries, tags, groups, settings, allTodos, allTodoTags, allTemplates, allAttachments] = await Promise.all([
     db.getAllEntries(),

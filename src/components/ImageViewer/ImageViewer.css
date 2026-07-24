@@ -103,9 +103,12 @@
   z-index: 2;
 }
 
-/* 移动端隐藏左右箭头（用手势） */
+/* 移动端保留左右箭头按钮（用户需求：左右滑动改为左右按钮切换） */
 @media (max-width: 768px) {
   .image-viewer-arrow {
-    display: none;
+    display: flex;
+    width: 36px;
+    height: 36px;
+    background: rgba(0, 0, 0, 0.6);
   }
 }

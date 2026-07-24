@@ -74,9 +74,11 @@ export function ImageViewer({ images, startIndex = 0, onClose }: ImageViewerProp
   }, [onClose, goNext, goPrev]);
 
   // 拖拽开始
+  // 修复：scale !== 1 时允许拖拽（缩放后可拖拽图片），
+  // 但 IS_TOUCH 时禁止拖拽切换（用户要求用左右按钮）
   const onPointerDown = useCallback((e: React.PointerEvent) => {
     if (isPinching.current) return; // 双指缩放中，不处理单指拖拽
-    if (scale !== 1) return; // 放大状态不切换
+    if (IS_TOUCH && scale === 1) return; // 手机端未缩放时不启动拖拽（用按钮切换）
     dragStartX.current = e.clientX;
     hasDragged.current = false;
     setIsDragging(true);
@@ -95,6 +97,11 @@ export function ImageViewer({ images, startIndex = 0, onClose }: ImageViewerProp
   const onPointerUp = useCallback(() => {
     if (!isDragging) return;
     setIsDragging(false);
+    // 缩放状态下，拖拽只是平移图片，不切换
+    if (scale !== 1) {
+      setDragX(0);
+      return;
+    }
     const threshold = (containerRef.current?.offsetWidth ?? 300) * 0.2;
     if (dragX < -threshold) {
       goNext();
@@ -103,7 +110,7 @@ export function ImageViewer({ images, startIndex = 0, onClose }: ImageViewerProp
     } else {
       setDragX(0);
     }
-  }, [isDragging, dragX, goNext, goPrev]);
+  }, [isDragging, dragX, goNext, goPrev, scale]);
 
   // 双指缩放：touch 事件
   const onTouchStart = useCallback((e: React.TouchEvent) => {
