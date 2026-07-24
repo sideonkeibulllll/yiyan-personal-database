@@ -215,7 +215,12 @@ async function streamChatCompletion(
     body.max_tokens = 4096;
   }
 
-  const response = await fetch(`${baseURL}/chat/completions`, {
+  // On Android/iOS, CapacitorHttp patches window.fetch to use native HTTP.
+  // Native HTTP doesn't support streaming responses (response.body.getReader()).
+  // Use the original WebView fetch (saved as CapacitorWebFetch) for streaming.
+  const fetchFn = (window as any).CapacitorWebFetch || fetch;
+
+  const response = await fetchFn(`${baseURL}/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

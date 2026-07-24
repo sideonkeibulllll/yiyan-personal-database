@@ -318,16 +318,24 @@ export async function exportToDownload(type: BackupType = 'manual'): Promise<Bac
     }
   }
 
-  const zipBlob = await zip.generateAsync({ type: 'base64', compression: 'DEFLATE' });
+  // 生成 zip 为 Blob，通过 <a download> 方式触发浏览器/WebView 下载
+  // 这种方式在所有平台都能正常工作：
+  // - Web/Electron: 保存到 Downloads 目录
+  // - Android APK: WebView 下载管理器保存到 /storage/emulated/0/Download/
+  // - 不需要任何存储权限
+  const zipBlobBytes = await zip.generateAsync({ type: 'arraybuffer', compression: 'DEFLATE' });
   const filename = `${formatTimestamp(ts)}_${getDeviceId()}.zip`;
 
-  await ensureDir(EXPORT_DIR, Directory.External);
-  await Filesystem.writeFile({
-    path: `${EXPORT_DIR}/${filename}`,
-    data: zipBlob,
-    directory: Directory.External,
-    recursive: true,
-  });
+  const blob = new Blob([new Uint8Array(zipBlobBytes)], { type: 'application/zip' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  // 延迟释放 URL，确保下载已触发
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 
   return manifest;
 }
