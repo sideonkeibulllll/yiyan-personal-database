@@ -654,7 +654,7 @@ export function HomePage() {
                 <div
                   className={`home-todo-card timed phase-${phase}`}
                   style={progressPct !== null ? {
-                    background: `linear-gradient(to right, ${cardColor}88 ${progressPct}%, var(--color-surface-2) ${progressPct}%)`,
+                    background: `linear-gradient(to right, ${cardColor}88 ${progressPct}%, var(--color-bg-elevated) ${progressPct}%)`,
                     borderLeftColor: cardColor,
                   } : phase === 'before' ? {
                     background: `${cardColor}44`,
