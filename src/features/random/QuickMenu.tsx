@@ -227,7 +227,7 @@ export function QuickMenu({
   // b.7: 编辑新建的待办
   const handleEditCreatedTodo = useCallback(() => {
     if (createdTodoId) {
-      navigate(`/todo/edit/${createdTodoId}`);
+      navigate(`/todo/${createdTodoId}/edit`);
       onClose();
     }
   }, [createdTodoId, navigate]);

@@ -59,6 +59,18 @@
   transform: scale(0.98);
 }
 
+/* 2: 进度条 — 进行中时从右往左减少 */
+.home-todo-card-progress {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(247, 103, 7, 0.25);
+  pointer-events: none;
+  transition: width 1s linear;
+  z-index: 0;
+}
+
 .home-todo-card.timed {
   border-left-color: var(--color-accent-primary);
 }

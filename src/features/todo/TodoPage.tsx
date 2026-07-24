@@ -453,6 +453,18 @@ function TodoItem({ todo, index, now, onToggleDone, onDelete, onEdit }: TodoItem
       {/* 半透明隔膜层，确保文字可读 */}
       <div className="todo-item-overlay" />
 
+      {/* 2: 进度条 — 已开始且未结束的待办，从右往左减少 */}
+      {todo.startTime && todo.endTime && todo.status === 'pending' && now >= todo.startTime && now < todo.endTime && (
+        <div
+          className="todo-item-progress"
+          style={{
+            width: `${((todo.endTime - now) / (todo.endTime - todo.startTime)) * 100}%`,
+            background: cardColor,
+            opacity: 0.35,
+          }}
+        />
+      )}
+
       <div className="todo-item-main">
         <div className="todo-item-header">
           <span className="todo-item-title">{todo.title}</span>

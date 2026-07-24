@@ -115,6 +115,17 @@
   z-index: 0;
 }
 
+/* 2: 进度条 — 进行中的待办从右往左减少 */
+.todo-item-progress {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 0;
+  pointer-events: none;
+  transition: width 1s linear;
+}
+
 .todo-item.done {
   opacity: 0.5;
 }

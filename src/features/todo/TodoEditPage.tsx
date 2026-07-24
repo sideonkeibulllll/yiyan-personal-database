@@ -24,13 +24,26 @@ function toDateTimeLocal(ts?: number): string {
   return new Date(ts - offset).toISOString().slice(0, 16);
 }
 
-/** 快捷时间预设 */
-const TIME_PRESETS = [
-  { label: '+30分钟', minutes: 30 },
-  { label: '+1小时', minutes: 60 },
-  { label: '+2小时', minutes: 120 },
-  { label: '+4小时', minutes: 240 },
+/** 快捷时间预设
+ * type: 'relative' = 基于已选时间递增/递减
+ * type: 'absolute' = 绝对时间
+ */
+const TIME_PRESETS: { label: string; offsetMinutes: number; type: 'relative' | 'absolute' }[] = [
+  { label: '-10分钟', offsetMinutes: -10, type: 'relative' },
+  { label: '当前时间', offsetMinutes: 0, type: 'absolute' },
+  { label: '+30分钟', offsetMinutes: 30, type: 'relative' },
+  { label: '+1小时', offsetMinutes: 60, type: 'relative' },
+  { label: '+4小时', offsetMinutes: 240, type: 'relative' },
+  { label: '明天6点', offsetMinutes: -3, type: 'absolute' },
 ];
+
+/** 获取明天指定小时的时间戳 */
+function getTomorrowAtHour(hour: number): number {
+  const now = new Date();
+  now.setDate(now.getDate() + 1);
+  now.setHours(hour, 0, 0, 0);
+  return now.getTime();
+}
 
 export function TodoEditPage() {
   const { id } = useParams<{ id: string }>();
@@ -150,11 +163,27 @@ export function TodoEditPage() {
   }, [title, note, startTime, endTime, isToday, selectedTagIds, isNew, id, addTodo, updateTodo, navigate]);
 
   // 快捷设置时间
-  const handlePresetTime = useCallback((minutes: number, target: 'start' | 'end') => {
-    const ts = Date.now() + minutes * 60 * 1000;
+  const handlePresetTime = useCallback((preset: typeof TIME_PRESETS[0], target: 'start' | 'end') => {
+    const currentVal = target === 'start' ? startTime : endTime;
+    let ts: number;
+    if (preset.type === 'absolute') {
+      if (preset.offsetMinutes === 0) {
+        // 当前时间
+        ts = Date.now();
+      } else if (preset.offsetMinutes === -3) {
+        // 明天6点
+        ts = getTomorrowAtHour(6);
+      } else {
+        ts = Date.now();
+      }
+    } else {
+      // relative: 基于当前已选时间或当前时间
+      const base = currentVal ?? Date.now();
+      ts = base + preset.offsetMinutes * 60 * 1000;
+    }
     if (target === 'start') setStartTime(ts);
     else setEndTime(ts);
-  }, []);
+  }, [startTime, endTime]);
 
   // c: 删除待办时同时删除图片附件
   const handleDelete = useCallback(async () => {
@@ -284,7 +313,7 @@ export function TodoEditPage() {
                 <button
                   key={p.label}
                   className="time-preset-chip"
-                  onClick={() => handlePresetTime(p.minutes, 'start')}
+                  onClick={() => handlePresetTime(p, 'start')}
                 >
                   {p.label}
                 </button>
@@ -306,7 +335,7 @@ export function TodoEditPage() {
                 <button
                   key={p.label}
                   className="time-preset-chip"
-                  onClick={() => handlePresetTime(p.minutes, 'end')}
+                  onClick={() => handlePresetTime(p, 'end')}
                 >
                   {p.label}
                 </button>

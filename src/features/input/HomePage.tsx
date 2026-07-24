@@ -19,14 +19,17 @@ import './HomePage.css';
 
 type InputMode = 'input' | 'tag' | 'info';
 
-/** 快捷时间预设（分钟后当前时间）*/
-const QUICK_TIME_PRESETS: { label: string; offsetMinutes: number }[] = [
-  { label: '-10分钟', offsetMinutes: -10 },
-  { label: '+30分钟', offsetMinutes: 30 },
-  { label: '+1小时', offsetMinutes: 60 },
-  { label: '+4小时', offsetMinutes: 240 },
-  { label: '今天18点', offsetMinutes: -1 }, // 特殊值，实际计算在函数里
-  { label: '明天12点', offsetMinutes: -2 },
+/** 快捷时间预设
+ * type: 'relative' = 基于已选时间递增/递减 (e.g. -10min, +30min)
+ * type: 'absolute' = 绝对时间 (e.g. 当前时间, 明天6点)
+ */
+const QUICK_TIME_PRESETS: { label: string; offsetMinutes: number; type: 'relative' | 'absolute' }[] = [
+  { label: '-10分钟', offsetMinutes: -10, type: 'relative' },
+  { label: '当前时间', offsetMinutes: 0, type: 'absolute' },
+  { label: '+30分钟', offsetMinutes: 30, type: 'relative' },
+  { label: '+1小时', offsetMinutes: 60, type: 'relative' },
+  { label: '+4小时', offsetMinutes: 240, type: 'relative' },
+  { label: '明天6点', offsetMinutes: -3, type: 'absolute' }, // 特殊值
 ];
 
 /** 获取当天指定小时的时间戳 */
@@ -576,20 +579,23 @@ export function HomePage() {
     navigate(`/entry/${lastEntryId}/edit`);
   }, [lastEntryId, navigate, showToastMessage]);
 
-  // 处理快捷时间预设（递增型：+x小时和-10分钟多次点击会累加）
+  // 处理快捷时间预设
   const handleQuickTime = useCallback((preset: typeof QUICK_TIME_PRESETS[0], target: 'start' | 'end') => {
     const currentVal = target === 'start' ? todoStartTime : todoEndTime;
     let ts: number;
-    if (preset.offsetMinutes === -1) {
-      ts = getTodayAtHour(18);
-    } else if (preset.offsetMinutes === -2) {
-      ts = getTomorrowAtHour(12);
-    } else if (preset.offsetMinutes > 0) {
-      // +x小时：递增，基于当前已选时间或当前时间
-      const base = currentVal ?? Date.now();
-      ts = base + preset.offsetMinutes * 60 * 1000;
+    if (preset.type === 'absolute') {
+      // 绝对时间
+      if (preset.offsetMinutes === 0) {
+        // 当前时间
+        ts = Date.now();
+      } else if (preset.offsetMinutes === -3) {
+        // 明天6点
+        ts = getTomorrowAtHour(6);
+      } else {
+        ts = Date.now();
+      }
     } else {
-      // -10分钟：递减，基于当前已选时间或当前时间
+      // relative: 基于当前已选时间或当前时间
       const base = currentVal ?? Date.now();
       ts = base + preset.offsetMinutes * 60 * 1000;
     }
@@ -611,6 +617,15 @@ export function HomePage() {
               className={`home-todo-card timed phase-${now < (timedCard.startTime ?? 0) ? 'before' : now < (timedCard.endTime ?? Infinity) ? 'ongoing' : 'ended'}`}
               onClick={() => navigate(`/todo/${timedCard.id}/edit`)}
             >
+              {/* 2: 进度条 — 进行中时从右往左减少 */}
+              {timedCard.startTime && timedCard.endTime && now >= timedCard.startTime && now < timedCard.endTime && (
+                <div
+                  className="home-todo-card-progress"
+                  style={{
+                    width: `${((timedCard.endTime - now) / (timedCard.endTime - timedCard.startTime)) * 100}%`,
+                  }}
+                />
+              )}
               <div className="home-todo-card-main">
                 <span className="home-todo-card-title">{timedCard.title}</span>
                 <span className="home-todo-card-time">{formatTimeShort(timedCard.startTime)} - {formatTimeShort(timedCard.endTime)}</span>
