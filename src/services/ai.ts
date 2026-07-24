@@ -162,14 +162,12 @@ class AIService {
     const minTags = this.config.smartTag?.minTags ?? 1;
 
     const promptTemplate = customPrompt || this.config.smartTag?.tagSuggestPrompt ||
-      `你是一个标签建议助手。请分析以下文本内容，结合用户最近使用过的标签，推荐 ${minTags}-${maxTags} 个合适的标签。
+      `你是一个标签建议助手。请分析以下文本内容，从用户最近使用过的标签中选出 ${minTags}-${maxTags} 个最合适的标签。
 
-要求：
-1. 标签简洁，2-6 个字
-2. 优先复用最近使用过的标签
-3. 从内容主题、情感、用途三个维度考虑
-4. 避免过于宽泛的标签（如"其他"）
-5. 只返回标签列表，每行一个，不要解释
+重要规则：
+1. 只能从「用户最近使用过的标签」列表中选择，不要创建新标签
+2. 如果已有标签中没有合适的，返回 "无合适标签"
+3. 从内容主题、情感、用途三个维度选择最匹配的已有标签
 
 用户最近使用过的标签：
 {recentTags}
@@ -184,15 +182,21 @@ class AIService {
       .replace(/\{maxTags\}/g, String(maxTags));
 
     const result = await this.chat({
-      systemPrompt: '你是一个标签建议助手，只返回标签列表。',
+      systemPrompt: '你是一个标签建议助手，只返回标签列表。只能从已有标签中选择。',
       userMessage: prompt,
     });
 
-    return result
+    const parsed = result
       .split('\n')
       .map(tag => tag.trim().replace(/^[-*\d.]+\s*/, ''))
-      .filter(tag => tag.length > 0 && tag.length <= 12)
-      .slice(0, maxTags);
+      .filter(tag => tag.length > 0 && tag.length <= 12);
+
+    // b.8: 只保留与已有标签完全匹配的建议
+    const existingSet = new Set(recentTags);
+    const matched = parsed.filter(t => existingSet.has(t));
+
+    // 如果没有匹配到任何已有标签，返回空数组
+    return matched.length > 0 ? matched.slice(0, maxTags) : [];
   }
 
   /**
@@ -223,13 +227,12 @@ class AIService {
 
     const promptTemplate = this.config.smartGroup?.groupSuggestPrompt ||
       this.config.prompts.groupSuggestion ||
-      `你是一个分组建议助手。请分析以下条目内容，推荐 1-3 个合适的分组。
+      `你是一个分组建议助手。请分析以下条目内容，从已有的分组中选出 1-3 个合适的分组。
 
-要求：
-1. 分组名简洁，2-8 个字
-2. 优先复用已有的分组
-3. 从内容主题、用途、领域三个维度考虑
-4. 只返回分组列表，每行一个，不要解释
+重要规则：
+1. 只能从「已有分组」列表中选择，不要创建新分组
+2. 如果已有分组中没有合适的，返回 "无合适分组"
+3. 从内容主题、用途、领域三个维度选择最匹配的已有分组
 
 已有分组：
 {existingGroups}
@@ -243,15 +246,21 @@ class AIService {
       .replace(/\{recentEntries\}/g, recentEntries?.join('\n') || '');
 
     const result = await this.chat({
-      systemPrompt: '你是一个分组建议助手，只返回分组列表。',
+      systemPrompt: '你是一个分组建议助手，只返回分组列表。只能从已有分组中选择。',
       userMessage: prompt,
     });
 
-    return result
+    const parsed = result
       .split('\n')
       .map(group => group.trim().replace(/^[-*\d.]+\s*/, ''))
-      .filter(group => group.length > 0 && group.length <= 16)
-      .slice(0, 3);
+      .filter(group => group.length > 0 && group.length <= 16);
+
+    // b.8: 只保留与已有分组完全匹配的建议
+    const existingSet = new Set(existingGroups);
+    const matched = parsed.filter(g => existingSet.has(g));
+
+    // 如果没有匹配到任何已有分组，返回空数组而不是创建新分组
+    return matched.length > 0 ? matched.slice(0, 3) : [];
   }
 
   /**

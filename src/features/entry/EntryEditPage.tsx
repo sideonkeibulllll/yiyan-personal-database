@@ -329,15 +329,16 @@ export function EntryEditPage() {
         .map(t => t.name);
       const customPrompt = settings.ai.smartTag?.tagSuggestPrompt;
       const suggested = await ai.suggestTagsWithRecent(content, recentTagNames, customPrompt);
-      // 自动添加推荐的标签
+      // b.8: 只从已有标签中选取，不创建新标签
       for (const tagName of suggested) {
-        let tag = allTags.find(t => t.name === tagName);
-        if (!tag) {
-          tag = await addTag(tagName);
-        }
+        const tag = allTags.find(t => t.name === tagName);
+        // 只选中已有标签，不创建
         if (tag && !selectedTagIds.includes(tag.id)) {
           setSelectedTagIds(prev => [...prev, tag.id]);
         }
+      }
+      if (suggested.length === 0) {
+        alert('没有找到匹配的已有标签');
       }
     } catch (err) {
       console.error('智能标签失败:', err);
@@ -362,20 +363,18 @@ export function EntryEditPage() {
       ai.setConfig(settings.ai);
       const existingGroupNames = allGroups.map(g => g.name);
       const suggestedGroups = await ai.suggestGroups(content, existingGroupNames);
-      // 如果推荐了已有的组，自动选中
+      // b.8: 只从已有组中选取，不创建新组
+      let matched = false;
       for (const groupName of suggestedGroups) {
         const existing = allGroups.find(g => g.name === groupName);
         if (existing) {
           setGroupId(existing.id);
+          matched = true;
           break;
         }
       }
-      // 如果没有匹配到已有组，创建第一个推荐的组
-      if (!groupId && suggestedGroups.length > 0) {
-        const db = await getDatabase();
-        const newGroup = await db.createGroup(suggestedGroups[0]);
-        setAllGroups(prev => [...prev, newGroup]);
-        setGroupId(newGroup.id);
+      if (!matched) {
+        alert('没有找到匹配的已有分组');
       }
     } catch (err) {
       console.error('智能组失败:', err);

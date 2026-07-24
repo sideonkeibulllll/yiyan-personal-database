@@ -12,6 +12,7 @@ import { useTodoTagStore } from '@/stores/todoTagStore';
 import { BottomNav } from '@/components/BottomNav';
 import { getTodoDatabase } from '@/services/todoDatabase';
 import { pickImages, saveImageForTodo, readTodoThumbAsSrc, deleteTodoAttachmentFiles, deleteAllTodoAttachments } from '@/services/todoAttachmentService';
+import { getTodoAttachments as loadTodoAttachmentsMeta, appendTodoAttachment, removeTodoAttachment, clearTodoAttachments } from '@/services/todoAttachmentsMeta';
 import type { Todo, TodoAttachment } from '@/types';
 import './TodoEditPage.css';
 
@@ -91,13 +92,14 @@ export function TodoEditPage() {
         setEndTime(todo.endTime);
         setIsToday(todo.isToday);
         setSelectedTagIds(todo.tagIds || []);
-        // c: 加载附件
-        if (todo.attachments) {
-          setAttachments(todo.attachments);
+        // c: 加载附件（从 localStorage 元数据）
+        const loadedAtts = loadTodoAttachmentsMeta(todo.id);
+        if (loadedAtts.length > 0) {
+          setAttachments(loadedAtts);
           todoIdRef.current = todo.id;
           // 异步加载缩略图
           const srcs: Record<string, string> = {};
-          for (const att of todo.attachments) {
+          for (const att of loadedAtts) {
             const src = await readTodoThumbAsSrc(att.thumbPath);
             if (src) srcs[att.id] = src;
           }
@@ -163,6 +165,10 @@ export function TodoEditPage() {
       if (attachments.length > 0) {
         await deleteAllTodoAttachments(attachments);
       }
+      // c: 清除 localStorage 中的附件元数据
+      if (id) {
+        clearTodoAttachments(id);
+      }
       await deleteTodo(id);
       navigate('/todo');
     } catch (err) {
@@ -181,31 +187,16 @@ export function TodoEditPage() {
       const images = await pickImages(9);
       for (const img of images) {
         const att = await saveImageForTodo(tempId, img);
-        // 如果是已有待办，保存到数据库；如果是新待办，先放内存
-        if (id && id !== 'new') {
-          const db = await getTodoDatabase();
-          // 尝试保存附件到数据库（如果数据库支持）
-          try {
-            const fullAtt = await (db as any).createTodoAttachment?.(id, att);
-            if (fullAtt) {
-              setAttachments(prev => [...prev, fullAtt]);
-              const src = await readTodoThumbAsSrc(fullAtt.thumbPath);
-              if (src) setThumbSrcs(prev => ({ ...prev, [fullAtt.id]: src }));
-            }
-          } catch {
-            // 数据库不支持附件，暂存内存
-            const tempAtt: TodoAttachment = { ...att, id: `att_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, todoId: tempId };
-            setAttachments(prev => [...prev, tempAtt]);
-            const src = await readTodoThumbAsSrc(tempAtt.thumbPath);
-            if (src) setThumbSrcs(prev => ({ ...prev, [tempAtt.id]: src }));
-          }
-        } else {
-          // 新待办，暂存内存
-          const tempAtt: TodoAttachment = { ...att, id: `att_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, todoId: tempId };
-          setAttachments(prev => [...prev, tempAtt]);
-          const src = await readTodoThumbAsSrc(tempAtt.thumbPath);
-          if (src) setThumbSrcs(prev => ({ ...prev, [tempAtt.id]: src }));
-        }
+        // c: 保存附件元数据到 localStorage
+        const fullAtt: TodoAttachment = {
+          ...att,
+          id: `att_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          todoId: tempId,
+        };
+        appendTodoAttachment(tempId, fullAtt);
+        setAttachments(prev => [...prev, fullAtt]);
+        const src = await readTodoThumbAsSrc(fullAtt.thumbPath);
+        if (src) setThumbSrcs(prev => ({ ...prev, [fullAtt.id]: src }));
       }
     } catch (err) {
       console.error('[TodoEditPage] pickImages failed:', err);
@@ -218,6 +209,7 @@ export function TodoEditPage() {
   const handleDeleteAttachment = useCallback(async (att: TodoAttachment) => {
     if (!confirm('删除这张图片？')) return;
     await deleteTodoAttachmentFiles(att);
+    removeTodoAttachment(att.todoId, att.id);
     setAttachments(prev => prev.filter(a => a.id !== att.id));
     setThumbSrcs(prev => {
       const next = { ...prev };

@@ -965,25 +965,9 @@ export function SettingsPage() {
               />
               <span className="form-hint">AI 返回标签数量下限（默认 1）</span>
             </div>
-            <div className="form-group">
-              <label className="form-label">标签建议提示词</label>
-              <textarea
-                className="form-input glass"
-                style={{ minHeight: '120px', fontFamily: 'monospace', fontSize: '12px', resize: 'vertical' }}
-                value={settings.ai.smartTag?.tagSuggestPrompt ?? ''}
-                onChange={e => { updateAIConfig({
-                  smartTag: {
-                    ...settings.ai.smartTag!,
-                    tagSuggestPrompt: e.target.value,
-                  },
-                }); markDirty('ai.smartTag.tagSuggestPrompt'); }}
-                placeholder="可用变量: {recentTags} {content}"
-                rows={6}
-              />
-              <span className="form-hint">变量: {`{recentTags}`} = 最近标签列表, {`{content}`} = 当前条目内容</span>
-            </div>
+            {/* 标签建议提示词已移至「提示词」面板，避免重复 */}
 
-            {/* e.1: 组建议提示词 */}
+            {/* e.1: 组建议配置（提示词已移至「提示词」面板） */}
             <div className="settings-subsection-title">智能组建议</div>
             <div className="form-group">
               <label className="form-label">最近条目数量</label>
@@ -1002,23 +986,7 @@ export function SettingsPage() {
               />
               <span className="form-hint">用于组建议的最近条目数量（默认 50）</span>
             </div>
-            <div className="form-group">
-              <label className="form-label">组建议提示词</label>
-              <textarea
-                className="form-input glass"
-                style={{ minHeight: '100px', fontFamily: 'monospace', fontSize: '12px', resize: 'vertical' }}
-                value={settings.ai.smartGroup?.groupSuggestPrompt ?? ''}
-                onChange={e => { updateAIConfig({
-                  smartGroup: {
-                    ...settings.ai.smartGroup!,
-                    groupSuggestPrompt: e.target.value,
-                  },
-                }); markDirty('ai.smartGroup.groupSuggestPrompt'); }}
-                placeholder="可用变量: {existingGroups} {recentEntries}"
-                rows={5}
-              />
-              <span className="form-hint">变量: {`{existingGroups}`} = 已有分组, {`{recentEntries}`} = 最近条目</span>
-            </div>
+            {/* 组建议提示词已移至「提示词」面板，避免重复 */}
 
             {/* 连线建议配置 */}
             <div className="settings-subsection-title">连线建议</div>
@@ -1944,25 +1912,7 @@ export function SettingsPage() {
               />
             </div>
 
-            <div className="form-group">
-              <label className="form-label">GLM 模型名称</label>
-              <input
-                type="text"
-                className="form-input glass"
-                value={settings.ai.glm?.model ?? 'glm-4-flash'}
-                onChange={e => {
-                  updateAIConfig({
-                    glm: {
-                      ...settings.ai.glm!,
-                      model: e.target.value,
-                    },
-                  });
-                  markDirty('ai.glm.model');
-                }}
-                placeholder="glm-4-flash"
-              />
-              <span className="form-hint">推荐使用 glm-4-flash（免费额度大、速度快）</span>
-            </div>
+            {/* d: GLM 模型名称已移除，使用默认 glm-4-flash */}
 
             <div className="form-group">
               <label className="form-label">GLM API Base URL</label>

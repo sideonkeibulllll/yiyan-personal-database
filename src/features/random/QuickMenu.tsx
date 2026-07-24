@@ -192,17 +192,16 @@ export function QuickMenu({
   // === 全局"预备"内存：跨页面传递的临时条目 ID 列表 ===
   const PREPARED_KEY = '__yiyan_prepared_entry_ids__';
 
-  // b.5: 添加预备 — 对接 ChatPage 数据选择器，添加后自动选中
+  // b.5: 添加预备 — 对接 ChatPage 数据选择器，关闭快捷操作（不跳转）
   const handleAddPrepare = useCallback(() => {
     const prepared: string[] = (window as any)[PREPARED_KEY] || [];
     if (!prepared.includes(entry.id)) {
       prepared.push(entry.id);
       (window as any)[PREPARED_KEY] = prepared;
     }
-    // 跳转到 Chat 页面，并标记从预备列表来
-    navigate(`/chat?from=random`);
+    // 关闭快捷操作，不跳转到 Chat 页面
     onClose();
-  }, [entry.id, onClose, navigate]);
+  }, [entry.id, onClose]);
 
   // b.6: 就此内容谈话 — 跳到 AI 页面并选中数据（不单开一页）
   const handleStartChat = useCallback(() => {
@@ -211,18 +210,18 @@ export function QuickMenu({
     onClose();
   }, [entry.id, onClose, navigate]);
 
-  // b.7: 转为待办 — 创建后选项变为「编辑新建的待办」
+  // b.7: 转为待办 — 创建后菜单项变为「编辑新建的待办」（不关闭菜单）
   const handleConvertToTodo = useCallback(async () => {
     const today = new Date();
     const folderDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-    const todoId = await addTodo({
+    const todo = await addTodo({
       title: entry.content.slice(0, 80) + (entry.content.length > 80 ? '...' : ''),
       note: entry.content,
       folderDate,
       isToday: true,
     });
-    // 设置创建的待办 ID，菜单项变为「编辑新建的待办」
-    setCreatedTodoId(todoId.id);
+    // 设置创建的待办 ID，菜单项变为「编辑新建的待办」（保持菜单打开）
+    setCreatedTodoId(todo.id);
   }, [entry.id, entry.content, addTodo]);
 
   // b.7: 编辑新建的待办
@@ -295,9 +294,14 @@ export function QuickMenu({
                   onClick={() => {
                     if (item.action) {
                       item.action();
-                      // 详情面板已移除，只有组标签和 AI 对话切换面板
-                      if (index !== 2 && index !== 4) {
+                      // 只有需要关闭菜单的操作才关闭：编辑标签(0)、星标(1)、查看连线(3)
+                      // 组标签(2)、AI对话(4)、转为待办(5/编辑待办) 不关闭
+                      if (index === 0 || index === 1 || index === 3) {
                         onClose();
+                      }
+                      // 编辑详情也关闭
+                      if (item.label === '编辑详情') {
+                        // onEditInfo 回调中已调用 onClose
                       }
                     }
                   }}
@@ -399,7 +403,7 @@ export function QuickMenu({
                 <span className="ai-chat-option-icon"><PaperclipIcon /></span>
                 <div className="ai-chat-option-text">
                   <div className="ai-chat-option-title">添加预备</div>
-                  <div className="ai-chat-option-desc">存入内存，跳转到 AI 页面后自动选中</div>
+                  <div className="ai-chat-option-desc">存入预备列表，下次打开 AI 对话时自动选中</div>
                 </div>
               </button>
             </div>

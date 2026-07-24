@@ -361,15 +361,17 @@ export function HomePage() {
           setIsUploading(true);
           try {
             const { saveImageForTodo } = await import('@/services/todoAttachmentService');
+            const { appendTodoAttachment } = await import('@/services/todoAttachmentsMeta');
             const { getTodoDatabase } = await import('@/services/todoDatabase');
             const db = await getTodoDatabase();
             for (let i = 0; i < pendingImages.length; i++) {
               const att = await saveImageForTodo(todo.id, pendingImages[i]);
-              try {
-                await (db as any).createTodoAttachment?.(todo.id, att);
-              } catch (e) {
-                console.warn('[HomePage] 保存待办附件到数据库失败:', e);
-              }
+              const fullAtt = {
+                ...att,
+                id: `att_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 8)}`,
+                todoId: todo.id,
+              };
+              appendTodoAttachment(todo.id, fullAtt);
             }
           } catch (e) {
             console.error('[HomePage] 待办附件保存失败:', e);

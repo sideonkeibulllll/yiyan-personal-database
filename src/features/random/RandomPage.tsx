@@ -8,6 +8,7 @@ import { useEntryStore } from '@/stores/entryStore';
 import { useTagStore } from '@/stores/tagStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useTodoStore } from '@/stores/todoStore';
+import { getDatabase } from '@/services/database';
 import { weightedRandomSelect, filterEntries } from '@/services/random';
 import { BottomNav } from '@/components/BottomNav';
 import { QuickMenu } from './QuickMenu';
@@ -83,6 +84,36 @@ export function RandomPage() {
   // 上次抽取的 id 列表，用于避免连续两屏重复
   const lastIdsRef = useRef<Set<string>>(new Set());
 
+  // a: 快照持久化 — 保存最近一次刷新的 entry id 列表到 localStorage
+  const SNAPSHOT_KEY = '__yiyan_random_snapshot_ids__';
+  const SNAPSHOT_ENTRIES_KEY = '__yiyan_random_snapshot_entries__';
+
+  // 从快照恢复
+  const restoreSnapshot = useCallback((): Entry[] | null => {
+    try {
+      const idsJson = localStorage.getItem(SNAPSHOT_KEY);
+      const entriesJson = localStorage.getItem(SNAPSHOT_ENTRIES_KEY);
+      if (idsJson && entriesJson) {
+        const savedEntries: Entry[] = JSON.parse(entriesJson);
+        if (Array.isArray(savedEntries) && savedEntries.length > 0) {
+          const ids: string[] = JSON.parse(idsJson);
+          lastIdsRef.current = new Set(ids);
+          return savedEntries;
+        }
+      }
+    } catch { /* ignore */ }
+    return null;
+  }, []);
+
+  // 保存快照
+  const saveSnapshot = useCallback((entriesToSave: Entry[]) => {
+    try {
+      const ids = entriesToSave.map(e => e.id);
+      localStorage.setItem(SNAPSHOT_KEY, JSON.stringify(ids));
+      localStorage.setItem(SNAPSHOT_ENTRIES_KEY, JSON.stringify(entriesToSave));
+    } catch { /* ignore */ }
+  }, []);
+
   // 每条 entry 的缩略图 src 数组（与 entry.attachments 顺序一致）
   const [thumbSrcsByEntry, setThumbSrcsByEntry] = useState<Record<string, string[]>>({});
   // 图片查看器状态
@@ -153,17 +184,31 @@ export function RandomPage() {
     lastIdsRef.current = new Set(result.map(e => e.id));
 
     setCurrentEntries(result);
+    // a: 保存快照
+    saveSnapshot(result);
     setIsLoading(false);
   }, [entries, filterTagIds, filterStarred, cardsPerPage]);
 
-  // 初始加载
+  // 初始加载 — a: 优先从快照恢复，避免重新进入页面时内容变换
   useEffect(() => {
     if (entries.length > 0) {
+      const restored = restoreSnapshot();
+      if (restored && restored.length > 0) {
+        // 快照恢复成功，但仍需检查这些条目是否还存在
+        const existingIds = new Set(entries.map(e => e.id));
+        const stillValid = restored.filter(e => existingIds.has(e.id));
+        if (stillValid.length === restored.length) {
+          setCurrentEntries(restored);
+          setIsLoading(false);
+          return;
+        }
+      }
+      // 快照不存在或有部分失效，重新抽取
       getRandomEntries();
     } else {
       setIsLoading(false);
     }
-  }, [entries, getRandomEntries]);
+  }, [entries, getRandomEntries, restoreSnapshot]);
 
   // 加载当前批次的缩略图
   useEffect(() => {
@@ -336,8 +381,10 @@ export function RandomPage() {
 
     lastIdsRef.current = new Set(result.map(e => e.id));
     setCurrentEntries(result);
+    // a: 保存快照
+    saveSnapshot(result);
     setIsLoading(false);
-  }, [entries, cardsPerPage]);
+  }, [entries, cardsPerPage, saveSnapshot]);
 
   // 清理长按计时器
   useEffect(() => {
@@ -558,18 +605,53 @@ export function RandomPage() {
         </div>
       )}
 
-      {/* 标签选择器 */}
+      {/* 标签选择器 — b.1: 与录入界面一致的样式和功能 */}
       {showTagSelector && tagSelectorEntry && (
-        <div className="filter-overlay" onClick={() => setShowTagSelector(false)}>
-          <div className="filter-panel glass" onClick={e => e.stopPropagation()}>
+        <div className="home-tag-overlay" onClick={() => setShowTagSelector(false)}>
+          <div className="home-tag-panel glass" onClick={e => e.stopPropagation()}>
             <TagSelector
               selectedTagIds={tagSelectorEntry.tags?.map(t => t.id) || []}
               onSelectionChange={async (tagIds) => {
-                // TODO: 保存标签变更
+                // 保存标签变更到数据库
+                try {
+                  const db = await getDatabase();
+                  // 逐一更新标签关联
+                  const currentTags = tagSelectorEntry.tags?.map(t => t.id) || [];
+                  const toAdd = tagIds.filter(id => !currentTags.includes(id));
+                  const toRemove = currentTags.filter(id => !tagIds.includes(id));
+                  for (const tagId of toAdd) {
+                    await db.addTagToEntry(tagSelectorEntry.id, tagId);
+                  }
+                  for (const tagId of toRemove) {
+                    await db.removeTagFromEntry(tagSelectorEntry.id, tagId);
+                  }
+                  // 更新本地状态
+                  const updatedEntry = { ...tagSelectorEntry, tags: tagIds.map(id => tags.find(t => t.id === id)).filter(Boolean) as any };
+                  setTagSelectorEntry(updatedEntry);
+                  setCurrentEntries(prev => prev.map(e => e.id === updatedEntry.id ? updatedEntry : e));
+                } catch (err) {
+                  console.error('保存标签失败:', err);
+                }
                 setShowTagSelector(false);
               }}
               onClose={() => setShowTagSelector(false)}
+              entryId={tagSelectorEntry.id}
+              entryContent={tagSelectorEntry.content}
             />
+            <div className="home-tag-actions">
+              <button
+                className="home-tag-btn home-tag-cancel"
+                onClick={() => setShowTagSelector(false)}
+              >
+                取消
+              </button>
+              <button
+                className="home-tag-btn home-tag-confirm"
+                onClick={() => setShowTagSelector(false)}
+              >
+                确定
+              </button>
+            </div>
           </div>
         </div>
       )}
