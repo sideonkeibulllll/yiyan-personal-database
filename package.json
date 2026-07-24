@@ -60,7 +60,6 @@
       "output": "release-electron"
     },
     "compression": "normal",
-    "differentialPackage": false,
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
