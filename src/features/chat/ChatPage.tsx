@@ -902,22 +902,38 @@ export function ChatPage() {
       // EntryPickerPanel 的「数据」和「待办」两种模式共用一个 selectedIds 集合，
       // 因此必须同时查询 entry 与 todo 两个数据库，否则待办会被静默丢弃。
       if (pickerSelectedIds.size > 0) {
+        console.log('[ChatPage] pickerSelectedIds:', Array.from(pickerSelectedIds));
         try {
           const db = await getDatabase();
           const todoDb = await getTodoDatabase();
           const pickerEntries: Entry[] = [];
           const pickerTodos: Todo[] = [];
+          const failedIds: string[] = [];
           for (const eid of pickerSelectedIds) {
             // 先查 entry 数据库
-            const e = await db.getEntryById(eid);
-            if (e) {
-              pickerEntries.push(e);
-              continue;
+            try {
+              const e = await db.getEntryById(eid);
+              if (e) {
+                pickerEntries.push(e);
+                continue;
+              }
+            } catch (entryErr) {
+              console.warn('[ChatPage] getEntryById failed for', eid, entryErr);
             }
             // 查不到再查 todo 数据库
-            const t = await todoDb.getTodoById(eid);
-            if (t) pickerTodos.push(t);
+            try {
+              const t = await todoDb.getTodoById(eid);
+              if (t) {
+                pickerTodos.push(t);
+                continue;
+              }
+            } catch (todoErr) {
+              console.warn('[ChatPage] getTodoById failed for', eid, todoErr);
+            }
+            // 两个库都查不到
+            failedIds.push(eid);
           }
+          console.log('[ChatPage] loaded:', { entries: pickerEntries.length, todos: pickerTodos.length, failed: failedIds.length });
           if (pickerEntries.length > 0) {
             const pickerText = pickerEntries.map((e, i) =>
               `[${i + 1}] (ID: ${e.id}) ${e.content}${e.source ? ` [来源: ${e.source}]` : ''}${e.supplement ? ` [补充: ${e.supplement}]` : ''}`
@@ -936,8 +952,14 @@ export function ChatPage() {
             }).join('\n');
             systemPrompt += `\n\n## 用户选择的待办上下文\n用户选择了以下待办事项作为本次对话的参考：\n${todoText}\n`;
           }
+          if (failedIds.length > 0 && pickerEntries.length === 0 && pickerTodos.length === 0) {
+            // 所有数据都加载失败，至少告诉 AI 用户选了东西
+            systemPrompt += `\n\n## 用户选择的数据上下文\n用户选择了 ${failedIds.length} 条数据（ID: ${failedIds.join(', ')}），但数据加载失败。请告知用户数据可能未正确加载。\n`;
+          }
         } catch (err) {
-          console.error('加载选中条目失败:', err);
+          console.error('[ChatPage] 加载选中条目失败:', err);
+          // 即使数据库查询失败，也告诉 AI 用户选了数据
+          systemPrompt += `\n\n## 用户选择的数据上下文\n用户选择了 ${pickerSelectedIds.size} 条数据作为对话参考，但数据加载时发生错误。请告知用户数据可能未正确加载。\n`;
         }
       }
 

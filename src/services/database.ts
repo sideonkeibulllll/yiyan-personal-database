@@ -47,7 +47,14 @@ export async function getDatabase(): Promise<IDatabaseService> {
     }
   }
 
-  await dbInstance.init();
+  try {
+    await dbInstance.init();
+  } catch (err) {
+    // init 失败，清除单例，让下次调用重试
+    console.error('[database] init failed:', err);
+    dbInstance = null;
+    throw err;
+  }
   return dbInstance;
 }
 

@@ -7,6 +7,7 @@ import { Capacitor } from '@capacitor/core';
 import { CapacitorSQLite, SQLiteConnection, SQLiteDBConnection } from '@capacitor-community/sqlite';
 import type { Todo, TodoTag, TodoTemplate, TodoTemplateItem, TodoSearchTimeFilter } from '@/types';
 import type { ITodoDatabaseService } from './types';
+import { getSharedSQLiteConnection } from './sharedSQLite';
 
 class NativeTodoDatabaseService implements ITodoDatabaseService {
   private sqlite: SQLiteConnection;
@@ -20,7 +21,7 @@ class NativeTodoDatabaseService implements ITodoDatabaseService {
       const adapter = (globalThis as any).__ELECTRON_SQLITE__;
       this.sqlite = new adapter.SQLiteConnection();
     } else {
-      this.sqlite = new SQLiteConnection(CapacitorSQLite);
+      this.sqlite = getSharedSQLiteConnection();
     }
   }
 
@@ -48,19 +49,26 @@ class NativeTodoDatabaseService implements ITodoDatabaseService {
 
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        const ret = await this.sqlite.checkConnectionsConsistency();
-        const isConn = (await this.sqlite.isConnection(DB_NAME, false)).result;
-
-        if (ret.result && isConn) {
-          try {
-            this.db = await this.sqlite.retrieveConnection(DB_NAME, false);
-          } catch {
-            this.db = await this.sqlite.createConnection(DB_NAME, false, 'no-encryption', 1, false);
-          }
-        } else {
-          this.db = await this.sqlite.createConnection(DB_NAME, false, 'no-encryption', 1, false);
+        // 快速路径：直接尝试 retrieveConnection
+        try {
+          this.db = await this.sqlite.retrieveConnection(DB_NAME, false);
+          await this.db.open();
+          await this.db.query('SELECT 1 as test');
+          return;
+        } catch {
+          // retrieveConnection 失败，创建新连接
         }
 
+        try {
+          this.db = await this.sqlite.createConnection(DB_NAME, false, 'no-encryption', 1, false);
+        } catch (createErr) {
+          if (String(createErr).includes('already exists')) {
+            await this.sqlite.closeConnection(DB_NAME, false);
+            this.db = await this.sqlite.createConnection(DB_NAME, false, 'no-encryption', 1, false);
+          } else {
+            throw createErr;
+          }
+        }
         await this.db.open();
         await this.db.query('SELECT 1 as test');
         return;
@@ -68,6 +76,11 @@ class NativeTodoDatabaseService implements ITodoDatabaseService {
         console.warn(`[NativeTodoDatabase] initConnection attempt ${attempt + 1} failed:`, err);
         lastError = err;
         this.db = null;
+        try {
+          await this.sqlite.closeConnection(DB_NAME, false);
+        } catch {
+          // 忽略关闭失败
+        }
         if (attempt < 2) await new Promise(r => setTimeout(r, 200 * (attempt + 1)));
       }
     }

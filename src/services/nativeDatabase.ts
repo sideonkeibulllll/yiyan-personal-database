@@ -7,6 +7,7 @@ import { Capacitor } from '@capacitor/core';
 import { CapacitorSQLite, SQLiteConnection, SQLiteDBConnection } from '@capacitor-community/sqlite';
 import type { Entry, Tag, Group, Link, Settings, Attachment } from '@/types';
 import type { IDatabaseService } from './types';
+import { getSharedSQLiteConnection } from './sharedSQLite';
 
 class NativeDatabaseService implements IDatabaseService {
   private sqlite: SQLiteConnection;
@@ -21,7 +22,7 @@ class NativeDatabaseService implements IDatabaseService {
       const adapter = (globalThis as any).__ELECTRON_SQLITE__;
       this.sqlite = new adapter.SQLiteConnection();
     } else {
-      this.sqlite = new SQLiteConnection(CapacitorSQLite);
+      this.sqlite = getSharedSQLiteConnection();
     }
   }
 
@@ -53,30 +54,43 @@ class NativeDatabaseService implements IDatabaseService {
 
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        const ret = await this.sqlite.checkConnectionsConsistency();
-        const isConn = (await this.sqlite.isConnection(DB_NAME, false)).result;
-
-        if (ret.result && isConn) {
-          // 连接已存在，尝试 retrieve
-          try {
-            this.db = await this.sqlite.retrieveConnection(DB_NAME, false);
-          } catch {
-            // retrieve 失败，说明连接状态不一致，重新创建
-            this.db = await this.sqlite.createConnection(DB_NAME, false, 'no-encryption', 1, false);
-          }
-        } else {
-          this.db = await this.sqlite.createConnection(DB_NAME, false, 'no-encryption', 1, false);
+        // 快速路径：直接尝试 retrieveConnection（如果连接已存在）
+        try {
+          this.db = await this.sqlite.retrieveConnection(DB_NAME, false);
+          await this.db.open();
+          await this.db.query('SELECT 1 as test');
+          return; // 成功
+        } catch {
+          // retrieveConnection 失败，说明连接不存在或不一致，继续创建新连接
         }
 
+        // 创建新连接
+        try {
+          this.db = await this.sqlite.createConnection(DB_NAME, false, 'no-encryption', 1, false);
+        } catch (createErr) {
+          // 如果连接已存在（原生层有但 JS 层没有），先关闭再重建
+          if (String(createErr).includes('already exists')) {
+            await this.sqlite.closeConnection(DB_NAME, false);
+            this.db = await this.sqlite.createConnection(DB_NAME, false, 'no-encryption', 1, false);
+          } else {
+            throw createErr;
+          }
+        }
         await this.db.open();
 
-        // 验证连接是否真的可用（执行一个简单查询）
+        // 验证连接是否真的可用
         await this.db.query('SELECT 1 as test');
         return; // 成功
       } catch (err) {
         console.warn(`[NativeDatabase] initConnection attempt ${attempt + 1} failed:`, err);
         lastError = err;
         this.db = null;
+        // 尝试关闭可能残留的连接
+        try {
+          await this.sqlite.closeConnection(DB_NAME, false);
+        } catch {
+          // 忽略关闭失败
+        }
         // 短暂等待后重试
         if (attempt < 2) await new Promise(r => setTimeout(r, 200 * (attempt + 1)));
       }

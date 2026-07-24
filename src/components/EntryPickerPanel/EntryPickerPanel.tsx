@@ -8,7 +8,7 @@
  * - 第三块的点选也会触发关联更新（链式）
  * - 单行卡片形式，长按展开完整内容
  */
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { getDatabase } from '@/services/database';
 import { getTodoDatabase } from '@/services/todoDatabase';
 import type { Entry, Todo } from '@/types';
@@ -160,7 +160,7 @@ function EntryCard({
 }
 
 export function EntryPickerPanel({
-  selectedIds,
+  selectedIds: initialSelectedIds,
   onSelectionChange,
   onClose,
   initialEntryId,
@@ -187,6 +187,30 @@ export function EntryPickerPanel({
   // 关联数据的筛选选项（多条 tag/组时展示）
   const [relatedFilterOptions, setRelatedFilterOptions] = useState<{ type: 'tag' | 'group'; id: string; name: string }[]>([]);
   const [activeRelatedFilter, setActiveRelatedFilter] = useState<string | null>(null);
+
+  // === 分开维护数据和待办的选中状态 ===
+  const [entrySelectedIds, setEntrySelectedIds] = useState<Set<string>>(() => new Set(initialSelectedIds));
+  const [todoSelectedIds, setTodoSelectedIds] = useState<Set<string>>(() => new Set());
+
+  // 合并的只读视图（供过滤关联列表等需要全部选中ID的场景使用）
+  const selectedIds = useMemo(() => {
+    const merged = new Set<string>();
+    entrySelectedIds.forEach(id => merged.add(id));
+    todoSelectedIds.forEach(id => merged.add(id));
+    return merged;
+  }, [entrySelectedIds, todoSelectedIds]);
+
+  const totalSelected = selectedIds.size;
+  const entrySelectedCount = entrySelectedIds.size;
+  const todoSelectedCount = todoSelectedIds.size;
+
+  // 同步合并 Set 到父组件
+  const syncToParent = useCallback(() => {
+    const merged = new Set<string>();
+    entrySelectedIds.forEach(id => merged.add(id));
+    todoSelectedIds.forEach(id => merged.add(id));
+    onSelectionChange(merged);
+  }, [entrySelectedIds, todoSelectedIds, onSelectionChange]);
 
   /** 搜索条目 → 刷新第二块 */
   const handleSearch = useCallback(async () => {
@@ -386,6 +410,11 @@ export function EntryPickerPanel({
     }
   }, [initialEntryId, loadRelated]);
 
+  // === 选中状态变化时同步到父组件 ===
+  useEffect(() => {
+    syncToParent();
+  }, [syncToParent]);
+
   // === 修复 1：selectedIds 变化时重新过滤关联列表 ===
   useEffect(() => {
     if (currentEntryId) {
@@ -396,9 +425,9 @@ export function EntryPickerPanel({
   /** 点击数据块中的条目 */
   const handleDataEntryClick = useCallback((entryId: string) => {
     if (!multiSelect) {
-      const newSet = new Set<string>();
-      newSet.add(entryId);
-      onSelectionChange(newSet);
+      // 单选模式：只选中当前条目，清空另一模式的选中
+      setEntrySelectedIds(pickerMode === 'entry' ? new Set([entryId]) : new Set());
+      setTodoSelectedIds(pickerMode === 'todo' ? new Set([entryId]) : new Set());
       setCurrentEntryId(entryId);
       if (pickerMode === 'entry') {
         loadRelated(entryId);
@@ -408,43 +437,50 @@ export function EntryPickerPanel({
       return;
     }
 
-    // 多选模式
-    const newSet = new Set(selectedIds);
-    if (newSet.has(entryId)) {
-      newSet.delete(entryId);
+    // 多选模式：根据当前模式修改对应的 Set
+    if (pickerMode === 'entry') {
+      setEntrySelectedIds(prev => {
+        const newSet = new Set(prev);
+        if (newSet.has(entryId)) newSet.delete(entryId);
+        else newSet.add(entryId);
+        return newSet;
+      });
     } else {
-      newSet.add(entryId);
+      setTodoSelectedIds(prev => {
+        const newSet = new Set(prev);
+        if (newSet.has(entryId)) newSet.delete(entryId);
+        else newSet.add(entryId);
+        return newSet;
+      });
     }
-    onSelectionChange(newSet);
     setCurrentEntryId(entryId);
     if (pickerMode === 'entry') {
       loadRelated(entryId);
     } else {
       loadTodoRelated(entryId);
     }
-  }, [multiSelect, selectedIds, onSelectionChange, loadRelated, pickerMode]);
+  }, [multiSelect, pickerMode, loadRelated, loadTodoRelated]);
 
   /** 点击关联块中的条目 */
   const handleRelatedEntryClick = useCallback((entryId: string) => {
     if (!multiSelect) {
-      const newSet = new Set<string>();
-      newSet.add(entryId);
-      onSelectionChange(newSet);
+      setEntrySelectedIds(new Set([entryId]));
+      setTodoSelectedIds(new Set());
       setCurrentEntryId(entryId);
       loadRelated(entryId);
       return;
     }
 
-    const newSet = new Set(selectedIds);
-    if (newSet.has(entryId)) {
-      newSet.delete(entryId);
-    } else {
-      newSet.add(entryId);
-    }
-    onSelectionChange(newSet);
+    // 关联条目总是 entry 类型
+    setEntrySelectedIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(entryId)) newSet.delete(entryId);
+      else newSet.add(entryId);
+      return newSet;
+    });
     setCurrentEntryId(entryId);
     loadRelated(entryId);
-  }, [multiSelect, selectedIds, onSelectionChange, loadRelated]);
+  }, [multiSelect, loadRelated]);
 
   return (
     <div className="entry-picker-overlay" onClick={onClose}>
@@ -498,21 +534,25 @@ export function EntryPickerPanel({
                   const allIds = pickerMode === 'todo'
                     ? dataTodos.map(t => t.id)
                     : dataEntries.map(e => e.id);
-                  const newSet = new Set(selectedIds);
-                  // 检查是否已全部选中，若全选则取消全选
-                  const allSelected = allIds.every(id => newSet.has(id));
+                  const currentSet = pickerMode === 'todo' ? todoSelectedIds : entrySelectedIds;
+                  const allSelected = allIds.every(id => currentSet.has(id));
+                  const newSet = new Set(currentSet);
                   if (allSelected) {
                     allIds.forEach(id => newSet.delete(id));
                   } else {
                     allIds.forEach(id => newSet.add(id));
                   }
-                  onSelectionChange(newSet);
+                  if (pickerMode === 'todo') {
+                    setTodoSelectedIds(newSet);
+                  } else {
+                    setEntrySelectedIds(newSet);
+                  }
                   // 注意：不刷新关联数据
                 }}
               >
                 {pickerMode === 'todo'
-                  ? (dataTodos.every(t => selectedIds.has(t.id)) ? '取消全选' : '全选')
-                  : (dataEntries.every(e => selectedIds.has(e.id)) ? '取消全选' : '全选')
+                  ? (dataTodos.every(t => todoSelectedIds.has(t.id)) ? '取消全选' : '全选')
+                  : (dataEntries.every(e => entrySelectedIds.has(e.id)) ? '取消全选' : '全选')
                 }
               </button>
             )}
@@ -525,12 +565,12 @@ export function EntryPickerPanel({
                 dataTodos.map(todo => (
                   <div
                     key={todo.id}
-                    className={`ep-card ${selectedIds.has(todo.id) ? 'selected' : ''}`}
+                    className={`ep-card ${todoSelectedIds.has(todo.id) ? 'selected' : ''}`}
                     onClick={() => handleDataEntryClick(todo.id)}
                   >
                     <div className="ep-card-main">
-                      <div className={`ep-card-checkbox ${selectedIds.has(todo.id) ? 'checked' : ''}`}>
-                        {selectedIds.has(todo.id) && '✓'}
+                      <div className={`ep-card-checkbox ${todoSelectedIds.has(todo.id) ? 'checked' : ''}`}>
+                        {todoSelectedIds.has(todo.id) && '✓'}
                       </div>
                       <div className="ep-card-text">{todo.title}</div>
                       {todo.startTime && <span className="ep-card-date">{formatTimeShort(todo.startTime)}</span>}
@@ -546,7 +586,7 @@ export function EntryPickerPanel({
                   <EntryCard
                     key={entry.id}
                     entry={entry}
-                    isSelected={selectedIds.has(entry.id)}
+                    isSelected={entrySelectedIds.has(entry.id)}
                     onToggle={() => handleDataEntryClick(entry.id)}
                   />
                 ))
@@ -568,17 +608,17 @@ export function EntryPickerPanel({
                   className="ep-select-all-btn"
                   onClick={() => {
                     const allIds = relatedEntries.map(e => e.id);
-                    const newSet = new Set(selectedIds);
+                    const newSet = new Set(entrySelectedIds);
                     const allSelected = allIds.every(id => newSet.has(id));
                     if (allSelected) {
                       allIds.forEach(id => newSet.delete(id));
                     } else {
                       allIds.forEach(id => newSet.add(id));
                     }
-                    onSelectionChange(newSet);
+                    setEntrySelectedIds(newSet);
                   }}
                 >
-                  {relatedEntries.every(e => selectedIds.has(e.id)) ? '取消全选' : '全选'}
+                  {relatedEntries.every(e => entrySelectedIds.has(e.id)) ? '取消全选' : '全选'}
                 </button>
               )}
             </div>
@@ -600,7 +640,7 @@ export function EntryPickerPanel({
                   <EntryCard
                     key={entry.id}
                     entry={entry}
-                    isSelected={selectedIds.has(entry.id)}
+                    isSelected={entrySelectedIds.has(entry.id)}
                     onToggle={() => handleRelatedEntryClick(entry.id)}
                   />
                 ))
@@ -623,17 +663,17 @@ export function EntryPickerPanel({
                   className="ep-select-all-btn"
                   onClick={() => {
                     const allIds = relatedEntries.map(e => e.id);
-                    const newSet = new Set(selectedIds);
+                    const newSet = new Set(entrySelectedIds);
                     const allSelected = allIds.every(id => newSet.has(id));
                     if (allSelected) {
                       allIds.forEach(id => newSet.delete(id));
                     } else {
                       allIds.forEach(id => newSet.add(id));
                     }
-                    onSelectionChange(newSet);
+                    setEntrySelectedIds(newSet);
                   }}
                 >
-                  {relatedEntries.every(e => selectedIds.has(e.id)) ? '取消全选' : '全选'}
+                  {relatedEntries.every(e => entrySelectedIds.has(e.id)) ? '取消全选' : '全选'}
                 </button>
               )}
             </div>
@@ -670,7 +710,7 @@ export function EntryPickerPanel({
                     <EntryCard
                       key={entry.id}
                       entry={entry}
-                      isSelected={selectedIds.has(entry.id)}
+                      isSelected={entrySelectedIds.has(entry.id)}
                       onToggle={() => handleRelatedEntryClick(entry.id)}
                     />
                   ))
@@ -683,9 +723,14 @@ export function EntryPickerPanel({
 
         {/* 底部 */}
         <div className="ep-footer">
-          <span className="ep-selected-count">已选 {selectedIds.size} 条</span>
+          <span className="ep-selected-count">
+            已选 {totalSelected} 条{entrySelectedCount > 0 && ` (数据${entrySelectedCount})`}{todoSelectedCount > 0 && ` (待办${todoSelectedCount})`}
+          </span>
           <div className="ep-footer-actions">
-            <button className="ep-footer-btn ep-clear-btn" onClick={() => onSelectionChange(new Set())}>
+            <button className="ep-footer-btn ep-clear-btn" onClick={() => {
+              setEntrySelectedIds(new Set());
+              setTodoSelectedIds(new Set());
+            }}>
               清空
             </button>
             <button className="ep-footer-btn ep-confirm-btn" onClick={onClose}>

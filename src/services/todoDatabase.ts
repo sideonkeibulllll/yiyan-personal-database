@@ -40,7 +40,13 @@ export async function getTodoDatabase(): Promise<ITodoDatabaseService> {
     }
   }
 
-  await todoDbInstance.init();
+  try {
+    await todoDbInstance.init();
+  } catch (err) {
+    console.error('[todoDatabase] init failed:', err);
+    todoDbInstance = null;
+    throw err;
+  }
   return todoDbInstance;
 }
 
