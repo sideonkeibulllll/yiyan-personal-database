@@ -35,6 +35,11 @@ import { getTodoDatabase } from '@/services/todoDatabase';
 import { EntryPickerPanel } from '@/components/EntryPickerPanel';
 import html2canvas from 'html2canvas';
 import type { Entry, Todo } from '@/types';
+import {
+  loadChatSessions,
+  saveChatSession as saveSessionDb,
+  deleteChatSession as deleteSessionDb,
+} from '@/services/chatSessionService';
 import './ChatPage.css';
 
 /* === SVG Icons === */
@@ -129,18 +134,15 @@ interface SearchSelectedResult {
 }
 
 /* === Storage === */
-const SESSIONS_KEY = 'yiyan_chat_sessions';
+const SESSIONS_KEY = 'yiyan_chat_sessions'; // 旧 key，仅用于兼容性检查
 
-function loadSessions(): ChatSession[] {
+function loadSessionsSync(): ChatSession[] {
+  // 同步加载：仅用于初始化 state，后续 useEffect 会从 DB 重新加载
   try {
     const stored = localStorage.getItem(SESSIONS_KEY);
     if (stored) return JSON.parse(stored);
   } catch { /* ignore */ }
   return [];
-}
-
-function saveSessions(sessions: ChatSession[]): void {
-  try { localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions)); } catch { /* ignore */ }
 }
 
 function createId(): string {
@@ -158,6 +160,8 @@ const MODEL_OPTIONS = [
   { value: '', label: '全局默认' },
   { value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' },
   { value: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash' },
+  // e.4: 添加「智能GLM」选项
+  { value: '__glm_smart__', label: '智能 GLM' },
 ];
 
 /* === Streaming fetch === */
@@ -294,7 +298,7 @@ async function streamChatCompletion(
 export function ChatPage() {
   const settings = useSettingsStore(state => state.settings);
 
-  const [sessions, setSessions] = useState<ChatSession[]>(() => loadSessions());
+  const [sessions, setSessions] = useState<ChatSession[]>(() => loadSessionsSync());
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -336,6 +340,8 @@ export function ChatPage() {
   // 条目选择器面板（上传按钮触发）
   const [entryPickerOpen, setEntryPickerOpen] = useState(false);
   const [pickerSelectedIds, setPickerSelectedIds] = useState<Set<string>>(new Set());
+  // e.2: 「最近」勾选项
+  const [recentPickerEnabled, setRecentPickerEnabled] = useState(false);
   // 从 QuickMenu「就此内容谈话」跳转来的初始条目
   const [pickerInitialEntryId, setPickerInitialEntryId] = useState<string | undefined>(undefined);
   // “特殊状态”返回按钮：指示从其他页面跳入且未完成对话
@@ -369,6 +375,23 @@ export function ChatPage() {
     }
   }, [searchParams]);
 
+  // e.2: 「最近」勾选项 — 自动选中最近 N 条
+  const handleRecentPickerToggle = useCallback(async (enabled: boolean) => {
+    setRecentPickerEnabled(enabled);
+    if (enabled) {
+      const count = settings.ai.recentPickerCount ?? 30;
+      const db = await getDatabase();
+      const allEntries = await db.getAllEntries();
+      const recentIds = allEntries
+        .sort((a, b) => b.createdAt - a.createdAt)
+        .slice(0, count)
+        .map(e => e.id);
+      setPickerSelectedIds(new Set(recentIds));
+    } else {
+      setPickerSelectedIds(new Set());
+    }
+  }, [settings.ai.recentPickerCount]);
+
   // === 任务 2：上传按钮处理 ===
   const handleUploadClick = useCallback(() => {
     setPickerInitialEntryId(undefined);
@@ -392,6 +415,30 @@ export function ChatPage() {
   const currentSession = sessions.find(s => s.id === currentSessionId) || null;
   const messages = currentSession?.messages ?? [];
   const currentModel = currentSession?.model || settings.ai.model || 'deepseek-v4-flash';
+  // e.4: 智能GLM处理
+  const effectiveModel = currentModel === '__glm_smart__' && settings.ai.glm?.enabled
+    ? (settings.ai.glm.model || 'glm-4-flash')
+    : currentModel;
+  const effectiveBaseURL = currentModel === '__glm_smart__' && settings.ai.glm?.enabled
+    ? (settings.ai.glm.baseURL || 'https://open.bigmodel.cn/api/paas/v4')
+    : (settings.ai.baseURL || 'https://api.deepseek.com');
+  const effectiveAPIKey = currentModel === '__glm_smart__' && settings.ai.glm?.enabled
+    ? (settings.ai.glm.apiKey || '')
+    : (settings.ai.apiKey || '');
+
+  // 首次挂载：从数据库异步加载对话历史（覆盖 localStorage 同步初始值）
+  useEffect(() => {
+    let mounted = true;
+    loadChatSessions().then(dbSessions => {
+      if (mounted && dbSessions.length > 0) {
+        setSessions(prev => {
+          // 合并：DB 数据优先，如果没有就用现有的
+          return dbSessions.length > 0 ? dbSessions as unknown as ChatSession[] : prev;
+        });
+      }
+    }).catch(() => {});
+    return () => { mounted = false; };
+  }, []);
 
   // 监听窗口大小
   useEffect(() => {
@@ -571,7 +618,8 @@ export function ChatPage() {
 
   const persistSessions = useCallback((next: ChatSession[]) => {
     setSessions(next);
-    saveSessions(next);
+    // 异步写入数据库（不阻塞 UI）
+    next.forEach(s => saveSessionDb(s).catch(() => {}));
   }, []);
 
   const updateSessionMessages = useCallback((sessionId: string, msgs: ChatMessage[]) => {
@@ -580,7 +628,9 @@ export function ChatPage() {
         ? { ...s, messages: msgs, updatedAt: Date.now() }
         : s
       );
-      saveSessions(next);
+      // 异步写入数据库
+      const updated = next.find(s => s.id === sessionId);
+      if (updated) saveSessionDb(updated).catch(() => {});
       return next;
     });
   }, []);
@@ -628,6 +678,7 @@ export function ChatPage() {
     e.stopPropagation();
     const next = sessions.filter(s => s.id !== id);
     persistSessions(next);
+    deleteSessionDb(id).catch(() => {});
     if (currentSessionId === id) {
       setCurrentSessionId(next[0]?.id ?? null);
     }
@@ -828,7 +879,7 @@ export function ChatPage() {
     const text = input.trim();
     if (!text || isLoading) return;
 
-    if (!settings.ai.apiKey) {
+    if (!effectiveAPIKey) {
       alert('请先在设置页面配置 AI API Key');
       return;
     }
@@ -889,8 +940,24 @@ export function ChatPage() {
     updateSessionMessages(sessionId, currentMsgs);
 
     try {
-      // 构建系统提示
-      let systemPrompt = '你是一个友好的AI助手。';
+      // e.3: 构建系统提示 — 使用 chatSoul 和 dialogueContext 配置
+      let systemPrompt = settings.ai.chatSoul || '你是一个友好的AI助手。';
+
+      // e.2: 如果有对话上下文提示词配置，使用它
+      if (settings.ai.prompts.dialogueContext) {
+        // 简化后的 dialogueContext 仅提供 {currentEntry} {recentEntries} 字段
+        const recentEntries = await (async () => {
+          try {
+            const db = await getDatabase();
+            const all = await db.getAllEntries();
+            return all.sort((a, b) => b.createdAt - a.createdAt).slice(0, 10)
+              .map(e => `- ${e.content.slice(0, 80)}`).join('\n');
+          } catch { return ''; }
+        })();
+        systemPrompt += '\n\n' + settings.ai.prompts.dialogueContext
+          .replace(/\{currentEntry\}/g, '')
+          .replace(/\{recentEntries\}/g, recentEntries);
+      }
 
       // 注意：MCP 工具已改为通过 OpenAI 原生 tools 字段下发，不再注入提示词。
       // 用户启用的工具在下方 buildToolsPayload() 中转为结构化 schema 传给 API。
@@ -1023,9 +1090,9 @@ export function ChatPage() {
         const toolCallAcc = new Map<number, ResolvedToolCall>();
 
         const { finishReason } = await streamChatCompletion(
-          settings.ai.baseURL,
-          settings.ai.apiKey,
-          currentModel,
+          effectiveBaseURL,
+          effectiveAPIKey,
+          effectiveModel,
           loopMessages,
           thinkingEnabled,
           thinkingEnabled ? thinkingEffort : null,
@@ -1522,6 +1589,16 @@ export function ChatPage() {
               <IconUpload />
               <span>数据</span>
             </button>
+
+            {/* e.2: 「最近」勾选项 */}
+            <label className="recent-picker-toggle" title="自动选中最近30条">
+              <input
+                type="checkbox"
+                checked={recentPickerEnabled}
+                onChange={e => handleRecentPickerToggle(e.target.checked)}
+              />
+              <span>最近</span>
+            </label>
 
             {/* 深度思考 */}
             <button

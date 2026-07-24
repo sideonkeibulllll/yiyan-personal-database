@@ -1,6 +1,8 @@
 /**
- * 连线展示页面
+ * 连线展示页面 v2
  * 显示与某条目相关的所有连线
+ * v2 变更：
+ * - b.4: 底部添加「连线建议」按钮，发送最近100条给 AI
  */
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -57,6 +59,10 @@ export function LinkPage() {
   const [isSavingLink, setIsSavingLink] = useState(false);
   const [aiSuggesting, setAiSuggesting] = useState(false);
   const [aiDescription, setAiDescription] = useState('');
+  // b.4: 连线建议状态
+  const [connectionSuggesting, setConnectionSuggesting] = useState(false);
+  const [connectionSuggestions, setConnectionSuggestions] = useState<{ sourceId: string; targetId: string; description: string }[]>([]);
+  const [recentEntries, setRecentEntries] = useState<Entry[]>([]);
 
   // 加载连线数据
   useEffect(() => {
@@ -122,6 +128,86 @@ export function LinkPage() {
       setAiSuggesting(false);
     }
   }, [entry, selectedTarget, settings.ai]);
+
+  // b.4: 连线建议 — 发送最近100条给 AI
+  const handleConnectionSuggestion = useCallback(async () => {
+    if (!settings.ai.apiKey) {
+      alert('请先在设置页面配置 AI API Key');
+      return;
+    }
+    setConnectionSuggesting(true);
+    try {
+      const db = await getDatabase();
+      const count = settings.ai.connectionSuggestion?.recentEntryCount ?? 100;
+      const allEntries = await db.getAllEntries();
+      const recent = allEntries
+        .sort((a, b) => b.createdAt - a.createdAt)
+        .slice(0, count);
+      setRecentEntries(recent);
+
+      // 构建提示词
+      const promptTemplate = settings.ai.connectionSuggestion?.connectionSuggestPrompt ||
+        settings.ai.prompts.connectionSuggestion ||
+        '请分析以下条目，找出可能有关联的条目对。\n返回格式：ID1 → ID2: 关联描述\n\n最近条目列表：\n{entries}';
+      
+      const entriesText = recent.map(e => `[${e.id}] ${e.content.slice(0, 100)}`).join('\n');
+      const prompt = promptTemplate.replace('{entries}', entriesText);
+
+      ai.setConfig(settings.ai);
+      const result = await ai.chat({
+        systemPrompt: '你是一个知识关联发现助手。',
+        userMessage: prompt,
+      });
+
+      // 解析返回结果，格式：ID1 → ID2: 关联描述
+      const suggestions: { sourceId: string; targetId: string; description: string }[] = [];
+      const lines = result.split('\n').filter(l => l.trim());
+      for (const line of lines) {
+        const match = line.match(/\[?([^\]]+)\]?\s*[→>\-]\s*\[?([^\]:]+)\]?\s*:?\s*(.*)/);
+        if (match) {
+          const [, id1, id2, desc] = match;
+          suggestions.push({
+            sourceId: id1.trim(),
+            targetId: id2.trim(),
+            description: (desc || '').trim(),
+          });
+        }
+      }
+      setConnectionSuggestions(suggestions);
+    } catch (e) {
+      console.error('连线建议失败:', e);
+      alert('连线建议失败: ' + (e as Error).message);
+    } finally {
+      setConnectionSuggesting(false);
+    }
+  }, [settings.ai]);
+
+  // b.4: 应用连线建议
+  const handleApplySuggestion = useCallback(async (sourceId: string, targetId: string, description: string) => {
+    try {
+      const db = await getDatabase();
+      // 检查是否已存在
+      const existingLinks = await db.getLinksByEntryId(sourceId);
+      const exists = existingLinks.some(l => l.sourceId === targetId || l.targetId === targetId);
+      if (!exists) {
+        await db.createLink(sourceId, targetId, description);
+        // 重新加载连线
+        if (entryId) {
+          const linkData = await db.getLinksByEntryId(entryId);
+          const linksWithEntries = await Promise.all(
+            linkData.map(async link => {
+              const targetId = link.sourceId === entryId ? link.targetId : link.sourceId;
+              const targetEntry = await db.getEntryById(targetId);
+              return { ...link, targetEntry: targetEntry! };
+            })
+          );
+          setLinks(linksWithEntries.filter(l => l.targetEntry));
+        }
+      }
+    } catch (e) {
+      console.error('应用连线建议失败:', e);
+    }
+  }, [entryId]);
 
   // 保存连线
   const handleSaveLink = useCallback(async () => {
@@ -223,6 +309,45 @@ export function LinkPage() {
               <span className="empty-icon"><IconLink /></span>
               <p className="empty-text">暂无连线</p>
               <p className="empty-hint">在随机浏览或搜索中可以为条目建立连线</p>
+            </div>
+          )}
+        </div>
+
+        {/* b.4: 连线建议按钮 + 建议结果 */}
+        <div className="connection-suggestion-section">
+          <button
+            className="connection-suggest-btn glass"
+            onClick={handleConnectionSuggestion}
+            disabled={connectionSuggesting || !settings.ai.apiKey}
+          >
+            <IconBot />
+            <span>{connectionSuggesting ? 'AI 分析中...' : '连线建议'}</span>
+          </button>
+
+          {connectionSuggestions.length > 0 && (
+            <div className="connection-suggestions">
+              <div className="suggestions-label">AI 发现的潜在关联：</div>
+              {connectionSuggestions.map((s, i) => {
+                const sourceEntry = recentEntries.find(e => e.id === s.sourceId);
+                const targetEntry = recentEntries.find(e => e.id === s.targetId);
+                if (!sourceEntry || !targetEntry) return null;
+                return (
+                  <div key={i} className="suggestion-item glass">
+                    <div className="suggestion-entries">
+                      <span className="suggestion-entry">{sourceEntry.content.slice(0, 60)}</span>
+                      <span className="suggestion-arrow">→</span>
+                      <span className="suggestion-entry">{targetEntry.content.slice(0, 60)}</span>
+                    </div>
+                    <div className="suggestion-desc">{s.description}</div>
+                    <button
+                      className="suggestion-apply-btn"
+                      onClick={() => handleApplySuggestion(s.sourceId, s.targetId, s.description)}
+                    >
+                      创建连线
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

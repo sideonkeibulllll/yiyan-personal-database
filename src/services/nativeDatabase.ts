@@ -6,7 +6,7 @@
 import { Capacitor } from '@capacitor/core';
 import { CapacitorSQLite, SQLiteConnection, SQLiteDBConnection } from '@capacitor-community/sqlite';
 import type { Entry, Tag, Group, Link, Settings, Attachment } from '@/types';
-import type { IDatabaseService } from './types';
+import type { IDatabaseService, ChatSession } from './types';
 import { getSharedSQLiteConnection } from './sharedSQLite';
 
 class NativeDatabaseService implements IDatabaseService {
@@ -181,6 +181,18 @@ class NativeDatabaseService implements IDatabaseService {
         FOREIGN KEY (entry_id) REFERENCES entries(id) ON DELETE CASCADE
       )`,
       `CREATE INDEX IF NOT EXISTS idx_attachments_entry ON attachments(entry_id)`,
+      // 对话历史表（v2.0.0 新增）
+      `CREATE TABLE IF NOT EXISTS chat_sessions (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        messages TEXT NOT NULL,
+        model TEXT,
+        mcp_enabled_tools TEXT,
+        mcp_search_results TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_chat_sessions_updated ON chat_sessions(updated_at DESC)`,
     ];
 
     for (const sql of schemas) {
@@ -244,7 +256,7 @@ class NativeDatabaseService implements IDatabaseService {
     await this.db.run('DELETE FROM entries WHERE id = ?', [id]);
   }
 
-  async searchEntries(keyword: string, options?: { tagIds?: string[]; isStarred?: boolean }): Promise<Entry[]> {
+  async searchEntries(keyword: string, options?: { tagIds?: string[]; isStarred?: boolean; hasAttachment?: boolean }): Promise<Entry[]> {
     if (!this.db) throw new Error('Database not initialized');
     let sql = 'SELECT DISTINCT e.* FROM entries e';
     const conditions: string[] = [];
@@ -256,6 +268,13 @@ class NativeDatabaseService implements IDatabaseService {
     }
     if (keyword) { conditions.push('e.content LIKE ?'); values.push(`%${keyword}%`); }
     if (options?.isStarred !== undefined) { conditions.push('e.is_starred = ?'); values.push(options.isStarred ? 1 : 0); }
+    if (options?.hasAttachment !== undefined) {
+      if (options.hasAttachment) {
+        conditions.push('EXISTS (SELECT 1 FROM attachments a WHERE a.entry_id = e.id)');
+      } else {
+        conditions.push('NOT EXISTS (SELECT 1 FROM attachments a WHERE a.entry_id = e.id)');
+      }
+    }
     if (conditions.length > 0) sql += ' WHERE ' + conditions.join(' AND ');
     sql += ' ORDER BY e.created_at DESC';
     const result = await this.db.query(sql, values);
@@ -475,6 +494,56 @@ class NativeDatabaseService implements IDatabaseService {
       'INSERT OR REPLACE INTO settings (id, data, updated_at) VALUES (1, ?, ?)',
       [data, now]
     );
+  }
+
+  // ==================== 对话历史操作 ====================
+
+  async saveChatSession(session: ChatSession): Promise<void> {
+    if (!this.db) throw new Error('Database not initialized');
+    await this.db.run(
+      `INSERT OR REPLACE INTO chat_sessions (id, title, messages, model, mcp_enabled_tools, mcp_search_results, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        session.id,
+        session.title,
+        JSON.stringify(session.messages),
+        session.model || null,
+        session.mcpEnabledTools ? JSON.stringify(session.mcpEnabledTools) : null,
+        session.mcpSearchResults ? JSON.stringify(session.mcpSearchResults) : null,
+        session.createdAt,
+        session.updatedAt,
+      ],
+    );
+  }
+
+  async getAllChatSessions(): Promise<ChatSession[]> {
+    if (!this.db) throw new Error('Database not initialized');
+    const result = await this.db.query('SELECT * FROM chat_sessions ORDER BY updated_at DESC');
+    if (!result.values) return [];
+    return result.values.map(row => this.rowToChatSession(row));
+  }
+
+  async deleteChatSession(id: string): Promise<void> {
+    if (!this.db) throw new Error('Database not initialized');
+    await this.db.run('DELETE FROM chat_sessions WHERE id = ?', [id]);
+  }
+
+  async deleteAllChatSessions(): Promise<void> {
+    if (!this.db) throw new Error('Database not initialized');
+    await this.db.run('DELETE FROM chat_sessions', []);
+  }
+
+  private rowToChatSession(row: Record<string, unknown>): ChatSession {
+    return {
+      id: row.id as string,
+      title: row.title as string,
+      messages: JSON.parse(row.messages as string),
+      createdAt: row.created_at as number,
+      updatedAt: row.updated_at as number,
+      model: (row.model as string) || undefined,
+      mcpEnabledTools: row.mcp_enabled_tools ? JSON.parse(row.mcp_enabled_tools as string) : undefined,
+      mcpSearchResults: row.mcp_search_results ? JSON.parse(row.mcp_search_results as string) : undefined,
+    };
   }
 
   private generateId(): string {

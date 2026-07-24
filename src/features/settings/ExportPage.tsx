@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import { useEntryStore } from '@/stores/entryStore';
 import { useTagStore } from '@/stores/tagStore';
 import { exportAndDownload, type ExportOptions } from '@/utils/export';
+import { getDatabase } from '@/services/database';
 import { BottomNav } from '@/components/BottomNav';
 import './ExportPage.css';
 
@@ -50,8 +51,17 @@ export function ExportPage() {
   const [scope, setScope] = useState<ExportOptions['scope']>('all');
   const [selectedTagId, setSelectedTagId] = useState<string>('');
   const [includeLinks, setIncludeLinks] = useState(true);
+  const [includeChatSessions, setIncludeChatSessions] = useState(false);
+  const [chatSessionCount, setChatSessionCount] = useState(0);
   const [isExporting, setIsExporting] = useState(false);
   const [showToast, setShowToast] = useState(false);
+
+  // 获取对话会话计数
+  useState(() => {
+    getDatabase().then(db => (db as any).getAllChatSessions?.()).then(sessions => {
+      if (sessions) setChatSessionCount(sessions.length);
+    }).catch(() => {});
+  });
 
   // 计算导出数量
   const getExportCount = useCallback(() => {
@@ -76,6 +86,7 @@ export function ExportPage() {
         scope,
         tagId: scope === 'tag' ? selectedTagId : undefined,
         includeLinks: format === 'json' ? includeLinks : undefined,
+        includeChatSessions: format === 'json' ? includeChatSessions : undefined,
       });
       setShowToast(true);
       setTimeout(() => setShowToast(false), 2000);
@@ -84,7 +95,7 @@ export function ExportPage() {
     } finally {
       setIsExporting(false);
     }
-  }, [format, scope, selectedTagId, includeLinks]);
+  }, [format, scope, selectedTagId, includeLinks, includeChatSessions]);
 
   return (
     <div className="export-page">
@@ -175,6 +186,14 @@ export function ExportPage() {
                 onChange={e => setIncludeLinks(e.target.checked)}
               />
               <span>包含连线数据</span>
+            </label>
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={includeChatSessions}
+                onChange={e => setIncludeChatSessions(e.target.checked)}
+              />
+              <span>包含对话历史 ({chatSessionCount} 个会话)</span>
             </label>
           </section>
         )}

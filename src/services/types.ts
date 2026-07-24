@@ -3,6 +3,18 @@
  */
 import type { Entry, Tag, Group, Link, Settings, Attachment, Todo, TodoTag, TodoTemplate, TodoTemplateItem, TodoSearchTimeFilter } from '@/types';
 
+/** 对话历史会话（v2.0.0 新增） */
+export interface ChatSession {
+  id: string;
+  title: string;
+  messages: unknown[];  // ChatMessage[] 但为避免循环依赖用 unknown[]
+  createdAt: number;
+  updatedAt: number;
+  model?: string;
+  mcpEnabledTools?: string[];
+  mcpSearchResults?: { entryId: string; content: string; source?: string }[];
+}
+
 export interface IDatabaseService {
   init(): Promise<void>;
 
@@ -12,11 +24,11 @@ export interface IDatabaseService {
   getEntryById(id: string): Promise<Entry | null>;
   updateEntry(id: string, updates: Partial<Entry>): Promise<void>;
   deleteEntry(id: string): Promise<void>;
-  searchEntries(keyword: string, options?: { tagIds?: string[]; isStarred?: boolean }): Promise<Entry[]>;
+  searchEntries(keyword: string, options?: { tagIds?: string[]; isStarred?: boolean; hasAttachment?: boolean }): Promise<Entry[]>;
   getRecentEntries(limit: number): Promise<Entry[]>;
 
   // 标签操作
-  createTag(name: string, options?: { isSmart?: boolean; searchCriteria?: { keyword?: string; tagIds?: string[]; isStarred?: boolean } }): Promise<Tag>;
+  createTag(name: string, options?: { isSmart?: boolean; searchCriteria?: { keyword?: string; tagIds?: string[]; isStarred?: boolean; hasAttachment?: boolean } }): Promise<Tag>;
   getAllTags(): Promise<Tag[]>;
   getTagsByEntryId(entryId: string): Promise<Tag[]>;
   addTagToEntry(entryId: string, tagId: string): Promise<void>;
@@ -52,6 +64,12 @@ export interface IDatabaseService {
   // 设置操作
   getSettings(): Promise<Settings | null>;
   saveSettings(settings: Settings): Promise<void>;
+
+  // 对话历史操作（v2.0.0 新增）
+  saveChatSession(session: ChatSession): Promise<void>;
+  getAllChatSessions(): Promise<ChatSession[]>;
+  deleteChatSession(id: string): Promise<void>;
+  deleteAllChatSessions(): Promise<void>;
 }
 
 /**

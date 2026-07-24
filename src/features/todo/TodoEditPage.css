@@ -320,3 +320,76 @@
   margin-left: 2px;
   font-size: 10px;
 }
+
+/* c: 图片附件区域 */
+.todo-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: flex-start;
+}
+
+.todo-attachment-item {
+  position: relative;
+  width: 80px;
+  height: 80px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-primary);
+}
+
+.todo-attachment-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  cursor: pointer;
+}
+
+.todo-attachment-delete {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+  color: white;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.todo-attachment-delete:active {
+  transform: scale(0.85);
+}
+
+.todo-attachment-add {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  width: 80px;
+  height: 80px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-elevated);
+  border: 1px dashed var(--color-border-secondary);
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  font-size: var(--text-xs);
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.todo-attachment-add:active {
+  transform: scale(0.96);
+}
+
+.todo-attachment-add:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

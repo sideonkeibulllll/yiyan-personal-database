@@ -38,6 +38,19 @@ const CloseIcon = () => (
   </svg>
 );
 
+const PaperclipIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 17.93 8.83l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+  </svg>
+);
+
+const PaperclipOffIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 17.93 8.83l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+    <path d="m2 2 20 20"/>
+  </svg>
+);
+
 const LightbulbIcon = () => (
   <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
     <path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/>
@@ -52,6 +65,7 @@ export function SearchPage() {
   const [showToast, setShowToast] = useState(false);
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [filterStarred, setFilterStarred] = useState<boolean | undefined>(undefined);
+  const [filterHasAttachment, setFilterHasAttachment] = useState<boolean | undefined>(undefined);
   const [todoMode, setTodoMode] = useState(false);
   const [todoResults, setTodoResults] = useState<Todo[]>([]);
   const [todoTimeFilter, setTodoTimeFilter] = useState<TodoSearchTimeFilter>('future');
@@ -156,7 +170,7 @@ export function SearchPage() {
       return;
     }
 
-    if (!keyword.trim() && selectedTagIds.length === 0 && filterStarred === undefined) {
+    if (!keyword.trim() && selectedTagIds.length === 0 && filterStarred === undefined && filterHasAttachment === undefined) {
       setResults([]);
       return;
     }
@@ -166,12 +180,13 @@ export function SearchPage() {
       const searchResults = await search(keyword.trim(), {
         tagIds: selectedTagIds.length > 0 ? selectedTagIds : undefined,
         isStarred: filterStarred,
+        hasAttachment: filterHasAttachment,
       });
       setResults(searchResults);
     } finally {
       setIsSearching(false);
     }
-  }, [keyword, selectedTagIds, filterStarred, search, todoMode, todoTimeFilter, searchTodos]);
+  }, [keyword, selectedTagIds, filterStarred, filterHasAttachment, search, todoMode, todoTimeFilter, searchTodos]);
 
   // 防抖搜索
   useEffect(() => {
@@ -214,6 +229,11 @@ export function SearchPage() {
     setFilterStarred(prev => prev === undefined ? true : prev === true ? false : undefined);
   }, []);
 
+  // 切换附件筛选
+  const toggleAttachmentFilter = useCallback(() => {
+    setFilterHasAttachment(prev => prev === undefined ? true : prev === true ? false : undefined);
+  }, []);
+
   // 长按结果项
   const handlePressStart = useCallback((entry: Entry) => {
     const timer = setTimeout(() => {
@@ -250,13 +270,14 @@ export function SearchPage() {
         keyword: keyword.trim() || undefined,
         tagIds: selectedTagIds.length > 0 ? selectedTagIds : undefined,
         isStarred: filterStarred,
+        hasAttachment: filterHasAttachment,
       },
     });
     setSmartTagName('');
     setShowSaveSmartTag(false);
     setShowToast(true);
     setTimeout(() => setShowToast(false), 1500);
-  }, [smartTagName, keyword, selectedTagIds, filterStarred]);
+  }, [smartTagName, keyword, selectedTagIds, filterStarred, filterHasAttachment]);
 
   return (
     <div className="search-page">
@@ -367,6 +388,14 @@ export function SearchPage() {
               <span>{filterStarred === false ? '未星标' : filterStarred ? '已星标' : '全部'}</span>
             </button>
 
+            <button
+              className={`filter-chip ${filterHasAttachment !== undefined ? 'active' : ''}`}
+              onClick={toggleAttachmentFilter}
+            >
+              <span>{filterHasAttachment === false ? <PaperclipOffIcon /> : <PaperclipIcon />}</span>
+              <span>{filterHasAttachment === false ? '无附件' : filterHasAttachment ? '有附件' : '附件'}</span>
+            </button>
+
             {tags.map(tag => (
               <button
                 key={tag.id}
@@ -380,7 +409,7 @@ export function SearchPage() {
         )}
 
         {/* 保存为智能标签 */}
-        {!todoMode && (keyword || selectedTagIds.length > 0 || filterStarred !== undefined) && (
+        {!todoMode && (keyword || selectedTagIds.length > 0 || filterStarred !== undefined || filterHasAttachment !== undefined) && (
           <button
             className="save-smart-tag-btn"
             onClick={() => setShowSaveSmartTag(true)}
@@ -455,7 +484,7 @@ export function SearchPage() {
                 </div>
               </div>
             ))
-          ) : keyword || selectedTagIds.length > 0 || filterStarred !== undefined ? (
+          ) : keyword || selectedTagIds.length > 0 || filterStarred !== undefined || filterHasAttachment !== undefined ? (
             <div className="empty-results">
               <span className="empty-icon"><SearchIcon /></span>
               <p className="empty-text">没有找到相关内容</p>

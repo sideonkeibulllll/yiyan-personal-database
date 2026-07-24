@@ -3,7 +3,7 @@
  * 使用 localStorage 存储，便于开发和测试
  */
 import type { Entry, Tag, Group, Link, Settings, Attachment } from '@/types';
-import type { IDatabaseService } from './types';
+import type { IDatabaseService, ChatSession } from './types';
 
 /** Simple content hash for deduplication */
 function simpleContentHash(content: string): string {
@@ -67,7 +67,7 @@ class WebDatabaseService implements IDatabaseService {
     this.saveAttachmentsToStorage(attachments.filter(a => a.entryId !== id));
   }
 
-  async searchEntries(keyword: string, options?: { tagIds?: string[]; isStarred?: boolean }): Promise<Entry[]> {
+  async searchEntries(keyword: string, options?: { tagIds?: string[]; isStarred?: boolean; hasAttachment?: boolean }): Promise<Entry[]> {
     let entries = this.getEntriesFromStorage();
 
     if (keyword) {
@@ -83,6 +83,11 @@ class WebDatabaseService implements IDatabaseService {
     }
 
     this.fillAttachmentsForEntries(entries);
+
+    if (options?.hasAttachment !== undefined) {
+      entries = entries.filter(e => (e.attachments && e.attachments.length > 0) === options.hasAttachment);
+    }
+
     return entries;
   }
 
@@ -315,6 +320,45 @@ class WebDatabaseService implements IDatabaseService {
 
   async saveSettings(settings: Settings): Promise<void> {
     localStorage.setItem('yiyan_settings', JSON.stringify(settings));
+  }
+
+  // ==================== 对话历史操作 ====================
+
+  async saveChatSession(session: ChatSession): Promise<void> {
+    const sessions = this.getChatSessionsFromStorage();
+    const index = sessions.findIndex(s => s.id === session.id);
+    if (index >= 0) {
+      sessions[index] = session;
+    } else {
+      sessions.unshift(session);
+    }
+    this.saveChatSessionsToStorage(sessions);
+  }
+
+  async getAllChatSessions(): Promise<ChatSession[]> {
+    return this.getChatSessionsFromStorage().sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+
+  async deleteChatSession(id: string): Promise<void> {
+    const sessions = this.getChatSessionsFromStorage().filter(s => s.id !== id);
+    this.saveChatSessionsToStorage(sessions);
+  }
+
+  async deleteAllChatSessions(): Promise<void> {
+    this.saveChatSessionsToStorage([]);
+  }
+
+  private getChatSessionsFromStorage(): ChatSession[] {
+    try {
+      const data = localStorage.getItem('yiyan_chat_sessions_db');
+      return data ? JSON.parse(data) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  private saveChatSessionsToStorage(sessions: ChatSession[]): void {
+    try { localStorage.setItem('yiyan_chat_sessions_db', JSON.stringify(sessions)); } catch { /* ignore */ }
   }
 
   // ==================== 存储工具 ====================

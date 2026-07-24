@@ -1,14 +1,18 @@
 /**
- * 待办编辑页
+ * 待办编辑页 v2
  * 编辑字段：标题、开始时间、结束时间、今日处理、标签、备注
+ * v2 变更：
+ * - c: 支持添加图片附件
+ * - c: 待办删除时图片附件不保留
  */
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTodoStore } from '@/stores/todoStore';
 import { useTodoTagStore } from '@/stores/todoTagStore';
 import { BottomNav } from '@/components/BottomNav';
 import { getTodoDatabase } from '@/services/todoDatabase';
-import type { Todo } from '@/types';
+import { pickImages, saveImageForTodo, readTodoThumbAsSrc, deleteTodoAttachmentFiles, deleteAllTodoAttachments } from '@/services/todoAttachmentService';
+import type { Todo, TodoAttachment } from '@/types';
 import './TodoEditPage.css';
 
 /** 格式化时间戳为 datetime-local input 值 */
@@ -44,6 +48,11 @@ export function TodoEditPage() {
   const [showTagEditor, setShowTagEditor] = useState(false);
   const [newTagName, setNewTagName] = useState('');
   const [newTagColor, setNewTagColor] = useState('#f76707');
+  // c: 图片附件状态
+  const [attachments, setAttachments] = useState<TodoAttachment[]>([]);
+  const [thumbSrcs, setThumbSrcs] = useState<Record<string, string>>({});
+  const [isPickingImages, setIsPickingImages] = useState(false);
+  const todoIdRef = useRef<string | null>(null);
 
   const updateTodo = useTodoStore(state => state.updateTodo);
   const addTodo = useTodoStore(state => state.addTodo);
@@ -82,6 +91,18 @@ export function TodoEditPage() {
         setEndTime(todo.endTime);
         setIsToday(todo.isToday);
         setSelectedTagIds(todo.tagIds || []);
+        // c: 加载附件
+        if (todo.attachments) {
+          setAttachments(todo.attachments);
+          todoIdRef.current = todo.id;
+          // 异步加载缩略图
+          const srcs: Record<string, string> = {};
+          for (const att of todo.attachments) {
+            const src = await readTodoThumbAsSrc(att.thumbPath);
+            if (src) srcs[att.id] = src;
+          }
+          if (!cancelled) setThumbSrcs(srcs);
+        }
       } catch (err) {
         console.error('[TodoEditPage] load todo failed:', err);
       } finally {
@@ -133,18 +154,77 @@ export function TodoEditPage() {
     else setEndTime(ts);
   }, []);
 
-  // 删除整条待办
+  // c: 删除待办时同时删除图片附件
   const handleDelete = useCallback(async () => {
     if (isNew || !id) return;
     if (!confirm('确定删除这条待办吗？')) return;
     try {
+      // c: 删除所有附件文件
+      if (attachments.length > 0) {
+        await deleteAllTodoAttachments(attachments);
+      }
       await deleteTodo(id);
       navigate('/todo');
     } catch (err) {
       console.error('删除失败:', err);
       alert('删除失败: ' + (err instanceof Error ? err.message : '未知错误'));
     }
-  }, [isNew, id, deleteTodo, navigate]);
+  }, [isNew, id, attachments, deleteTodo, navigate]);
+
+  // c: 选择图片附件
+  const handlePickImages = useCallback(async () => {
+    setIsPickingImages(true);
+    try {
+      // 为新待办生成临时 ID，保存后迁移
+      const tempId = id && id !== 'new' ? id : `temp_${Date.now()}`;
+      todoIdRef.current = tempId;
+      const images = await pickImages(9);
+      for (const img of images) {
+        const att = await saveImageForTodo(tempId, img);
+        // 如果是已有待办，保存到数据库；如果是新待办，先放内存
+        if (id && id !== 'new') {
+          const db = await getTodoDatabase();
+          // 尝试保存附件到数据库（如果数据库支持）
+          try {
+            const fullAtt = await (db as any).createTodoAttachment?.(id, att);
+            if (fullAtt) {
+              setAttachments(prev => [...prev, fullAtt]);
+              const src = await readTodoThumbAsSrc(fullAtt.thumbPath);
+              if (src) setThumbSrcs(prev => ({ ...prev, [fullAtt.id]: src }));
+            }
+          } catch {
+            // 数据库不支持附件，暂存内存
+            const tempAtt: TodoAttachment = { ...att, id: `att_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, todoId: tempId };
+            setAttachments(prev => [...prev, tempAtt]);
+            const src = await readTodoThumbAsSrc(tempAtt.thumbPath);
+            if (src) setThumbSrcs(prev => ({ ...prev, [tempAtt.id]: src }));
+          }
+        } else {
+          // 新待办，暂存内存
+          const tempAtt: TodoAttachment = { ...att, id: `att_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, todoId: tempId };
+          setAttachments(prev => [...prev, tempAtt]);
+          const src = await readTodoThumbAsSrc(tempAtt.thumbPath);
+          if (src) setThumbSrcs(prev => ({ ...prev, [tempAtt.id]: src }));
+        }
+      }
+    } catch (err) {
+      console.error('[TodoEditPage] pickImages failed:', err);
+    } finally {
+      setIsPickingImages(false);
+    }
+  }, [id]);
+
+  // c: 删除附件
+  const handleDeleteAttachment = useCallback(async (att: TodoAttachment) => {
+    if (!confirm('删除这张图片？')) return;
+    await deleteTodoAttachmentFiles(att);
+    setAttachments(prev => prev.filter(a => a.id !== att.id));
+    setThumbSrcs(prev => {
+      const next = { ...prev };
+      delete next[att.id];
+      return next;
+    });
+  }, []);
 
   // 创建新标签
   const handleCreateTag = useCallback(async () => {
@@ -370,6 +450,39 @@ export function TodoEditPage() {
               placeholder="添加备注..."
               rows={3}
             />
+          </div>
+
+          {/* c: 图片附件 */}
+          <div className="form-group">
+            <label className="form-label">图片附件</label>
+            <div className="todo-attachments">
+              {attachments.map(att => (
+                <div key={att.id} className="todo-attachment-item">
+                  {thumbSrcs[att.id] && (
+                    <img src={thumbSrcs[att.id]} alt="附件" className="todo-attachment-thumb" />
+                  )}
+                  <button
+                    className="todo-attachment-delete"
+                    onClick={() => handleDeleteAttachment(att)}
+                    title="删除"
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M18 6 6 18M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              ))}
+              <button
+                className="todo-attachment-add"
+                onClick={handlePickImages}
+                disabled={isPickingImages}
+              >
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+                <span>{isPickingImages ? '选择中...' : '添加图片'}</span>
+              </button>
+            </div>
           </div>
         </div>
       </main>

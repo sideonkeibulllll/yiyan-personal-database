@@ -27,6 +27,8 @@ export interface BackupManifest {
   groupCount: number;
   /** 应用版本号 */
   appVersion: string;
+  /** 对话会话数量（v2.0.0 新增） */
+  chatSessionCount?: number;
 }
 
 /** 备份条目（用于列表显示） */
@@ -55,6 +57,9 @@ export interface RestoreResult {
   /** 组：新增/跳过 */
   groupsImported: number;
   groupsSkipped: number;
+  /** 对话会话：新增/跳过（v2.0.0 新增） */
+  chatSessionsImported?: number;
+  chatSessionsSkipped?: number;
   /** 错误信息 */
   errors: string[];
 }

@@ -991,6 +991,35 @@
   color: var(--color-accent-primary);
 }
 
+/* e.2: 「最近」勾选项 */
+.recent-picker-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-primary);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.recent-picker-toggle input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--color-accent-primary);
+  cursor: pointer;
+}
+
+.recent-picker-toggle:has(input:checked) {
+  color: var(--color-accent-primary);
+  background: var(--color-accent-subtle);
+  border-color: var(--color-border-accent);
+}
+
 .input-row {
   display: flex;
   align-items: flex-end;

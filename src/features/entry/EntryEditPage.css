@@ -88,6 +88,30 @@
   font-weight: 500;
   color: var(--color-text-secondary);
   padding-left: var(--space-1);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* b.8: 智能标签/智能组按钮 */
+.smart-suggest-btn {
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  color: var(--color-accent-primary);
+  background: var(--color-accent-subtle);
+  border: 1px solid var(--color-border-accent);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.smart-suggest-btn:active {
+  transform: scale(0.96);
+}
+
+.smart-suggest-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .entry-edit-input {

@@ -7,6 +7,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { getDatabase } from '@/services/database';
 import { useTagStore } from '@/stores/tagStore';
 import { useEntryStore } from '@/stores/entryStore';
+import { useSettingsStore } from '@/stores/settingsStore';
+import { ai } from '@/services/ai';
 import { TagSelector } from '@/components/TagSelector/TagSelector';
 import { GroupSelector } from '@/components/GroupSelector/GroupSelector';
 import { pickImages, saveImageForEntry, deleteAttachmentFiles, readThumbAsSrc } from '@/services/attachmentService';
@@ -86,6 +88,12 @@ export function EntryEditPage() {
   // 弹出层
   const [showTagSelector, setShowTagSelector] = useState(false);
   const [showGroupSelector, setShowGroupSelector] = useState(false);
+
+  // b.8: 智能标签和智能组状态
+  const settings = useSettingsStore(state => state.settings);
+  const [isSmartTagLoading, setIsSmartTagLoading] = useState(false);
+  const [isSmartGroupLoading, setIsSmartGroupLoading] = useState(false);
+  const addTag = useTagStore(state => state.addTag);
 
   // 图片附件
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -298,6 +306,85 @@ export function EntryEditPage() {
     }
   }, []);
 
+  // b.8: 智能标签 — AI 推荐标签
+  const handleSmartTagSuggest = useCallback(async () => {
+    if (!content.trim()) {
+      alert('请先输入内容');
+      return;
+    }
+    if (!settings.ai.apiKey) {
+      alert('请先在设置中配置 AI API Key');
+      return;
+    }
+    setIsSmartTagLoading(true);
+    try {
+      ai.setConfig(settings.ai);
+      // 获取最近标签
+      const db = await getDatabase();
+      const allTags = await db.getAllTags();
+      const count = settings.ai.smartTag?.recentTagCount ?? 50;
+      const recentTagNames = allTags
+        .sort((a, b) => b.createdAt - a.createdAt)
+        .slice(0, count)
+        .map(t => t.name);
+      const customPrompt = settings.ai.smartTag?.tagSuggestPrompt;
+      const suggested = await ai.suggestTagsWithRecent(content, recentTagNames, customPrompt);
+      // 自动添加推荐的标签
+      for (const tagName of suggested) {
+        let tag = allTags.find(t => t.name === tagName);
+        if (!tag) {
+          tag = await addTag(tagName);
+        }
+        if (tag && !selectedTagIds.includes(tag.id)) {
+          setSelectedTagIds(prev => [...prev, tag.id]);
+        }
+      }
+    } catch (err) {
+      console.error('智能标签失败:', err);
+      alert('智能标签失败: ' + (err as Error).message);
+    } finally {
+      setIsSmartTagLoading(false);
+    }
+  }, [content, settings.ai, selectedTagIds, addTag]);
+
+  // b.8: 智能组 — AI 推荐组
+  const handleSmartGroupSuggest = useCallback(async () => {
+    if (!content.trim()) {
+      alert('请先输入内容');
+      return;
+    }
+    if (!settings.ai.apiKey) {
+      alert('请先在设置中配置 AI API Key');
+      return;
+    }
+    setIsSmartGroupLoading(true);
+    try {
+      ai.setConfig(settings.ai);
+      const existingGroupNames = allGroups.map(g => g.name);
+      const suggestedGroups = await ai.suggestGroups(content, existingGroupNames);
+      // 如果推荐了已有的组，自动选中
+      for (const groupName of suggestedGroups) {
+        const existing = allGroups.find(g => g.name === groupName);
+        if (existing) {
+          setGroupId(existing.id);
+          break;
+        }
+      }
+      // 如果没有匹配到已有组，创建第一个推荐的组
+      if (!groupId && suggestedGroups.length > 0) {
+        const db = await getDatabase();
+        const newGroup = await db.createGroup(suggestedGroups[0]);
+        setAllGroups(prev => [...prev, newGroup]);
+        setGroupId(newGroup.id);
+      }
+    } catch (err) {
+      console.error('智能组失败:', err);
+      alert('智能组失败: ' + (err as Error).message);
+    } finally {
+      setIsSmartGroupLoading(false);
+    }
+  }, [content, settings.ai, allGroups, groupId]);
+
   // 获取标签名
   const getTagName = useCallback((tagId: string) => {
     const tag = allTags.find(t => t.id === tagId);
@@ -380,7 +467,18 @@ export function EntryEditPage() {
 
         {/* 标签 */}
         <div className="entry-edit-field">
-          <label className="entry-edit-label">标签</label>
+          <label className="entry-edit-label">
+            标签
+            {/* b.8: 智能标签按钮 */}
+            <button
+              className="smart-suggest-btn"
+              onClick={handleSmartTagSuggest}
+              disabled={isSmartTagLoading}
+              title="AI 智能标签"
+            >
+              {isSmartTagLoading ? 'AI...' : '智能标签'}
+            </button>
+          </label>
           <div className="entry-edit-tags">
             {selectedTagIds.map(tagId => (
               <span key={tagId} className="entry-edit-tag-chip">
@@ -406,7 +504,18 @@ export function EntryEditPage() {
 
         {/* 组 */}
         <div className="entry-edit-field">
-          <label className="entry-edit-label">所属组</label>
+          <label className="entry-edit-label">
+            所属组
+            {/* b.8: 智能组按钮 */}
+            <button
+              className="smart-suggest-btn"
+              onClick={handleSmartGroupSuggest}
+              disabled={isSmartGroupLoading}
+              title="AI 智能组"
+            >
+              {isSmartGroupLoading ? 'AI...' : '智能组'}
+            </button>
+          </label>
           <button
             className="entry-edit-group-display glass"
             onClick={() => setShowGroupSelector(true)}

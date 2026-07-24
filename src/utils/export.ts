@@ -14,6 +14,8 @@ export interface ExportOptions {
   tagId?: string;
   groupId?: string;
   includeLinks?: boolean;
+  /** v2.0.0: 包含对话历史 */
+  includeChatSessions?: boolean;
 }
 
 /**
@@ -48,7 +50,7 @@ export async function exportData(options: ExportOptions): Promise<string> {
 
   // 根据格式导出
   if (options.format === 'json') {
-    return exportAsJSON(entries, db, options.includeLinks);
+    return exportAsJSON(entries, db, options.includeLinks, options.includeChatSessions);
   } else {
     return exportAsMarkdown(entries);
   }
@@ -60,7 +62,8 @@ export async function exportData(options: ExportOptions): Promise<string> {
 async function exportAsJSON(
   entries: Entry[],
   db: Awaited<ReturnType<typeof getDatabase>>,
-  includeLinks?: boolean
+  includeLinks?: boolean,
+  includeChatSessions?: boolean
 ): Promise<string> {
   const exportObj: Record<string, unknown> = {
     version: '1.0',
@@ -86,6 +89,20 @@ async function exportAsJSON(
       allLinks.push(...links);
     }
     exportObj.links = allLinks;
+  }
+
+  // v2.0.0: 包含对话历史
+  if (includeChatSessions && typeof db.getAllChatSessions === 'function') {
+    const sessions = await db.getAllChatSessions();
+    exportObj.chatSessions = sessions.map(s => ({
+      id: s.id,
+      title: s.title,
+      messageCount: s.messages?.length || 0,
+      messages: s.messages,
+      model: s.model,
+      createdAt: new Date(s.createdAt).toISOString(),
+      updatedAt: new Date(s.updatedAt).toISOString(),
+    }));
   }
 
   return JSON.stringify(exportObj, null, 2);

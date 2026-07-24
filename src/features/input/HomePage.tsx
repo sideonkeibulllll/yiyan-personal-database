@@ -184,7 +184,7 @@ export function HomePage() {
   const [allTodos, setAllTodos] = useState<Todo[]>([]);
   const [now, setNow] = useState(Date.now());
 
-  // 录入时待保存的图片（待办模式不支持附件）
+  // 录入时待保存的图片
   const [pendingImages, setPendingImages] = useState<SelectedImage[]>([]);
   const [isPickingImage, setIsPickingImage] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -355,7 +355,31 @@ export function HomePage() {
           folderDate,
         });
         setLastTodoId(todo.id);
+
+        // c: 处理待办图片附件
+        if (pendingImages.length > 0) {
+          setIsUploading(true);
+          try {
+            const { saveImageForTodo } = await import('@/services/todoAttachmentService');
+            const { getTodoDatabase } = await import('@/services/todoDatabase');
+            const db = await getTodoDatabase();
+            for (let i = 0; i < pendingImages.length; i++) {
+              const att = await saveImageForTodo(todo.id, pendingImages[i]);
+              try {
+                await (db as any).createTodoAttachment?.(todo.id, att);
+              } catch (e) {
+                console.warn('[HomePage] 保存待办附件到数据库失败:', e);
+              }
+            }
+          } catch (e) {
+            console.error('[HomePage] 待办附件保存失败:', e);
+          } finally {
+            setIsUploading(false);
+          }
+        }
+
         setContent('');
+        setPendingImages([]);
         showToastMessage('待办已创建');
 
         // 修复5：待办模式发送后确保回到input模式，不出现"为上一条添加信息"
@@ -385,7 +409,7 @@ export function HomePage() {
       setLastEntryContent(content.trim());
       setContent('');
 
-      // 处理图片附件（待办模式不支持，这里 isTodoMode 必为 false）
+      // 处理图片附件（普通录入模式）
       let attachError = false;
       if (pendingImages.length > 0) {
         setIsUploading(true);
@@ -634,8 +658,8 @@ export function HomePage() {
               />
             </div>
 
-            {/* 已选图片预览（仅普通录入模式） */}
-            {!isTodoMode && pendingImages.length > 0 && (
+            {/* 已选图片预览（普通录入模式 + 待办模式） */}
+            {pendingImages.length > 0 && (
               <div className="pending-images">
                 {pendingImages.map((img, idx) => (
                   <div key={idx} className="pending-image-item">
@@ -748,18 +772,17 @@ export function HomePage() {
                 <span className="btn-icon">{ClipboardIcon}</span>
                 <span>粘贴</span>
               </button>
-              {!isTodoMode && (
-                <button
-                  className="action-btn secondary"
-                  onClick={handlePickImages}
-                  disabled={isPickingImage || isUploading}
-                  title="从相册选择图片"
-                >
-                  <span className="btn-icon">{ImageIcon}</span>
-                  <span>选图</span>
-                </button>
-              )}
-              {!isTodoMode && showCameraButton && (
+              {/* c: 待办模式也支持选图 */}
+              <button
+                className="action-btn secondary"
+                onClick={handlePickImages}
+                disabled={isPickingImage || isUploading}
+                title="从相册选择图片"
+              >
+                <span className="btn-icon">{ImageIcon}</span>
+                <span>选图</span>
+              </button>
+              {showCameraButton && (
                 <button
                   className="action-btn secondary"
                   onClick={handleTakePhoto}

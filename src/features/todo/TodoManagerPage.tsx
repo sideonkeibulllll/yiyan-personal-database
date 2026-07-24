@@ -167,7 +167,7 @@ export function TodoManagerPage() {
             {selectedDate === formatDate(new Date()) && (
               <div
                 className="timeline-now-line"
-                style={{ top: `${(currentHour / 24) * 100}%` }}
+                style={{ top: `${currentHour * 100}px` }}
               >
                 <span className="now-label">现在</span>
               </div>
@@ -177,7 +177,7 @@ export function TodoManagerPage() {
             {selectedDate === formatDate(new Date()) && (
               <div
                 className="timeline-past"
-                style={{ height: `${(currentHour / 24) * 100}%` }}
+                style={{ height: `${currentHour * 100}px` }}
               />
             )}
 
@@ -195,12 +195,12 @@ export function TodoManagerPage() {
               });
 
               return Array.from(groups.entries()).map(([groupKey, groupTodos]) => {
-                const top = `${((groupKey < 0 ? 0 : groupKey) / 24) * 100}%`;
+                const topPx = groupKey < 0 ? 0 : groupKey * 100;
                 return (
                   <div
                     key={groupKey}
                     className="timeline-todo-group"
-                    style={{ top }}
+                    style={{ top: `${topPx}px` }}
                   >
                     {groupTodos.map((todo, index) => {
                       const startHour = todo.startTime
@@ -209,7 +209,7 @@ export function TodoManagerPage() {
                       const endHour = todo.endTime
                         ? new Date(todo.endTime).getHours() + new Date(todo.endTime).getMinutes() / 60
                         : startHour + 1;
-                      const height = `${Math.max(((endHour - startHour) / 24) * 100, 2)}%`;
+                      const heightPx = Math.max((endHour - startHour) * 100, 60);
                       const color = getTodoColor(todo, index);
                       const isSelected = selectedIds.has(todo.id);
 
@@ -218,7 +218,7 @@ export function TodoManagerPage() {
                           key={todo.id}
                           className={`timeline-todo-card ${todo.status === 'done' ? 'done' : ''} ${isSelected ? 'selected' : ''}`}
                           style={{
-                            height,
+                            height: `${heightPx}px`,
                             backgroundColor: color + '33',
                             borderLeft: `3px solid ${color}`,
                           }}

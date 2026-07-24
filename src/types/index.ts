@@ -50,6 +50,7 @@ export interface Tag {
     keyword?: string;
     tagIds?: string[];
     isStarred?: boolean;
+    hasAttachment?: boolean;
   };
 }
 
@@ -106,6 +107,24 @@ export interface Todo {
   deletedAt?: number;
   /** 日期文件夹（YYYY-MM-DD） */
   folderDate: string;
+  /** c: 图片附件列表（待办附件，删除待办时不保留） */
+  attachments?: TodoAttachment[];
+}
+
+/** c: 待办图片附件 */
+export interface TodoAttachment {
+  id: string;
+  todoId: string;
+  /** 原图相对路径 */
+  filePath: string;
+  /** 缩略图相对路径 */
+  thumbPath: string;
+  /** MIME 类型 */
+  mimeType: string;
+  /** 排序序号 */
+  sortOrder: number;
+  /** 创建时间戳 */
+  createdAt: number;
 }
 
 /** 待办标签（独立标签池） */
@@ -188,6 +207,16 @@ export interface AIConfig {
   prompts: PromptConfig;
   /** 智能标签功能配置 */
   smartTag?: SmartTagOptions;
+  /** 智能组建议配置 */
+  smartGroup?: SmartGroupOptions;
+  /** 连线建议配置 */
+  connectionSuggestion?: ConnectionSuggestionOptions;
+  /** GLM 模型配置 */
+  glm?: GLMConfig;
+  /** Chat Soul 提示词（对话系统提示词） */
+  chatSoul?: string;
+  /** 数据选择器「最近」勾选项数量 */
+  recentPickerCount?: number;
 }
 
 export interface DeepSeekOptions {
@@ -203,6 +232,38 @@ export interface SmartTagOptions {
   recentTagCount: number;
   /** 标签建议专用提示词（独立于 prompts.tagSuggestion）*/
   tagSuggestPrompt: string;
+  /** AI 返回标签数量上限 */
+  maxTags: number;
+  /** AI 返回标签数量下限 */
+  minTags: number;
+}
+
+/** 智能组建议配置 */
+export interface SmartGroupOptions {
+  /** 用于组建议的最近条目数量 */
+  recentEntryCount: number;
+  /** 组建议提示词 */
+  groupSuggestPrompt: string;
+}
+
+/** 连线建议配置 */
+export interface ConnectionSuggestionOptions {
+  /** 用于连线建议的最近条目数量 */
+  recentEntryCount: number;
+  /** 连线建议提示词 */
+  connectionSuggestPrompt: string;
+}
+
+/** GLM 模型配置 */
+export interface GLMConfig {
+  /** 是否启用 GLM 智能切换 */
+  enabled: boolean;
+  /** GLM API Key */
+  apiKey: string;
+  /** GLM 模型名称 */
+  model: string;
+  /** GLM API Base URL */
+  baseURL: string;
 }
 
 export interface PromptConfig {
@@ -210,6 +271,10 @@ export interface PromptConfig {
   relationSuggestion: string;
   dialogueContext: string;
   autoLink: string;
+  /** 组建议提示词 */
+  groupSuggestion: string;
+  /** 连线建议提示词 */
+  connectionSuggestion: string;
 }
 
 export interface ContextConfig {
@@ -245,17 +310,15 @@ export const DEFAULT_PROMPTS: PromptConfig = {
 
 条目B：{contentB}`,
 
+  // e.2: 对话上下文提示词简化为仅提供 {currentEntry} {recentEntries} 字段
   dialogueContext: `你是一个个人知识管理助手。用户正在围绕一条笔记展开对话。
 请基于以下上下文提供帮助：
 
-【长效记忆】
-{longTermMemory}
+【当前条目】
+{currentEntry}
 
 【近期关注】
 {recentEntries}
-
-【当前条目】
-{currentEntry}
 
 请记住：
 1. 你的角色是辅助思考，不是代替思考
@@ -271,6 +334,30 @@ export const DEFAULT_PROMPTS: PromptConfig = {
 
 候选条目（最近 50 条）：
 {candidates}`,
+
+  // e.1: 组建议提示词
+  groupSuggestion: `你是一个分组建议助手。请分析以下条目内容，推荐 1-3 个合适的分组。
+要求：
+1. 分组名简洁，2-8 个字
+2. 从内容主题、用途、领域三个维度考虑
+3. 优先复用已有的分组
+4. 只返回分组列表，每行一个，不要解释
+
+已有分组：
+{existingGroups}
+
+最近条目内容：
+{recentEntries}`,
+
+  // b.4: 连线建议提示词
+  connectionSuggestion: `你是一个知识关联发现助手。请分析以下条目，找出可能有关联的条目对。
+要求：
+1. 找出 3-5 组有关联的条目对
+2. 用一句话描述每对条目的关联
+3. 返回格式：ID1 → ID2: 关联描述
+
+最近条目列表：
+{entries}`,
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -286,7 +373,7 @@ export const DEFAULT_SETTINGS: Settings = {
     prompts: DEFAULT_PROMPTS,
     smartTag: {
       recentTagCount: 50,
-      tagSuggestPrompt: `你是一个标签建议助手。请分析以下文本内容，结合用户最近使用过的标签，推荐 3-5 个合适的标签。
+      tagSuggestPrompt: `你是一个标签建议助手。请分析以下文本内容，结合用户最近使用过的标签，推荐 {minTags}-{maxTags} 个合适的标签。
 
 要求：
 1. 标签简洁，2-6 个字
@@ -300,7 +387,43 @@ export const DEFAULT_SETTINGS: Settings = {
 
 当前条目内容：
 {content}`,
+      maxTags: 6,
+      minTags: 1,
     },
+    smartGroup: {
+      recentEntryCount: 50,
+      groupSuggestPrompt: `你是一个分组建议助手。请分析以下条目内容，推荐 1-3 个合适的分组。
+要求：
+1. 分组名简洁，2-8 个字
+2. 从内容主题、用途、领域三个维度考虑
+3. 优先复用已有的分组
+4. 只返回分组列表，每行一个，不要解释
+
+已有分组：
+{existingGroups}
+
+最近条目内容：
+{recentEntries}`,
+    },
+    connectionSuggestion: {
+      recentEntryCount: 100,
+      connectionSuggestPrompt: `你是一个知识关联发现助手。请分析以下条目，找出可能有关联的条目对。
+要求：
+1. 找出 3-5 组有关联的条目对
+2. 用一句话描述每对条目的关联
+3. 返回格式：ID1 → ID2: 关联描述
+
+最近条目列表：
+{entries}`,
+    },
+    glm: {
+      enabled: false,
+      apiKey: '',
+      model: 'glm-4-flash',
+      baseURL: 'https://open.bigmodel.cn/api/paas/v4',
+    },
+    chatSoul: '',
+    recentPickerCount: 30,
   },
   context: {
     recentWindow: 20,

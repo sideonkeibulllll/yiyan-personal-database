@@ -133,7 +133,11 @@ export function TagSelector({
       const recentTags = await getRecentTagNames();
       const customPrompt = settings.ai.smartTag?.tagSuggestPrompt;
       const suggested = await ai.suggestTagsWithRecent(entryContent, recentTags, customPrompt);
-      setAiSuggestedTags(suggested);
+      // b.1: 标签建议改为 1-6 个
+      const maxTags = settings.ai.smartTag?.maxTags ?? 6;
+      const minTags = settings.ai.smartTag?.minTags ?? 1;
+      const filtered = suggested.filter(tag => tag.length > 0 && tag.length <= 12).slice(0, maxTags);
+      setAiSuggestedTags(filtered.length >= minTags ? filtered : filtered);
       setAiState('done');
     } catch (err) {
       console.error('AI 标签建议失败:', err);

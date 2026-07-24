@@ -16,6 +16,7 @@ import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from './filesystemAdapter';
 import { getDatabase } from './database';
 import { getTodoDatabase } from './todoDatabase';
+import { loadChatSessions } from './chatSessionService';
 import { contentHash } from '@/features/datamanager/types';
 import type {
   BackupManifest,
@@ -138,7 +139,7 @@ export async function createBackup(
   await (todoDb as any).ensureConnection?.();
 
   // 收集所有数据
-  const [entries, tags, groups, settings, allTodos, allTodoTags, allTemplates, allAttachments] = await Promise.all([
+  const [entries, tags, groups, settings, allTodos, allTodoTags, allTemplates, allAttachments, chatSessions] = await Promise.all([
     db.getAllEntries(),
     db.getAllTags(),
     db.getAllGroups(),
@@ -147,6 +148,7 @@ export async function createBackup(
     todoDb.getAllTodoTags(),
     todoDb.getAllTemplates(),
     db.getAllAttachments(),
+    loadChatSessions(),
   ]);
 
   // 收集所有条目的关联链接
@@ -174,6 +176,7 @@ export async function createBackup(
     tagCount: tags.length,
     groupCount: groups.length,
     appVersion: APP_VERSION,
+    chatSessionCount: chatSessions.length,
   };
 
   // 打包 zip
@@ -195,6 +198,8 @@ export async function createBackup(
 
   // 附件元数据（全量）+ 缩略图（全量）+ 原图（增量：排除接收方已有的）
   zip.file('attachments.json', JSON.stringify(allAttachments, null, 2));
+  // v2.0.0: 对话历史数据
+  zip.file('chatSessions.json', JSON.stringify(chatSessions, null, 2));
   for (const att of allAttachments) {
     // 缩略图：全量打包（体积小，新设备需要）
     try {
@@ -253,7 +258,7 @@ export async function exportToDownload(type: BackupType = 'manual'): Promise<Bac
   await (db as any).ensureConnection?.();
   await (todoDb as any).ensureConnection?.();
 
-  const [entries, tags, groups, settings, allTodos, allTodoTags, allTemplates, allAttachments] = await Promise.all([
+  const [entries, tags, groups, settings, allTodos, allTodoTags, allTemplates, allAttachments, chatSessions] = await Promise.all([
     db.getAllEntries(),
     db.getAllTags(),
     db.getAllGroups(),
@@ -262,6 +267,7 @@ export async function exportToDownload(type: BackupType = 'manual'): Promise<Bac
     todoDb.getAllTodoTags(),
     todoDb.getAllTemplates(),
     db.getAllAttachments(),
+    loadChatSessions(),
   ]);
 
   const links = [];
@@ -287,6 +293,7 @@ export async function exportToDownload(type: BackupType = 'manual'): Promise<Bac
     tagCount: tags.length,
     groupCount: groups.length,
     appVersion: APP_VERSION,
+    chatSessionCount: chatSessions.length,
   };
 
   const zip = new JSZip();
@@ -306,6 +313,8 @@ export async function exportToDownload(type: BackupType = 'manual'): Promise<Bac
 
   // 附件元数据 + 缩略图（原图不打包，按需拉取）
   zip.file('attachments.json', JSON.stringify(allAttachments, null, 2));
+  // v2.0.0: 对话历史数据
+  zip.file('chatSessions.json', JSON.stringify(chatSessions, null, 2));
   for (const att of allAttachments) {
     try {
       const thumbRes = await Filesystem.readFile({
@@ -496,6 +505,7 @@ async function restoreFromZip(zip: JSZip, overwrite: boolean): Promise<RestoreRe
   const todos = await readJson<any[]>('todos.json');
   const todoTags = await readJson<any[]>('todoTags.json');
   const templates = await readJson<any[]>('templates.json');
+  const chatSessions = await readJson<any[]>('chatSessions.json');
 
   // 覆盖式：先清空数据库
   if (overwrite) {
@@ -800,6 +810,33 @@ async function restoreFromZip(zip: JSZip, overwrite: boolean): Promise<RestoreRe
             result.errors.push(`附件原图补齐失败 att=${att.id}: ${String(err)}`);
           }
         }
+      }
+    }
+  }
+
+  // v2.0.0: 恢复对话历史
+  if (chatSessions && Array.isArray(chatSessions)) {
+    const existingSessions = await db.getAllChatSessions();
+    const existingIds = new Set(existingSessions.map(s => s.id));
+    for (const session of chatSessions) {
+      if (existingIds.has(session.id)) {
+        result.chatSessionsSkipped = (result.chatSessionsSkipped ?? 0) + 1;
+        continue;
+      }
+      try {
+        await db.saveChatSession({
+          id: session.id,
+          title: session.title || '未命名对话',
+          messages: session.messages || [],
+          createdAt: session.createdAt || Date.now(),
+          updatedAt: session.updatedAt || Date.now(),
+          model: session.model,
+          mcpEnabledTools: session.mcpEnabledTools,
+          mcpSearchResults: session.mcpSearchResults,
+        });
+        result.chatSessionsImported = (result.chatSessionsImported ?? 0) + 1;
+      } catch (err) {
+        result.errors.push(`对话恢复失败 id=${session.id}: ${String(err)}`);
       }
     }
   }

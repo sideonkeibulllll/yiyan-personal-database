@@ -12,7 +12,7 @@ import { weightedRandomSelect, filterEntries } from '@/services/random';
 import { BottomNav } from '@/components/BottomNav';
 import { QuickMenu } from './QuickMenu';
 import { TagSelector } from '@/components/TagSelector';
-import { AIChatPanel } from '@/components/AIChatPanel';
+// b.6: AIChatPanel 已移除，改为直接跳转到 Chat 页面
 import { ImageViewer } from '@/components/ImageViewer';
 import { readThumbAsSrc } from '@/services/attachmentService';
 import { hasLocalOriginal, addMissingOriginal } from '@/services/syncService';
@@ -79,6 +79,7 @@ export function RandomPage() {
 
   // 当前展示的一批条目
   const [currentEntries, setCurrentEntries] = useState<Entry[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
   // 上次抽取的 id 列表，用于避免连续两屏重复
   const lastIdsRef = useRef<Set<string>>(new Set());
 
@@ -92,9 +93,7 @@ export function RandomPage() {
   const [showFilter, setShowFilter] = useState(false);
   const [showTagSelector, setShowTagSelector] = useState(false);
   const [tagSelectorEntry, setTagSelectorEntry] = useState<Entry | null>(null);
-  const [showAIChat, setShowAIChat] = useState(false);
-  const [chatEntry, setChatEntry] = useState<Entry | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  // b.6: 不再需要 AIChatPanel，QuickMenu 直接跳转到 /chat
 
   // 每张卡片的长按计时器
   const longPressTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
@@ -502,12 +501,8 @@ export function RandomPage() {
             setShowTagSelector(true);
           }}
           onAIChat={(entryId) => {
+            // b.6: QuickMenu 内部直接 navigate 到 /chat，这里不需要做任何事
             setShowMenu(false);
-            const e = currentEntries.find(x => x.id === entryId);
-            if (e) {
-              setChatEntry(e);
-              setShowAIChat(true);
-            }
           }}
           onConvertToTodo={handleConvertToTodo}
           onEditInfo={(entry) => {
@@ -515,18 +510,6 @@ export function RandomPage() {
             navigate(`/entry/${entry.id}/edit`);
           }}
         />
-      )}
-
-      {/* AI 对话面板 */}
-      {showAIChat && chatEntry && (
-        <div className="ai-chat-overlay" onClick={() => setShowAIChat(false)}>
-          <div className="ai-chat-container" onClick={e => e.stopPropagation()}>
-            <AIChatPanel
-              entry={chatEntry}
-              onClose={() => setShowAIChat(false)}
-            />
-          </div>
-        </div>
       )}
 
       {/* 筛选面板 */}
