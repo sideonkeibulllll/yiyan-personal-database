@@ -16,7 +16,7 @@ interface FileManagerWindowProps {
   isActive: boolean;
   onSelect: (id: string) => void;
   onMultiSelectToggle: (id: string) => void;
-  onLongPress: (id: string) => void;
+  onLongPress: (id: string, itemType: 'folder' | 'file') => void;
 }
 
 /** Folder icon */
@@ -168,10 +168,8 @@ export function FileManagerWindow({
   };
 
   const handleItemLongPress = (item: ListItem) => {
-    if (item.type === 'file') {
-      // 长按只弹出菜单，不影响选中状态
-      onLongPress(item.id);
-    }
+    // 长按只弹出菜单，不影响选中状态（文件和文件夹都支持）
+    onLongPress(item.id, item.type);
   };
 
   const startLongPress = (item: ListItem) => {

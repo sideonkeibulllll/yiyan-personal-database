@@ -32,6 +32,11 @@ export function DataManagerPage() {
   const [showActionMenu, setShowActionMenu] = useState(false);
   const [actionMenuEntryId, setActionMenuEntryId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  // 文件夹操作菜单状态
+  const [showFolderMenu, setShowFolderMenu] = useState(false);
+  const [folderMenuId, setFolderMenuId] = useState<string | null>(null);
+  const [showRenameDialog, setShowRenameDialog] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadEntries = useEntryStore(state => state.loadEntries);
@@ -108,10 +113,15 @@ export function DataManagerPage() {
     });
   }, [activeWindow]);
 
-  // 长按
-  const handleLongPress = useCallback((id: string) => {
-    setActionMenuEntryId(id);
-    setShowActionMenu(true);
+  // 长按（文件和文件夹统一处理）
+  const handleLongPress = useCallback((id: string, itemType: 'folder' | 'file') => {
+    if (itemType === 'folder') {
+      setFolderMenuId(id);
+      setShowFolderMenu(true);
+    } else {
+      setActionMenuEntryId(id);
+      setShowActionMenu(true);
+    }
   }, []);
 
   // 底部操作：返回上一路径
@@ -615,6 +625,86 @@ export function DataManagerPage() {
   const canGoUp = currentWindow.path.length > 1;
   const canCreate = currentWindow.path.length === 1;
 
+  // === 文件夹操作：删除标签/组 ===
+  const handleDeleteFolder = useCallback(async () => {
+    if (!folderMenuId) return;
+    const currentMode = currentWindow.mode;
+    if (currentMode !== 'tags' && currentMode !== 'groups') {
+      showToast('只有标签或组模式才能删除文件夹');
+      setShowFolderMenu(false);
+      return;
+    }
+    const typeLabel = currentMode === 'tags' ? '标签' : '组';
+    if (!confirm(`确定删除此${typeLabel}？\n\n操作内容：\n1. 解绑所有数据与此${typeLabel}的关联\n2. 永久删除此${typeLabel}\n\n此操作不可恢复!`)) {
+      setShowFolderMenu(false);
+      return;
+    }
+    try {
+      const db = await getDatabase();
+      if (currentMode === 'tags') {
+        // 先解绑所有数据
+        const entries = await db.getEntriesByTagId(folderMenuId);
+        for (const entry of entries) {
+          await db.removeTagFromEntry(entry.id, folderMenuId);
+        }
+        // 再删除标签本身
+        await db.deleteTag(folderMenuId);
+        showToast(`已删除标签，解绑 ${entries.length} 条数据`);
+      } else {
+        // 组模式：先清除所有数据的 groupId
+        const entries = await db.getEntriesByGroupId(folderMenuId);
+        for (const entry of entries) {
+          await db.updateEntry(entry.id, { groupId: undefined });
+        }
+        await db.deleteGroup(folderMenuId);
+        showToast(`已删除组，解绑 ${entries.length} 条数据`);
+      }
+      // 刷新
+      setLeftWindow(prev => ({ ...prev, refreshKey: prev.refreshKey + 1 }));
+      setRightWindow(prev => ({ ...prev, refreshKey: prev.refreshKey + 1 }));
+      await loadEntries();
+      await loadTags();
+    } catch (err) {
+      showToast('删除失败: ' + (err as Error).message);
+    }
+    setShowFolderMenu(false);
+    setFolderMenuId(null);
+  }, [folderMenuId, currentWindow.mode, showToast, loadEntries, loadTags]);
+
+  // === 文件夹操作：重命名标签/组 ===
+  const handleRenameFolder = useCallback(() => {
+    if (!folderMenuId) return;
+    // 预填当前名称（从当前窗口的 items 中找）
+    const currentMode = currentWindow.mode;
+    setShowFolderMenu(false);
+    setShowRenameDialog(true);
+    // renameValue 将在弹窗加载时通过另一个 effect 初始化
+    setRenameValue('');
+  }, [folderMenuId, currentWindow.mode]);
+
+  const confirmRename = useCallback(async () => {
+    if (!folderMenuId || !renameValue.trim()) return;
+    try {
+      const db = await getDatabase();
+      const currentMode = currentWindow.mode;
+      if (currentMode === 'tags') {
+        await db.renameTag(folderMenuId, renameValue.trim());
+        showToast('标签已重命名');
+      } else if (currentMode === 'groups') {
+        await db.updateGroup(folderMenuId, { name: renameValue.trim() });
+        showToast('组已重命名');
+      }
+      setLeftWindow(prev => ({ ...prev, refreshKey: prev.refreshKey + 1 }));
+      setRightWindow(prev => ({ ...prev, refreshKey: prev.refreshKey + 1 }));
+      await loadTags();
+    } catch (err) {
+      showToast('重命名失败: ' + (err as Error).message);
+    }
+    setShowRenameDialog(false);
+    setFolderMenuId(null);
+    setRenameValue('');
+  }, [folderMenuId, renameValue, currentWindow.mode, showToast, loadTags]);
+
   return (
     <div className="dm-page">
       {/* 隐藏的文件输入 */}
@@ -840,6 +930,52 @@ export function DataManagerPage() {
             </button>
           </div>
         </>
+      )}
+
+      {/* 文件夹操作菜单（长按标签/组文件夹呼出）*/}
+      {showFolderMenu && (
+        <>
+          <div className="dm-overlay" onClick={() => { setShowFolderMenu(false); setFolderMenuId(null); }} />
+          <div className="dm-action-menu glass">
+            <button className="dm-action-item" onClick={handleRenameFolder}>
+              <span>✏️</span> 重命名
+            </button>
+            <button className="dm-action-item danger" onClick={handleDeleteFolder}>
+              <span>🗑️</span> 删除
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* 文件夹重命名弹窗 */}
+      {showRenameDialog && (
+        <div className="dm-dialog-overlay" onClick={() => setShowRenameDialog(false)}>
+          <div className="dm-dialog glass" onClick={e => e.stopPropagation()}>
+            <h3 className="dm-dialog-title">
+              重命名{currentWindow.mode === 'tags' ? '标签' : '组'}
+            </h3>
+            <input
+              className="dm-dialog-input"
+              type="text"
+              value={renameValue}
+              onChange={e => setRenameValue(e.target.value)}
+              placeholder={`输入新的${currentWindow.mode === 'tags' ? '标签' : '组'}名称`}
+              autoFocus
+              onKeyDown={e => {
+                if (e.key === 'Enter') confirmRename();
+                if (e.key === 'Escape') { setShowRenameDialog(false); setFolderMenuId(null); }
+              }}
+            />
+            <div className="dm-dialog-actions">
+              <button className="dm-dialog-btn cancel" onClick={() => { setShowRenameDialog(false); setFolderMenuId(null); }}>
+                取消
+              </button>
+              <button className="dm-dialog-btn confirm" onClick={confirmRename}>
+                确定
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* 导入结果 */}

@@ -24,7 +24,7 @@ import { getTodoDatabase } from '@/services/todoDatabase';
 import { useEntryStore } from '@/stores/entryStore';
 import { useTagStore } from '@/stores/tagStore';
 import { useTodoStore } from '@/stores/todoStore';
-import type { Entry, Todo } from '@/types';
+import type { Entry, Todo, Link } from '@/types';
 
 /** 工具元数据（仅用于内部描述，传给 API 时由 buildToolsPayload 转换） */
 export interface BridgeTool {
@@ -176,13 +176,41 @@ export const BRIDGE_TOOLS: BridgeTool[] = [
       required: ['todoId'],
     },
   },
+  // === 数据连线 MCP 工具 ===
+  {
+    name: 'link_cards',
+    description: '将一个源数据卡片连接到 N 个目标数据卡片（N≥1）。建立连线后可以在查看连线时看到关联关系。',
+    parameters: {
+      type: 'object',
+      properties: {
+        sourceId: { type: 'string', description: '源数据卡片ID' },
+        targetIds: { type: 'array', items: { type: 'string' }, description: '目标数据卡片ID列表（至少1个）' },
+        description: { type: 'string', description: '连线描述（可选，说明为什么相关）' },
+      },
+      required: ['sourceId', 'targetIds'],
+    },
+  },
+  {
+    name: 'get_card_links',
+    description: '查询指定数据卡片的连线关系。可以指定深度（depth）进行多级遍历，返回所有关联卡片及其连线。例如 depth=2 会返回直接连线（1级）和连线的连线（2级）的所有卡片。',
+    parameters: {
+      type: 'object',
+      properties: {
+        entryId: { type: 'string', description: '要查询的数据卡片ID' },
+        depth: { type: 'number', description: '遍历深度（默认1，只返回直接连线；2则返回1级+2级连线；以此类推）' },
+        direction: { type: 'string', description: '方向过滤：all（默认，双向）、outgoing（只看出）、incoming（只看入）' },
+        limit: { type: 'number', description: '每级返回数量上限，默认50' },
+      },
+      required: ['entryId'],
+    },
+  },
 ];
 
 /** 所有工具名称 */
 export const ALL_TOOL_NAMES = BRIDGE_TOOLS.map(t => t.name);
 
 /** 按类型分组的工具名 */
-export const ENTRY_TOOLS = ['create_card', 'search_cards', 'edit_group', 'edit_tags'];
+export const ENTRY_TOOLS = ['create_card', 'search_cards', 'edit_group', 'edit_tags', 'link_cards', 'get_card_links'];
 export const TODO_TOOLS = ['create_todo', 'search_todos', 'complete_todo'];
 
 /**
@@ -375,12 +403,16 @@ export async function executeToolCall(
           success: true,
           data: {
             total: results.length,
-            results: results.slice(0, limit).map(e => ({
-              id: e.id,
-              content: e.content.length > 200 ? e.content.slice(0, 200) + '…' : e.content,
-              source: e.source,
-              isStarred: e.isStarred,
-              createdAt: e.createdAt,
+            results: await Promise.all(results.slice(0, limit).map(async e => {
+              const links = await db.getLinksByEntryId(e.id);
+              return {
+                id: e.id,
+                content: e.content.length > 200 ? e.content.slice(0, 200) + '…' : e.content,
+                source: e.source,
+                isStarred: e.isStarred,
+                createdAt: e.createdAt,
+                linkCount: links.length,
+              };
             })),
           },
         };
@@ -472,6 +504,141 @@ export async function executeToolCall(
             todoId,
             action: uncomplete ? '重新激活' : '标记完成',
             message: '待办状态已更新',
+          },
+        };
+      }
+
+      case 'link_cards': {
+        const sourceId = String(args.sourceId || '');
+        if (!sourceId) return { success: false, error: 'sourceId 不能为空' };
+        const targetIds = (args.targetIds as string[]) || [];
+        if (!Array.isArray(targetIds) || targetIds.length === 0) {
+          return { success: false, error: 'targetIds 不能为空，至少需要 1 个目标' };
+        }
+        const linkDesc = String(args.description || '') || undefined;
+
+        // 验证源条目存在
+        const sourceEntry = await db.getEntryById(sourceId);
+        if (!sourceEntry) {
+          return { success: false, error: `源条目 ${sourceId} 不存在` };
+        }
+
+        // 验证目标条目并创建连线
+        const createdLinks: Link[] = [];
+        const notFoundIds: string[] = [];
+        for (const targetId of targetIds) {
+          // 不允许自连
+          if (targetId === sourceId) {
+            notFoundIds.push(`${targetId}(不能自连)`);
+            continue;
+          }
+          const targetEntry = await db.getEntryById(targetId);
+          if (!targetEntry) {
+            notFoundIds.push(targetId);
+            continue;
+          }
+          const link = await db.createLink(sourceId, targetId, linkDesc);
+          createdLinks.push(link);
+        }
+
+        return {
+          success: true,
+          data: {
+            sourceId,
+            sourceContent: sourceEntry.content.slice(0, 80),
+            linkedCount: createdLinks.length,
+            links: createdLinks.map(l => ({
+              linkId: l.id,
+              targetId: l.targetId,
+              description: l.description,
+            })),
+            notFoundIds: notFoundIds.length > 0 ? notFoundIds : undefined,
+            message: `已连接 ${createdLinks.length} 条目标数据${notFoundIds.length > 0 ? `，${notFoundIds.length} 条未找到` : ''}`,
+          },
+        };
+      }
+
+      case 'get_card_links': {
+        const entryId = String(args.entryId || '');
+        if (!entryId) return { success: false, error: 'entryId 不能为空' };
+        const depth = Math.max(1, Math.min(Number(args.depth) || 1, 5));  // 限制 1-5 级
+        const direction = String(args.direction || 'all') as 'all' | 'outgoing' | 'incoming';
+        const limitPerLevel = Math.max(1, Math.min(Number(args.limit) || 50, 200));
+
+        // 验证起始条目存在
+        const startEntry = await db.getEntryById(entryId);
+        if (!startEntry) {
+          return { success: false, error: `条目 ${entryId} 不存在` };
+        }
+
+        // BFS 遍历
+        const visited = new Set<string>([entryId]);  // 已访问的条目 ID
+        const allLinks: { linkId: string; sourceId: string; targetId: string; description?: string; level: number }[] = [];
+        const allEntries: { id: string; content: string; source?: string; level: number }[] = [
+          { id: entryId, content: startEntry.content.slice(0, 100), source: startEntry.source, level: 0 },
+        ];
+        let currentLevel = 0;
+        let currentFrontier: string[] = [entryId];
+
+        while (currentLevel < depth && currentFrontier.length > 0) {
+          const nextFrontier: string[] = [];
+          for (const currentNode of currentFrontier) {
+            // 获取该节点的所有连线
+            const links = await db.getLinksByEntryId(currentNode);
+            let addedThisLevel = 0;
+            for (const link of links) {
+              // 方向过滤
+              const isOutgoing = link.sourceId === currentNode;
+              const isIncoming = link.targetId === currentNode;
+              if (direction === 'outgoing' && !isOutgoing) continue;
+              if (direction === 'incoming' && !isIncoming) continue;
+
+              // 确定对端节点
+              const otherId = isOutgoing ? link.targetId : link.sourceId;
+              if (visited.has(otherId)) continue;  // 避免环
+              if (addedThisLevel >= limitPerLevel) break;
+
+              visited.add(otherId);
+              addedThisLevel++;
+              allLinks.push({
+                linkId: link.id,
+                sourceId: link.sourceId,
+                targetId: link.targetId,
+                description: link.description,
+                level: currentLevel + 1,
+              });
+
+              // 加载对端条目信息
+              const otherEntry = await db.getEntryById(otherId);
+              if (otherEntry) {
+                allEntries.push({
+                  id: otherEntry.id,
+                  content: otherEntry.content.slice(0, 100),
+                  source: otherEntry.source,
+                  level: currentLevel + 1,
+                });
+              }
+              nextFrontier.push(otherId);
+            }
+          }
+          currentFrontier = nextFrontier;
+          currentLevel++;
+        }
+
+        return {
+          success: true,
+          data: {
+            startEntry: {
+              id: entryId,
+              content: startEntry.content.slice(0, 100),
+            },
+            depth,
+            direction,
+            totalLinks: allLinks.length,
+            totalEntries: allEntries.length - 1,  // 减去起始条目
+            links: allLinks,
+            entries: allEntries,
+            message: `查询完成：共 ${allLinks.length} 条连线，${allEntries.length - 1} 个关联条目（${depth} 级深度）`,
           },
         };
       }
