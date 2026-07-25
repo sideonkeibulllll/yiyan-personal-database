@@ -196,8 +196,11 @@ export async function backupToCloud(): Promise<CloudBackupResult> {
     }
   }
 
-  // ===== 同步 tags（增量：createdAt > lastBackupTs 或所有 tags 如果首次）=====
-  for (const tag of tags) {
+  // ===== 同步 tags（增量：只同步新增 tag，按 createdAt > lastBackupTs 筛选）=====
+  // 注意：tag 改名/改色不会自动同步到云端（牺牲以节省 D1 写入配额）
+  // 如需同步 tag 修改，可在设置中提供"全量重置"按钮
+  const newTags = tags.filter(t => t.createdAt > lastBackupTs);
+  for (const tag of newTags) {
     try {
       await d1.query(
         `INSERT OR REPLACE INTO tags
@@ -220,8 +223,12 @@ export async function backupToCloud(): Promise<CloudBackupResult> {
     }
   }
 
-  // ===== 同步 groups =====
-  for (const group of groups) {
+  // ===== 同步 groups（增量：只同步 D1 中不存在的新 group）=====
+  const existingGroupIds = new Set<string>(
+    (await d1.query('SELECT id FROM groups_table WHERE is_deleted = 0', [])).map((r: any) => r.id)
+  );
+  const newGroups = groups.filter(g => !existingGroupIds.has(g.id));
+  for (const group of newGroups) {
     try {
       await d1.query(
         `INSERT OR REPLACE INTO groups_table
@@ -235,8 +242,9 @@ export async function backupToCloud(): Promise<CloudBackupResult> {
     }
   }
 
-  // ===== 同步 links =====
-  for (const link of links) {
+  // ===== 同步 links（增量：createdAt > lastBackupTs）=====
+  const newLinks = links.filter(l => l.createdAt > lastBackupTs);
+  for (const link of newLinks) {
     try {
       await d1.query(
         `INSERT OR REPLACE INTO links
@@ -278,8 +286,9 @@ export async function backupToCloud(): Promise<CloudBackupResult> {
     }
   }
 
-  // ===== 同步 todo tags =====
-  for (const tt of allTodoTags) {
+  // ===== 同步 todo tags（增量：createdAt > lastBackupTs）=====
+  const newTodoTags = allTodoTags.filter(tt => tt.createdAt > lastBackupTs);
+  for (const tt of newTodoTags) {
     try {
       await d1.query(
         `INSERT OR REPLACE INTO todo_tags
@@ -292,8 +301,13 @@ export async function backupToCloud(): Promise<CloudBackupResult> {
     }
   }
 
-  // ===== 同步 templates =====
+  // ===== 同步 templates（增量：updatedAt > lastBackupTs）=====
+  // 对变化的 template，其 items 只 INSERT D1 中不存在的新 item（避免全量重写）
+  const changedTemplateIds = new Set(
+    allTemplates.filter(t => t.updatedAt > lastBackupTs).map(t => t.id)
+  );
   for (const { template, items } of templatesWithItems) {
+    if (!changedTemplateIds.has(template.id)) continue;
     try {
       await d1.query(
         `INSERT OR REPLACE INTO templates
@@ -303,8 +317,13 @@ export async function backupToCloud(): Promise<CloudBackupResult> {
       );
       result.templatesSynced++;
 
-      // 同步 template items
-      for (const item of items) {
+      // 同步 template items：只 INSERT D1 中不存在的
+      const existingItemIds = new Set<string>(
+        (await d1.query('SELECT id FROM template_items WHERE template_id = ?', [template.id]))
+          .map((r: any) => r.id)
+      );
+      const newItems = items.filter(it => !existingItemIds.has(it.id));
+      for (const item of newItems) {
         await d1.query(
           `INSERT OR REPLACE INTO template_items
            (id, template_id, title, note, time, sort_order, backup_batch_id)

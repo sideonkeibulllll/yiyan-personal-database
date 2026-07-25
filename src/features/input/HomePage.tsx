@@ -501,8 +501,9 @@ export function HomePage() {
   }, [content, addEntry, showToastMessage, isTodoMode, todoStartTime, todoEndTime, todoIsToday, addTodo, pendingImages]);
 
   // 处理键盘事件
+  // 仅 PC 端（web 平台）按 Enter 自动发送；手机端（android/ios）回车只换行，避免误触发送
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey && Capacitor.getPlatform() === 'web') {
       e.preventDefault();
       handleSend();
     }
