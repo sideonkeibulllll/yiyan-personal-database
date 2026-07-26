@@ -44,21 +44,17 @@ import {
 } from '@/services/syncService';
 import { isElectron } from '@/services/electronAdapter';
 import { restoreFromBase64Zip, saveReceivedZip } from '@/services/backupService';
-import {
-  getCloudBackupConfig,
-  saveCloudBackupConfig,
-  clearCloudBackupConfig,
-  testCloudConnection,
-  backupToCloud,
-  restoreFromCloud,
-  listCloudBackups,
-  getLastCloudBackupTime,
-} from '@/services/cloudBackupService';
+// 云端备份模块改为动态 import（v2.1.2）：
+// - 避免进入设置页面就加载 R2Client/cloudBackupService（即使已移除 AWS SDK，仍可减少初始 chunk）
+// - 用户点击"加载云端备份模块"按钮后才加载，最大化启动速度
 import type {
   CloudBackupConfig,
   CloudBackupResult,
   CloudRestoreResult,
 } from '@/services/cloudBackupTypes';
+
+/** 云端备份模块类型（动态 import 后获得） */
+type CloudModule = typeof import('@/services/cloudBackupService');
 import { isHttpServerSupported } from '@/services/capacitorHttpServer';
 import type {
   DiscoveredDevice,
@@ -273,6 +269,9 @@ export function SettingsPage() {
   const [cloudRestoreResult, setCloudRestoreResult] = useState<CloudRestoreResult | null>(null);
   const [lastCloudBackupTs, setLastCloudBackupTs] = useState<number | null>(null);
   const [cloudBackupHistory, setCloudBackupHistory] = useState<any[]>([]);
+  // v2.1.2: 云端备份模块懒加载（点击按钮后才 dynamic import）
+  const [cloudModule, setCloudModule] = useState<CloudModule | null>(null);
+  const [cloudModuleLoading, setCloudModuleLoading] = useState(false);
 
   // 云端配置编辑表单
   const [editConfig, setEditConfig] = useState<CloudBackupConfig | null>(null);
@@ -585,8 +584,43 @@ export function SettingsPage() {
 
   // ===== 云端备份 =====
 
+  // v2.1.2: 加载云端备份模块（动态 import）
+  const handleLoadCloudModule = async () => {
+    if (cloudModule || cloudModuleLoading) return;
+    setCloudModuleLoading(true);
+    setCloudMessage('正在加载云端备份模块...');
+    try {
+      const mod = await import('@/services/cloudBackupService');
+      setCloudModule(mod);
+      setCloudMessage('');
+      // 模块加载完成后立即刷新状态
+      const config = mod.getCloudBackupConfig();
+      setCloudConfig(config);
+      setEditConfig(config || {
+        accountId: '', d1DatabaseId: '', d1ApiToken: '',
+        r2BucketName: '', r2AccessKeyId: '', r2SecretAccessKey: '',
+        r2CustomDomain: '',
+      });
+      if (config) {
+        try {
+          const ts = await mod.getLastCloudBackupTime();
+          setLastCloudBackupTs(ts);
+          const history = await mod.listCloudBackups();
+          setCloudBackupHistory(history);
+        } catch (err) {
+          console.warn('[cloud] refresh state failed:', err);
+        }
+      }
+    } catch (err) {
+      setCloudMessage(`加载失败: ${err instanceof Error ? err.message : '未知错误'}`);
+    } finally {
+      setCloudModuleLoading(false);
+    }
+  };
+
   const refreshCloudState = async () => {
-    const config = getCloudBackupConfig();
+    if (!cloudModule) return;
+    const config = cloudModule.getCloudBackupConfig();
     setCloudConfig(config);
     setEditConfig(config || {
       accountId: '', d1DatabaseId: '', d1ApiToken: '',
@@ -595,9 +629,9 @@ export function SettingsPage() {
     });
     if (config) {
       try {
-        const ts = await getLastCloudBackupTime();
+        const ts = await cloudModule.getLastCloudBackupTime();
         setLastCloudBackupTs(ts);
-        const history = await listCloudBackups();
+        const history = await cloudModule.listCloudBackups();
         setCloudBackupHistory(history);
       } catch (err) {
         console.warn('[cloud] refresh state failed:', err);
@@ -606,20 +640,21 @@ export function SettingsPage() {
   };
 
   const handleSaveCloudConfig = () => {
-    if (!editConfig) return;
+    if (!editConfig || !cloudModule) return;
     if (!editConfig.accountId || !editConfig.d1DatabaseId || !editConfig.d1ApiToken
         || !editConfig.r2BucketName || !editConfig.r2AccessKeyId || !editConfig.r2SecretAccessKey) {
       setCloudMessage('请填写所有必填字段');
       return;
     }
-    saveCloudBackupConfig(editConfig);
+    cloudModule.saveCloudBackupConfig(editConfig);
     setCloudConfig(editConfig);
     setCloudMessage('配置已保存');
   };
 
   const handleClearCloudConfig = () => {
+    if (!cloudModule) return;
     if (!confirm('确定清除云端备份配置？\n（不会影响已备份的数据）')) return;
-    clearCloudBackupConfig();
+    cloudModule.clearCloudBackupConfig();
     setCloudConfig(null);
     setEditConfig({
       accountId: '', d1DatabaseId: '', d1ApiToken: '',
@@ -632,11 +667,11 @@ export function SettingsPage() {
   };
 
   const handleTestCloud = async () => {
-    if (!cloudConfig) return;
+    if (!cloudConfig || !cloudModule) return;
     setCloudBusy(true);
     setCloudMessage('正在测试连接...');
     try {
-      const result = await testCloudConnection();
+      const result = await cloudModule.testCloudConnection();
       setCloudMessage(`D1: ${result.d1}\nR2: ${result.r2}`);
     } catch (err) {
       setCloudMessage(`测试失败: ${err instanceof Error ? err.message : '未知错误'}`);
@@ -646,11 +681,12 @@ export function SettingsPage() {
   };
 
   const handleCloudBackup = async () => {
+    if (!cloudModule) return;
     setCloudBusy(true);
     setCloudMessage('正在备份到云端...');
     setCloudBackupResult(null);
     try {
-      const result = await backupToCloud();
+      const result = await cloudModule.backupToCloud();
       setCloudBackupResult(result);
       setCloudMessage(
         `✅ 备份完成 (${(result.duration / 1000).toFixed(1)}s)\n` +
@@ -667,12 +703,13 @@ export function SettingsPage() {
   };
 
   const handleCloudRestore = async () => {
+    if (!cloudModule) return;
     if (!confirm('确定从云端恢复数据？\n（合并模式：跳过已存在的条目）')) return;
     setCloudBusy(true);
     setCloudMessage('正在从云端恢复...');
     setCloudRestoreResult(null);
     try {
-      const result = await restoreFromCloud();
+      const result = await cloudModule.restoreFromCloud();
       setCloudRestoreResult(result);
       setCloudMessage(
         `✅ 恢复完成 (${(result.duration / 1000).toFixed(1)}s)\n` +
@@ -786,12 +823,13 @@ export function SettingsPage() {
   // ====== 面板初始化副作用 ======
   useEffect(() => {
     if (activeTab === 'backup') refreshBackups();
-    if (activeTab === 'cloud') refreshCloudState();
+    // v2.1.2: 云端备份模块需用户点击按钮加载后才刷新
+    if (activeTab === 'cloud' && cloudModule) refreshCloudState();
     if (activeTab === 'sync') {
       refreshTrustedDevices();
       refreshLocalIp();
     }
-  }, [activeTab]);
+  }, [activeTab, cloudModule]);
 
   // ====== 渲染右侧面板 ======
   const renderPanel = () => {
@@ -1452,13 +1490,36 @@ export function SettingsPage() {
         return (
           <div className="settings-panel-content">
             <h2 className="panel-title">云端备份</h2>
-            <div className="form-hint" style={{ marginBottom: '12px' }}>
-              {cloudConfig
-                ? lastCloudBackupTs
-                  ? `上次备份: ${new Date(lastCloudBackupTs).toLocaleString('zh-CN')}`
-                  : '已配置 · 尚未备份'
-                : 'Cloudflare D1 + R2 远程备份'}
-            </div>
+            {!cloudModule ? (
+              <>
+                <div className="form-hint" style={{ marginBottom: '12px' }}>
+                  Cloudflare D1 + R2 远程备份（v2.1.2 仅支持自定义域名连接）
+                </div>
+                <div className="form-group">
+                  <button
+                    className="form-reset-btn"
+                    onClick={handleLoadCloudModule}
+                    disabled={cloudModuleLoading}
+                  >
+                    {cloudModuleLoading ? '加载中...' : '初始化云端备份模块'}
+                  </button>
+                </div>
+                <div className="form-hint" style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
+                  ℹ️ 点击按钮后才会加载云端备份模块，避免影响启动速度
+                </div>
+                {cloudMessage && (
+                  <div className="form-hint" style={{ marginTop: '8px' }}>{cloudMessage}</div>
+                )}
+              </>
+            ) : (
+              <>
+                <div className="form-hint" style={{ marginBottom: '12px' }}>
+                  {cloudConfig
+                    ? lastCloudBackupTs
+                      ? `上次备份: ${new Date(lastCloudBackupTs).toLocaleString('zh-CN')}`
+                      : '已配置 · 尚未备份'
+                    : 'Cloudflare D1 + R2 远程备份'}
+                </div>
 
             <div className="settings-subsection-title">Cloudflare 配置</div>
             {editConfig && (
@@ -1608,6 +1669,8 @@ export function SettingsPage() {
                     </div>
                   </>
                 )}
+              </>
+            )}
               </>
             )}
           </div>
