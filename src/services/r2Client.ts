@@ -1,13 +1,33 @@
 /**
- * Cloudflare R2 客户端封装（S3 兼容 API）
+ * Cloudflare R2 客户端封装（S3 兼容 API + 自定义域名直读）
  *
  * R2 S3 兼容 API 文档: https://developers.cloudflare.com/r2/api/s3/api/
  *
  * 端点格式: https://{account_id}.r2.cloudflarestorage.com
  * 使用 AWS Signature V4 签名（由 @aws-sdk/client-s3 处理）
+ *
+ * 优化策略（v2.0.6）：
+ * - 读操作（testConnection / getObject / getBase64 / exists）优先走自定义域名
+ *   （公开可读，无需签名，避免 AWS Sig V4 + CORS 预检 + 海外握手开销）
+ * - 写操作（putObject / putBase64Image）仍走 S3 API（自定义域名通常只读）
+ * - 自定义域名失败时自动降级回 S3 API，保证可用性
  */
 import { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import type { CloudBackupConfig } from './cloudBackupTypes';
+
+/** 自定义域名 fetch 的默认超时（ms） */
+const FETCH_TIMEOUT_MS = 15000;
+
+/** 带 AbortController 超时的 fetch 封装 */
+async function fetchWithTimeout(url: string, init: RequestInit = {}, timeoutMs = FETCH_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export class R2Client {
   private s3: S3Client;
@@ -16,7 +36,7 @@ export class R2Client {
 
   constructor(config: Pick<CloudBackupConfig, 'accountId' | 'r2BucketName' | 'r2AccessKeyId' | 'r2SecretAccessKey' | 'r2CustomDomain'>) {
     this.bucket = config.r2BucketName;
-    this.customDomain = config.r2CustomDomain;
+    this.customDomain = config.r2CustomDomain?.trim() || undefined;
     this.s3 = new S3Client({
       region: 'auto',
       endpoint: `https://${config.accountId}.r2.cloudflarestorage.com`,
@@ -27,14 +47,24 @@ export class R2Client {
     });
   }
 
+  /** 是否启用自定义域名直读 */
+  private hasCustomDomain(): boolean {
+    return !!this.customDomain;
+  }
+
+  /** 拼接自定义域名的完整 URL */
+  private buildCustomUrl(key: string): string {
+    const domain = this.customDomain!.replace(/^https?:\/\//, '').replace(/\/$/, '');
+    return `https://${domain}/${key}`;
+  }
+
   /**
    * 获取附件的公开访问 URL
    * 如果配置了自定义域名，优先使用自定义域名（更快）；否则用 R2 默认路径
    */
   getPublicUrl(key: string): string {
-    if (this.customDomain) {
-      const domain = this.customDomain.replace(/^https?:\/\//, '').replace(/\/$/, '');
-      return `https://${domain}/${key}`;
+    if (this.hasCustomDomain()) {
+      return this.buildCustomUrl(key);
     }
     // 无自定义域名时返回空字符串（调用方应通过 getObject 下载）
     return '';
@@ -42,9 +72,7 @@ export class R2Client {
 
   /**
    * 上传二进制数据到 R2
-   * @param key 对象 key（如 attachments/xxx_orig.jpg）
-   * @param data 二进制数据
-   * @param contentType MIME 类型
+   * 写操作必须走 S3 API（自定义域名通常只读）
    */
   async putObject(key: string, data: Uint8Array, contentType: string): Promise<void> {
     const cmd = new PutObjectCommand({
@@ -71,17 +99,38 @@ export class R2Client {
 
   /**
    * 从 R2 下载对象（返回 Uint8Array）
+   * 优先走自定义域名（无签名、无 CORS 预检），失败回退 S3 API
    */
   async getObject(key: string): Promise<Uint8Array> {
-    const cmd = new GetObjectCommand({
-      Bucket: this.bucket,
-      Key: key,
-    });
+    // 优先走自定义域名
+    if (this.hasCustomDomain()) {
+      try {
+        const resp = await fetchWithTimeout(this.buildCustomUrl(key), { method: 'GET' });
+        if (resp.ok) {
+          const buf = await resp.arrayBuffer();
+          return new Uint8Array(buf);
+        }
+        // 404 直接抛出，不降级（自定义域名已确认对象不存在）
+        if (resp.status === 404) {
+          throw new Error(`R2 object not found: ${key}`);
+        }
+        // 其他错误降级到 S3 API
+        console.warn(`[R2] 自定义域名 GET 失败 ${resp.status}，降级 S3 API: ${key}`);
+      } catch (err) {
+        // 404 错误不降级（已确认不存在）
+        if (err instanceof Error && err.message.includes('not found')) {
+          throw err;
+        }
+        console.warn(`[R2] 自定义域名 GET 异常，降级 S3 API:`, err);
+      }
+    }
+
+    // 降级：S3 API
+    const cmd = new GetObjectCommand({ Bucket: this.bucket, Key: key });
     const resp = await this.s3.send(cmd);
     if (!resp.Body) {
       throw new Error(`R2 object not found: ${key}`);
     }
-    // resp.Body 是 Readable 流，转成 Uint8Array
     const chunks: Uint8Array[] = [];
     const reader = (resp.Body as any).getReader();
     while (true) {
@@ -113,13 +162,25 @@ export class R2Client {
 
   /**
    * 检查对象是否存在（不下载内容）
+   * 优先走自定义域名 HEAD，失败回退 S3 API
    */
   async exists(key: string): Promise<boolean> {
+    // 优先走自定义域名
+    if (this.hasCustomDomain()) {
+      try {
+        const resp = await fetchWithTimeout(this.buildCustomUrl(key), { method: 'HEAD' });
+        if (resp.ok) return true;
+        if (resp.status === 404) return false;
+        // 其他错误降级到 S3 API
+        console.warn(`[R2] 自定义域名 HEAD 失败 ${resp.status}，降级 S3 API: ${key}`);
+      } catch (err) {
+        console.warn(`[R2] 自定义域名 HEAD 异常，降级 S3 API:`, err);
+      }
+    }
+
+    // 降级：S3 API
     try {
-      const cmd = new HeadObjectCommand({
-        Bucket: this.bucket,
-        Key: key,
-      });
+      const cmd = new HeadObjectCommand({ Bucket: this.bucket, Key: key });
       await this.s3.send(cmd);
       return true;
     } catch {
@@ -128,11 +189,29 @@ export class R2Client {
   }
 
   /**
-   * 测试连接（尝试 HEAD bucket）
+   * 测试连接
+   * 优先走自定义域名 HEAD（百毫秒级），失败回退 S3 API（秒级）
    */
   async testConnection(): Promise<{ ok: boolean; message: string }> {
+    // 优先走自定义域名
+    if (this.hasCustomDomain()) {
+      try {
+        const testUrl = this.buildCustomUrl('__connection_test__');
+        const resp = await fetchWithTimeout(testUrl, { method: 'HEAD' }, 8000);
+        // 200 = 域名可达，且 R2 工作正常（说明自定义域名已绑定 bucket）
+        // 404 = 域名可达，对象不存在但 R2 工作正常
+        if (resp.ok || resp.status === 404) {
+          return { ok: true, message: 'R2 连接成功（自定义域名）' };
+        }
+        // 403 / 其他 = 自定义域名配置异常，降级到 S3 API
+        console.warn(`[R2] 自定义域名测试返回 ${resp.status}，降级 S3 API`);
+      } catch (err) {
+        console.warn(`[R2] 自定义域名测试异常，降级 S3 API:`, err);
+      }
+    }
+
+    // 降级：S3 API
     try {
-      // 尝试 HEAD 一个不存在的 key，只要不报 NoSuchBucket 就说明 bucket 存在且凭证有效
       const cmd = new HeadObjectCommand({
         Bucket: this.bucket,
         Key: '__connection_test__',
@@ -144,18 +223,16 @@ export class R2Client {
         // 403 = 凭证无效或 bucket 不存在
         const name = err?.name || '';
         if (name === 'NotFound' || name === 'NoSuchKey') {
-          return { ok: true, message: 'R2 连接成功' };
+          return { ok: true, message: 'R2 连接成功（S3 API）' };
         }
         if (name === 'NoSuchBucket') {
           return { ok: false, message: `Bucket "${this.bucket}" 不存在` };
         }
-        // 其他错误也可能是凭证问题但连接通了
         if (name === 'Forbidden' || name === 'AccessDenied') {
           return { ok: false, message: '凭证无效或无权限访问该 Bucket' };
         }
       }
-      // 如果 HeadObject 成功（不太可能，因为 key 不存在），也视为连接正常
-      return { ok: true, message: 'R2 连接成功' };
+      return { ok: true, message: 'R2 连接成功（S3 API）' };
     } catch (err) {
       return {
         ok: false,
