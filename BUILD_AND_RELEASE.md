@@ -9,9 +9,9 @@
 - **项目路径**: `C:\Users\tianming\Desktop\test\yiyan-personal-database`
 - **GitHub 仓库**: https://github.com/sideonkeibulllll/yiyan-personal-database.git
 - **包名 (applicationId)**: `com.yiyan.memorydb`
-- **当前最新版本**: `[v2.1.2]` ← **推送完成后必须更新此项**
-- **当前 versionCode**: `[18]` ← **每次发版必须 +1**
-- **当前 versionName**: `[2.1.2]` ← **每次发版必须同步更新**
+- **当前最新版本**: `[v2.1.3]` ← **推送完成后必须更新此项**
+- **当前 versionCode**: `[19]` ← **每次发版必须 +1**
+- **当前 versionName**: `[2.1.3]` ← **每次发版必须同步更新**
 
 ---
 
