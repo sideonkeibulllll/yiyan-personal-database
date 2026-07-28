@@ -29,13 +29,27 @@ async function fetchWithTimeout(url: string, init: RequestInit = {}, timeoutMs =
   }
 }
 
+/** 中转站 R2 逻辑桶名（个人数据库用 memory） */
+const TS_BUCKET_KEY = 'memory';
+
 export class R2Client {
   private bucket: string;
   private customDomain: string | undefined;
+  private useTransferStation: boolean;
+  private tsUrl: string;
+  private tsToken: string;
 
-  constructor(config: Pick<CloudBackupConfig, 'accountId' | 'r2BucketName' | 'r2AccessKeyId' | 'r2SecretAccessKey' | 'r2CustomDomain'>) {
+  constructor(config: Pick<CloudBackupConfig, 'accountId' | 'r2BucketName' | 'r2AccessKeyId' | 'r2SecretAccessKey' | 'r2CustomDomain' | 'useTransferStation' | 'transferStationUrl' | 'transferStationToken'>) {
     this.bucket = config.r2BucketName;
     this.customDomain = config.r2CustomDomain?.trim() || undefined;
+    this.useTransferStation = config.useTransferStation ?? false;
+    this.tsUrl = config.transferStationUrl?.replace(/\/$/, '') ?? '';
+    this.tsToken = config.transferStationToken ?? '';
+  }
+
+  /** 是否走中转站 */
+  private isTransferStationMode(): boolean {
+    return this.useTransferStation && !!this.tsUrl && !!this.tsToken;
   }
 
   /** 是否启用自定义域名（本客户端强制要求启用） */
@@ -61,10 +75,14 @@ export class R2Client {
 
   /**
    * 上传二进制数据到 R2
-   * 注意：需要 bucket 允许公开写，或通过 Cloudflare Worker 代理
-   * 若不支持写，会快速失败并抛出明确错误
+   * - 直连模式：走自定义域名 PUT（需 bucket 公开写）
+   * - 中转站模式：走 /r2/put/<key>?bucket=memory（Worker 原生绑定代理）
    */
   async putObject(key: string, data: Uint8Array, contentType: string): Promise<void> {
+    if (this.isTransferStationMode()) {
+      await this.putObjectViaTransferStation(key, data, contentType);
+      return;
+    }
     if (!this.hasCustomDomain()) {
       throw new Error('未配置 R2 自定义域名，无法上传（v2.1.2 仅支持域名连接）');
     }
@@ -77,9 +95,26 @@ export class R2Client {
       body: ab,
     });
     if (!resp.ok) {
-      // 405 = 方法不允许（自定义域名只读）
-      // 403 = 拒绝访问
       throw new Error(`R2 上传失败 ${resp.status}（可能 bucket 未开放公开写）: ${resp.statusText}`);
+    }
+  }
+
+  /** 走中转站上传 */
+  private async putObjectViaTransferStation(key: string, data: Uint8Array, contentType: string): Promise<void> {
+    const url = `${this.tsUrl}/r2/put/${encodeURIComponent(key)}?bucket=${TS_BUCKET_KEY}`;
+    const ab = new ArrayBuffer(data.byteLength);
+    new Uint8Array(ab).set(data);
+    const resp = await fetchWithTimeout(url, {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${this.tsToken}`,
+        'Content-Type': contentType,
+      },
+      body: ab,
+    });
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(`R2(TS) 上传失败 ${resp.status}: ${text.slice(0, 200)}`);
     }
   }
 
@@ -97,8 +132,13 @@ export class R2Client {
 
   /**
    * 从 R2 下载对象（返回 Uint8Array）
+   * - 直连：自定义域名 GET
+   * - 中转站：/r2/get?bucket=memory&key=...
    */
   async getObject(key: string): Promise<Uint8Array> {
+    if (this.isTransferStationMode()) {
+      return this.getObjectViaTransferStation(key);
+    }
     if (!this.hasCustomDomain()) {
       throw new Error('未配置 R2 自定义域名，无法下载（v2.1.2 仅支持域名连接）');
     }
@@ -106,6 +146,24 @@ export class R2Client {
     if (!resp.ok) {
       if (resp.status === 404) throw new Error(`R2 object not found: ${key}`);
       throw new Error(`R2 下载失败 ${resp.status}: ${resp.statusText}`);
+    }
+    const buf = await resp.arrayBuffer();
+    return new Uint8Array(buf);
+  }
+
+  /** 走中转站下载 */
+  private async getObjectViaTransferStation(key: string): Promise<Uint8Array> {
+    const url = `${this.tsUrl}/r2/get?bucket=${TS_BUCKET_KEY}&key=${encodeURIComponent(key)}`;
+    const resp = await fetchWithTimeout(url, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${this.tsToken}`,
+      },
+    });
+    if (!resp.ok) {
+      if (resp.status === 404) throw new Error(`R2 object not found: ${key}`);
+      const text = await resp.text();
+      throw new Error(`R2(TS) 下载失败 ${resp.status}: ${text.slice(0, 200)}`);
     }
     const buf = await resp.arrayBuffer();
     return new Uint8Array(buf);
@@ -127,6 +185,23 @@ export class R2Client {
    * 检查对象是否存在（不下载内容）
    */
   async exists(key: string): Promise<boolean> {
+    if (this.isTransferStationMode()) {
+      // 中转站没有 HEAD 接口，用 GET 范围请求试
+      try {
+        const url = `${this.tsUrl}/r2/get?bucket=${TS_BUCKET_KEY}&key=${encodeURIComponent(key)}`;
+        const resp = await fetchWithTimeout(url, {
+          method: 'GET',
+          headers: { 'Authorization': `Bearer ${this.tsToken}` },
+        });
+        if (resp.ok) return true;
+        if (resp.status === 404) return false;
+        throw new Error(`R2(TS) HEAD 失败 ${resp.status}`);
+      } catch (err) {
+        // 如果是 404 相关错误，返回 false
+        if (err instanceof Error && err.message.includes('not found')) return false;
+        throw err;
+      }
+    }
     if (!this.hasCustomDomain()) {
       throw new Error('未配置 R2 自定义域名');
     }

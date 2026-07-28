@@ -18,6 +18,12 @@ export interface CloudBackupConfig {
   r2SecretAccessKey: string;
   /** R2 自定义域名（可选，用于公开访问附件） */
   r2CustomDomain?: string;
+  /** 是否走中转站（Cloudflare Worker 代理） */
+  useTransferStation?: boolean;
+  /** 中转站地址 */
+  transferStationUrl?: string;
+  /** 中转站 AUTH_TOKEN */
+  transferStationToken?: string;
 }
 
 /** 云端备份结果 */

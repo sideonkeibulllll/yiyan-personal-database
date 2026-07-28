@@ -600,6 +600,7 @@ export function SettingsPage() {
         accountId: '', d1DatabaseId: '', d1ApiToken: '',
         r2BucketName: '', r2AccessKeyId: '', r2SecretAccessKey: '',
         r2CustomDomain: '',
+        useTransferStation: false, transferStationUrl: '', transferStationToken: '',
       });
       if (config) {
         try {
@@ -626,6 +627,7 @@ export function SettingsPage() {
       accountId: '', d1DatabaseId: '', d1ApiToken: '',
       r2BucketName: '', r2AccessKeyId: '', r2SecretAccessKey: '',
       r2CustomDomain: '',
+      useTransferStation: false, transferStationUrl: '', transferStationToken: '',
     });
     if (config) {
       try {
@@ -660,6 +662,7 @@ export function SettingsPage() {
       accountId: '', d1DatabaseId: '', d1ApiToken: '',
       r2BucketName: '', r2AccessKeyId: '', r2SecretAccessKey: '',
       r2CustomDomain: '',
+      useTransferStation: false, transferStationUrl: '', transferStationToken: '',
     });
     setLastCloudBackupTs(null);
     setCloudBackupHistory([]);
@@ -1595,6 +1598,45 @@ export function SettingsPage() {
                   />
                   <span className="form-hint">配置后访问附件更快</span>
                 </div>
+
+                {/* 中转站配置 */}
+                <div className="settings-subsection-title" style={{ marginTop: '16px' }}>中转站（Cloudflare Worker 代理）</div>
+                <div className="form-group">
+                  <label className="form-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={editConfig.useTransferStation ?? false}
+                      onChange={e => setEditConfig({ ...editConfig, useTransferStation: e.target.checked })}
+                    />
+                    <span>走中转站</span>
+                  </label>
+                  <span className="form-hint">开启后 D1/R2 请求经 Cloudflare Worker 代理，减少 CORS 问题并加速批量写入</span>
+                </div>
+                {editConfig.useTransferStation && (
+                  <>
+                    <div className="form-group">
+                      <label className="form-label">中转站地址</label>
+                      <input
+                        type="text"
+                        className="form-input glass"
+                        value={editConfig.transferStationUrl || ''}
+                        onChange={e => setEditConfig({ ...editConfig, transferStationUrl: e.target.value })}
+                        placeholder="https://cloudflare.8765777.xyz"
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">中转站 Token</label>
+                      <input
+                        type="password"
+                        className="form-input glass"
+                        value={editConfig.transferStationToken || ''}
+                        onChange={e => setEditConfig({ ...editConfig, transferStationToken: e.target.value })}
+                        placeholder="AUTH_TOKEN"
+                      />
+                    </div>
+                  </>
+                )}
+
                 <div className="form-group" style={{ display: 'flex', gap: '8px' }}>
                   <button className="form-reset-btn" onClick={handleSaveCloudConfig}>
                     保存配置
