@@ -58,3 +58,6 @@ _tmp_md_backup/
 quickmenu-fix_*.md
 todo-sprint*.md
 entry_tags_info_optimization.md
+
+# Local agent memory (not for release)
+.workbuddy/

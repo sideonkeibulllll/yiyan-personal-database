@@ -2,30 +2,6 @@
  * 云端备份类型定义
  */
 
-/** 云端备份配置（存 localStorage） */
-export interface CloudBackupConfig {
-  /** Cloudflare Account ID */
-  accountId: string;
-  /** D1 Database ID */
-  d1DatabaseId: string;
-  /** D1 API Token（需 D1 编辑权限） */
-  d1ApiToken: string;
-  /** R2 Bucket 名称 */
-  r2BucketName: string;
-  /** R2 Access Key ID */
-  r2AccessKeyId: string;
-  /** R2 Secret Access Key */
-  r2SecretAccessKey: string;
-  /** R2 自定义域名（可选，用于公开访问附件） */
-  r2CustomDomain?: string;
-  /** 是否走中转站（Cloudflare Worker 代理） */
-  useTransferStation?: boolean;
-  /** 中转站地址 */
-  transferStationUrl?: string;
-  /** 中转站 AUTH_TOKEN */
-  transferStationToken?: string;
-}
-
 /** 云端备份结果 */
 export interface CloudBackupResult {
   /** 备份批次 ID */
@@ -112,9 +88,6 @@ export interface D1BackupBatch {
   app_version: string;
   created_at: number;
 }
-
-/** 云端备份配置的 localStorage key */
-export const CLOUD_BACKUP_CONFIG_KEY = 'yiyan_cloud_backup_config';
 
 /** R2 中附件存储的 key 前缀 */
 export const R2_ATTACHMENT_PREFIX = 'attachments/';

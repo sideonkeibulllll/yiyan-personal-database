@@ -48,7 +48,6 @@ import { restoreFromBase64Zip, saveReceivedZip } from '@/services/backupService'
 // - 避免进入设置页面就加载 R2Client/cloudBackupService（即使已移除 AWS SDK，仍可减少初始 chunk）
 // - 用户点击"加载云端备份模块"按钮后才加载，最大化启动速度
 import type {
-  CloudBackupConfig,
   CloudBackupResult,
   CloudRestoreResult,
 } from '@/services/cloudBackupTypes';
@@ -262,7 +261,7 @@ export function SettingsPage() {
   const [pendingZipFile, setPendingZipFile] = useState<{ file: File; manifest: BackupManifest | null } | null>(null);
 
   // 云端备份状态
-  const [cloudConfig, setCloudConfig] = useState<CloudBackupConfig | null>(null);
+  // cloudConfig 已移除（硬编码配置不需要 state）
   const [cloudBusy, setCloudBusy] = useState(false);
   const [cloudMessage, setCloudMessage] = useState('');
   const [cloudBackupResult, setCloudBackupResult] = useState<CloudBackupResult | null>(null);
@@ -274,7 +273,7 @@ export function SettingsPage() {
   const [cloudModuleLoading, setCloudModuleLoading] = useState(false);
 
   // 云端配置编辑表单
-  const [editConfig, setEditConfig] = useState<CloudBackupConfig | null>(null);
+  // editConfig 已移除（硬编码配置不需要表单）
 
   // 同步状态
   const [trustedDevices, setTrustedDevices] = useState<TrustedDevice[]>([]);
@@ -584,7 +583,7 @@ export function SettingsPage() {
 
   // ===== 云端备份 =====
 
-  // v2.1.2: 加载云端备份模块（动态 import）
+  // v2.2.0: 加载云端备份模块（动态 import）
   const handleLoadCloudModule = async () => {
     if (cloudModule || cloudModuleLoading) return;
     setCloudModuleLoading(true);
@@ -594,23 +593,13 @@ export function SettingsPage() {
       setCloudModule(mod);
       setCloudMessage('');
       // 模块加载完成后立即刷新状态
-      const config = mod.getCloudBackupConfig();
-      setCloudConfig(config);
-      setEditConfig(config || {
-        accountId: '', d1DatabaseId: '', d1ApiToken: '',
-        r2BucketName: '', r2AccessKeyId: '', r2SecretAccessKey: '',
-        r2CustomDomain: '',
-        useTransferStation: false, transferStationUrl: '', transferStationToken: '',
-      });
-      if (config) {
-        try {
-          const ts = await mod.getLastCloudBackupTime();
-          setLastCloudBackupTs(ts);
-          const history = await mod.listCloudBackups();
-          setCloudBackupHistory(history);
-        } catch (err) {
-          console.warn('[cloud] refresh state failed:', err);
-        }
+      try {
+        const ts = await mod.getLastCloudBackupTime();
+        setLastCloudBackupTs(ts);
+        const history = await mod.listCloudBackups();
+        setCloudBackupHistory(history);
+      } catch (err) {
+        console.warn('[cloud] refresh state failed:', err);
       }
     } catch (err) {
       setCloudMessage(`加载失败: ${err instanceof Error ? err.message : '未知错误'}`);
@@ -621,56 +610,18 @@ export function SettingsPage() {
 
   const refreshCloudState = async () => {
     if (!cloudModule) return;
-    const config = cloudModule.getCloudBackupConfig();
-    setCloudConfig(config);
-    setEditConfig(config || {
-      accountId: '', d1DatabaseId: '', d1ApiToken: '',
-      r2BucketName: '', r2AccessKeyId: '', r2SecretAccessKey: '',
-      r2CustomDomain: '',
-      useTransferStation: false, transferStationUrl: '', transferStationToken: '',
-    });
-    if (config) {
-      try {
-        const ts = await cloudModule.getLastCloudBackupTime();
-        setLastCloudBackupTs(ts);
-        const history = await cloudModule.listCloudBackups();
-        setCloudBackupHistory(history);
-      } catch (err) {
-        console.warn('[cloud] refresh state failed:', err);
-      }
+    try {
+      const ts = await cloudModule.getLastCloudBackupTime();
+      setLastCloudBackupTs(ts);
+      const history = await cloudModule.listCloudBackups();
+      setCloudBackupHistory(history);
+    } catch (err) {
+      console.warn('[cloud] refresh state failed:', err);
     }
-  };
-
-  const handleSaveCloudConfig = () => {
-    if (!editConfig || !cloudModule) return;
-    if (!editConfig.accountId || !editConfig.d1DatabaseId || !editConfig.d1ApiToken
-        || !editConfig.r2BucketName || !editConfig.r2AccessKeyId || !editConfig.r2SecretAccessKey) {
-      setCloudMessage('请填写所有必填字段');
-      return;
-    }
-    cloudModule.saveCloudBackupConfig(editConfig);
-    setCloudConfig(editConfig);
-    setCloudMessage('配置已保存');
-  };
-
-  const handleClearCloudConfig = () => {
-    if (!cloudModule) return;
-    if (!confirm('确定清除云端备份配置？\n（不会影响已备份的数据）')) return;
-    cloudModule.clearCloudBackupConfig();
-    setCloudConfig(null);
-    setEditConfig({
-      accountId: '', d1DatabaseId: '', d1ApiToken: '',
-      r2BucketName: '', r2AccessKeyId: '', r2SecretAccessKey: '',
-      r2CustomDomain: '',
-      useTransferStation: false, transferStationUrl: '', transferStationToken: '',
-    });
-    setLastCloudBackupTs(null);
-    setCloudBackupHistory([]);
-    setCloudMessage('配置已清除');
   };
 
   const handleTestCloud = async () => {
-    if (!cloudConfig || !cloudModule) return;
+    if (!cloudModule) return;
     setCloudBusy(true);
     setCloudMessage('正在测试连接...');
     try {
@@ -1496,7 +1447,7 @@ export function SettingsPage() {
             {!cloudModule ? (
               <>
                 <div className="form-hint" style={{ marginBottom: '12px' }}>
-                  Cloudflare D1 + R2 远程备份（v2.1.2 仅支持自定义域名连接）
+                  Cloudflare D1 + R2 远程备份（中转站模式）
                 </div>
                 <div className="form-group">
                   <button
@@ -1517,145 +1468,12 @@ export function SettingsPage() {
             ) : (
               <>
                 <div className="form-hint" style={{ marginBottom: '12px' }}>
-                  {cloudConfig
-                    ? lastCloudBackupTs
-                      ? `上次备份: ${new Date(lastCloudBackupTs).toLocaleString('zh-CN')}`
-                      : '已配置 · 尚未备份'
-                    : 'Cloudflare D1 + R2 远程备份'}
+                  {lastCloudBackupTs
+                    ? `上次备份: ${new Date(lastCloudBackupTs).toLocaleString('zh-CN')}`
+                    : 'Cloudflare D1 + R2 · 中转站模式'}
                 </div>
 
-            <div className="settings-subsection-title">Cloudflare 配置</div>
-            {editConfig && (
-              <>
-                <div className="form-group">
-                  <label className="form-label">Account ID</label>
-                  <input
-                    type="text"
-                    className="form-input glass"
-                    value={editConfig.accountId}
-                    onChange={e => setEditConfig({ ...editConfig, accountId: e.target.value })}
-                    placeholder="Cloudflare Account ID"
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">D1 Database ID</label>
-                  <input
-                    type="text"
-                    className="form-input glass"
-                    value={editConfig.d1DatabaseId}
-                    onChange={e => setEditConfig({ ...editConfig, d1DatabaseId: e.target.value })}
-                    placeholder="D1 数据库 ID"
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">D1 API Token</label>
-                  <input
-                    type="password"
-                    className="form-input glass"
-                    value={editConfig.d1ApiToken}
-                    onChange={e => setEditConfig({ ...editConfig, d1ApiToken: e.target.value })}
-                    placeholder="需 D1 编辑权限"
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">R2 Bucket 名称</label>
-                  <input
-                    type="text"
-                    className="form-input glass"
-                    value={editConfig.r2BucketName}
-                    onChange={e => setEditConfig({ ...editConfig, r2BucketName: e.target.value })}
-                    placeholder="如 yiyan-backups"
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">R2 Access Key ID</label>
-                  <input
-                    type="text"
-                    className="form-input glass"
-                    value={editConfig.r2AccessKeyId}
-                    onChange={e => setEditConfig({ ...editConfig, r2AccessKeyId: e.target.value })}
-                    placeholder="R2 API Token 中的 Access Key ID"
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">R2 Secret Access Key</label>
-                  <input
-                    type="password"
-                    className="form-input glass"
-                    value={editConfig.r2SecretAccessKey}
-                    onChange={e => setEditConfig({ ...editConfig, r2SecretAccessKey: e.target.value })}
-                    placeholder="R2 Secret Access Key"
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">R2 自定义域名（可选）</label>
-                  <input
-                    type="text"
-                    className="form-input glass"
-                    value={editConfig.r2CustomDomain || ''}
-                    onChange={e => setEditConfig({ ...editConfig, r2CustomDomain: e.target.value })}
-                    placeholder="如 yiyanr2.8765777.xyz"
-                  />
-                  <span className="form-hint">配置后访问附件更快</span>
-                </div>
-
-                {/* 中转站配置 */}
-                <div className="settings-subsection-title" style={{ marginTop: '16px' }}>中转站（Cloudflare Worker 代理）</div>
-                <div className="form-group">
-                  <label className="form-checkbox">
-                    <input
-                      type="checkbox"
-                      checked={editConfig.useTransferStation ?? false}
-                      onChange={e => setEditConfig({ ...editConfig, useTransferStation: e.target.checked })}
-                    />
-                    <span>走中转站</span>
-                  </label>
-                  <span className="form-hint">开启后 D1/R2 请求经 Cloudflare Worker 代理，减少 CORS 问题并加速批量写入</span>
-                </div>
-                {editConfig.useTransferStation && (
-                  <>
-                    <div className="form-group">
-                      <label className="form-label">中转站地址</label>
-                      <input
-                        type="text"
-                        className="form-input glass"
-                        value={editConfig.transferStationUrl || ''}
-                        onChange={e => setEditConfig({ ...editConfig, transferStationUrl: e.target.value })}
-                        placeholder="https://cloudflare.8765777.xyz"
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">中转站 Token</label>
-                      <input
-                        type="password"
-                        className="form-input glass"
-                        value={editConfig.transferStationToken || ''}
-                        onChange={e => setEditConfig({ ...editConfig, transferStationToken: e.target.value })}
-                        placeholder="AUTH_TOKEN"
-                      />
-                    </div>
-                  </>
-                )}
-
-                <div className="form-group" style={{ display: 'flex', gap: '8px' }}>
-                  <button className="form-reset-btn" onClick={handleSaveCloudConfig}>
-                    保存配置
-                  </button>
-                  {cloudConfig && (
-                    <button className="form-reset-btn danger" onClick={handleClearCloudConfig}>
-                      清除配置
-                    </button>
-                  )}
-                </div>
-                <div className="form-hint" style={{ marginTop: '4px', fontSize: '11px', color: 'var(--text-tertiary)' }}>
-                  ⚠️ Token 明文存储于本地 localStorage，仅适用于个人使用场景
-                </div>
-              </>
-            )}
-
-            {cloudConfig && (
-              <>
-                <div className="settings-subsection-title" style={{ marginTop: '16px' }}>操作</div>
+                <div className="settings-subsection-title">操作</div>
                 <div className="form-group" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                   <button
                     className="form-reset-btn"
@@ -1711,8 +1529,6 @@ export function SettingsPage() {
                     </div>
                   </>
                 )}
-              </>
-            )}
               </>
             )}
           </div>

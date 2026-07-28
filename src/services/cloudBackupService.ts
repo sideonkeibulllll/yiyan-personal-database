@@ -1,88 +1,57 @@
 /**
  * 云端备份服务（Cloudflare D1 + R2）
  *
+ * v2.2.0 重构：
+ * - 连接层改为函数式调用（d1Query / r2PutBase64Image 等）
+ * - 配置硬编码到 config/cloudflare.ts，不再从 localStorage 读取
+ * - 原生端用 CapacitorHttp 绕过 CORS
+ * - testConnection 轻量化
+ *
  * 功能：
  * 1. 增量备份本地数据到 D1（文本）+ R2（附件）
  * 2. 从云端恢复数据到本地（合并模式，跳过已存在 hash）
- * 3. 测试连接 · 管理配置
+ * 3. 测试连接
  *
  * 增量策略：
  * - 首次备份：D1 空库 → 全量导入（自然全量）
  * - 后续备份：按 updated_at > last_backup_ts 增量上传
  * - 删除同步：本地删除的条目在 D1 标记 is_deleted=1
- *
- * 安全提醒：
- * - API Token 存 localStorage 明文，仅适用于个人使用场景
- * - Token 拥有 D1 编辑权限，泄漏后可被删库
  */
-import { D1Client } from './d1Client';
-import { R2Client } from './r2Client';
+import {
+  d1Query,
+  d1BatchExec,
+  d1BatchInsert,
+  d1InitSchema,
+  d1GetSyncState,
+  d1SetSyncState,
+  d1TestConnection,
+} from './d1Client';
+import {
+  r2PutBase64Image,
+  r2GetBase64,
+  r2TestConnection,
+} from './r2Client';
 import { getDatabase } from './database';
 import { getTodoDatabase } from './todoDatabase';
 import { Filesystem, Directory } from './filesystemAdapter';
 import { contentHash } from '@/features/datamanager/types';
 import {
-  CLOUD_BACKUP_CONFIG_KEY,
-  D1_INIT_SQL,
   R2_ATTACHMENT_PREFIX,
 } from './cloudBackupTypes';
 import type {
-  CloudBackupConfig,
   CloudBackupResult,
   CloudRestoreResult,
 } from './cloudBackupTypes';
 
-const APP_VERSION = '1.7.5';
+const APP_VERSION = '2.2.0';
 const SYNC_STATE_KEY = 'last_backup_ts';
-
-/** ============ 配置管理 ============ */
-
-export function getCloudBackupConfig(): CloudBackupConfig | null {
-  try {
-    const raw = localStorage.getItem(CLOUD_BACKUP_CONFIG_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw) as CloudBackupConfig;
-  } catch {
-    return null;
-  }
-}
-
-export function saveCloudBackupConfig(config: CloudBackupConfig): void {
-  localStorage.setItem(CLOUD_BACKUP_CONFIG_KEY, JSON.stringify(config));
-}
-
-export function clearCloudBackupConfig(): void {
-  localStorage.removeItem(CLOUD_BACKUP_CONFIG_KEY);
-}
-
-function getConfigOrThrow(): CloudBackupConfig {
-  const config = getCloudBackupConfig();
-  if (!config) {
-    throw new Error('未配置云端备份，请先在设置中填写 Cloudflare 凭证');
-  }
-  return config;
-}
-
-function getD1Client(): D1Client {
-  const config = getConfigOrThrow();
-  return new D1Client(config);
-}
-
-function getR2Client(): R2Client {
-  const config = getConfigOrThrow();
-  return new R2Client(config);
-}
 
 /** ============ 测试连接 ============ */
 
 export async function testCloudConnection(): Promise<{ d1: string; r2: string; ok: boolean }> {
-  const config = getConfigOrThrow();
-  const d1 = new D1Client(config);
-  const r2 = new R2Client(config);
-
   const [d1Result, r2Result] = await Promise.all([
-    d1.testConnection(D1_INIT_SQL),
-    r2.testConnection(),
+    d1TestConnection(),
+    r2TestConnection(),
   ]);
 
   return {
@@ -114,9 +83,6 @@ export async function backupToCloud(): Promise<CloudBackupResult> {
     errors: [],
   };
 
-  const config = getConfigOrThrow();
-  const d1 = new D1Client(config);
-  const r2 = new R2Client(config);
   const db = await getDatabase();
   const todoDb = await getTodoDatabase();
 
@@ -125,10 +91,10 @@ export async function backupToCloud(): Promise<CloudBackupResult> {
   await (todoDb as any).ensureConnection?.();
 
   // 确保 D1 表结构存在
-  await d1.initSchema(D1_INIT_SQL);
+  await d1InitSchema();
 
   // 读取上次备份时间戳（首次备份时为 0 → 全量）
-  const lastBackupTsStr = await d1.getSyncState(SYNC_STATE_KEY);
+  const lastBackupTsStr = await d1GetSyncState(SYNC_STATE_KEY);
   const lastBackupTs = lastBackupTsStr ? parseInt(lastBackupTsStr, 10) : 0;
 
   // 收集本地数据
@@ -160,7 +126,7 @@ export async function backupToCloud(): Promise<CloudBackupResult> {
   const changedEntries = entries.filter(e => e.updatedAt > lastBackupTs);
   for (const entry of changedEntries) {
     try {
-      await d1.query(
+      await d1Query(
         `INSERT OR REPLACE INTO entries
          (id, content, source, supplement, is_starred, is_deleted, created_at, updated_at, copy_count, content_hash, backup_batch_id)
          VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
@@ -182,10 +148,10 @@ export async function backupToCloud(): Promise<CloudBackupResult> {
       // 同步该条目的标签关联
       if (entry.tags && entry.tags.length > 0) {
         // 先删除旧关联
-        await d1.query('DELETE FROM entry_tags WHERE entry_id = ?', [entry.id]);
+        await d1Query('DELETE FROM entry_tags WHERE entry_id = ?', [entry.id]);
         // 插入新关联
         for (const tag of entry.tags) {
-          await d1.query(
+          await d1Query(
             'INSERT OR IGNORE INTO entry_tags (entry_id, tag_id) VALUES (?, ?)',
             [entry.id, tag.id]
           );
@@ -197,12 +163,10 @@ export async function backupToCloud(): Promise<CloudBackupResult> {
   }
 
   // ===== 同步 tags（增量：只同步新增 tag，按 createdAt > lastBackupTs 筛选）=====
-  // 注意：tag 改名/改色不会自动同步到云端（牺牲以节省 D1 写入配额）
-  // 如需同步 tag 修改，可在设置中提供"全量重置"按钮
   const newTags = tags.filter(t => t.createdAt > lastBackupTs);
   for (const tag of newTags) {
     try {
-      await d1.query(
+      await d1Query(
         `INSERT OR REPLACE INTO tags
          (id, name, color, is_smart, search_criteria, is_deleted, created_at, updated_at, backup_batch_id)
          VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)`,
@@ -225,12 +189,12 @@ export async function backupToCloud(): Promise<CloudBackupResult> {
 
   // ===== 同步 groups（增量：只同步 D1 中不存在的新 group）=====
   const existingGroupIds = new Set<string>(
-    (await d1.query('SELECT id FROM groups_table WHERE is_deleted = 0', [])).map((r: any) => r.id)
+    (await d1Query('SELECT id FROM groups_table WHERE is_deleted = 0', [])).map((r: any) => r.id)
   );
   const newGroups = groups.filter(g => !existingGroupIds.has(g.id));
   for (const group of newGroups) {
     try {
-      await d1.query(
+      await d1Query(
         `INSERT OR REPLACE INTO groups_table
          (id, name, sort_order, is_deleted, backup_batch_id)
          VALUES (?, ?, ?, 0, ?)`,
@@ -246,7 +210,7 @@ export async function backupToCloud(): Promise<CloudBackupResult> {
   const newLinks = links.filter(l => l.createdAt > lastBackupTs);
   for (const link of newLinks) {
     try {
-      await d1.query(
+      await d1Query(
         `INSERT OR REPLACE INTO links
          (id, source_id, target_id, description, is_deleted, created_at, backup_batch_id)
          VALUES (?, ?, ?, ?, 0, ?, ?)`,
@@ -262,7 +226,7 @@ export async function backupToCloud(): Promise<CloudBackupResult> {
   const changedTodos = allTodos.filter(t => (t.updatedAt || t.createdAt) > lastBackupTs);
   for (const todo of changedTodos) {
     try {
-      await d1.query(
+      await d1Query(
         `INSERT OR REPLACE INTO todos
          (id, title, note, folder_date, time, is_done, is_today, is_deleted, created_at, updated_at, completed_at, backup_batch_id)
          VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
@@ -290,7 +254,7 @@ export async function backupToCloud(): Promise<CloudBackupResult> {
   const newTodoTags = allTodoTags.filter(tt => tt.createdAt > lastBackupTs);
   for (const tt of newTodoTags) {
     try {
-      await d1.query(
+      await d1Query(
         `INSERT OR REPLACE INTO todo_tags
          (id, name, color, is_deleted, backup_batch_id)
          VALUES (?, ?, ?, 0, ?)`,
@@ -302,14 +266,13 @@ export async function backupToCloud(): Promise<CloudBackupResult> {
   }
 
   // ===== 同步 templates（增量：updatedAt > lastBackupTs）=====
-  // 对变化的 template，其 items 只 INSERT D1 中不存在的新 item（避免全量重写）
   const changedTemplateIds = new Set(
     allTemplates.filter(t => t.updatedAt > lastBackupTs).map(t => t.id)
   );
   for (const { template, items } of templatesWithItems) {
     if (!changedTemplateIds.has(template.id)) continue;
     try {
-      await d1.query(
+      await d1Query(
         `INSERT OR REPLACE INTO templates
          (id, name, is_deleted, backup_batch_id)
          VALUES (?, ?, 0, ?)`,
@@ -319,12 +282,12 @@ export async function backupToCloud(): Promise<CloudBackupResult> {
 
       // 同步 template items：只 INSERT D1 中不存在的
       const existingItemIds = new Set<string>(
-        (await d1.query('SELECT id FROM template_items WHERE template_id = ?', [template.id]))
+        (await d1Query('SELECT id FROM template_items WHERE template_id = ?', [template.id]))
           .map((r: any) => r.id)
       );
       const newItems = items.filter(it => !existingItemIds.has(it.id));
       for (const item of newItems) {
-        await d1.query(
+        await d1Query(
           `INSERT OR REPLACE INTO template_items
            (id, template_id, title, note, time, sort_order, backup_batch_id)
            VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -345,8 +308,7 @@ export async function backupToCloud(): Promise<CloudBackupResult> {
   }
 
   // ===== 同步附件到 R2 + D1 元数据 =====
-  // 获取 D1 中已有的附件 id 集合
-  const existingAttRows = await d1.query('SELECT id FROM attachments_meta WHERE is_deleted = 0', []);
+  const existingAttRows = await d1Query('SELECT id FROM attachments_meta WHERE is_deleted = 0', []);
   const existingAttIds = new Set(existingAttRows.map((r: any) => r.id));
 
   for (const att of allAttachments) {
@@ -362,9 +324,8 @@ export async function backupToCloud(): Promise<CloudBackupResult> {
             path: att.filePath,
             directory: Directory.Data,
           });
-          await r2.putBase64Image(r2KeyOrig, origRes.data as string, att.mimeType || 'image/jpeg');
+          await r2PutBase64Image(r2KeyOrig, origRes.data as string, att.mimeType || 'image/jpeg');
         } catch (err) {
-          // 原图可能不存在（按需拉取未完成），跳过但记录
           result.errors.push(`附件原图缺失 att=${att.id}, 跳过上传`);
         }
 
@@ -374,7 +335,7 @@ export async function backupToCloud(): Promise<CloudBackupResult> {
             path: att.thumbPath,
             directory: Directory.Data,
           });
-          await r2.putBase64Image(r2KeyThumb, thumbRes.data as string, att.mimeType || 'image/jpeg');
+          await r2PutBase64Image(r2KeyThumb, thumbRes.data as string, att.mimeType || 'image/jpeg');
         } catch (err) {
           result.errors.push(`附件缩略图缺失 att=${att.id}, 跳过上传`);
         }
@@ -383,7 +344,7 @@ export async function backupToCloud(): Promise<CloudBackupResult> {
       }
 
       // 写入/更新 D1 附件元数据
-      await d1.query(
+      await d1Query(
         `INSERT OR REPLACE INTO attachments_meta
          (id, entry_id, r2_key_orig, r2_key_thumb, mime_type, sort_order, is_deleted, created_at, backup_batch_id)
          VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)`,
@@ -405,29 +366,26 @@ export async function backupToCloud(): Promise<CloudBackupResult> {
   }
 
   // ===== 同步删除（软删）=====
-  // 检测本地已删除但 D1 中仍标记为 is_deleted=0 的条目
-  // 策略：D1 中有但本地没有的 entry → 标记 is_deleted=1
-  const d1EntryIds = await d1.query('SELECT id FROM entries WHERE is_deleted = 0', []);
+  const d1EntryIds = await d1Query('SELECT id FROM entries WHERE is_deleted = 0', []);
   const localEntryIds = new Set(entries.map(e => e.id));
   for (const row of d1EntryIds) {
     if (!localEntryIds.has(row.id)) {
-      await d1.query('UPDATE entries SET is_deleted = 1 WHERE id = ?', [row.id]);
+      await d1Query('UPDATE entries SET is_deleted = 1 WHERE id = ?', [row.id]);
       result.deletionsSynced++;
     }
   }
 
-  // 同样检测 todos 的删除
-  const d1TodoIds = await d1.query('SELECT id FROM todos WHERE is_deleted = 0', []);
+  const d1TodoIds = await d1Query('SELECT id FROM todos WHERE is_deleted = 0', []);
   const localTodoIds = new Set(allTodos.map(t => t.id));
   for (const row of d1TodoIds) {
     if (!localTodoIds.has(row.id)) {
-      await d1.query('UPDATE todos SET is_deleted = 1 WHERE id = ?', [row.id]);
+      await d1Query('UPDATE todos SET is_deleted = 1 WHERE id = ?', [row.id]);
       result.deletionsSynced++;
     }
   }
 
   // ===== 写入备份 manifest =====
-  await d1.query(
+  await d1Query(
     `INSERT INTO _backup_manifests
      (id, timestamp, type, entry_count, todo_count, tag_count, group_count, attachment_count, app_version, created_at)
      VALUES (?, ?, 'manual', ?, ?, ?, ?, ?, ?, ?)`,
@@ -444,12 +402,12 @@ export async function backupToCloud(): Promise<CloudBackupResult> {
     ]
   );
 
-  // ===== v2.0.0: 同步对话历史 =====
+  // ===== 同步对话历史 =====
   const localChatSessions = await db.getAllChatSessions();
   for (const session of localChatSessions) {
     if (session.updatedAt > lastBackupTs) {
       try {
-        await d1.query(
+        await d1Query(
           `INSERT OR REPLACE INTO chat_sessions (id, title, messages, model, mcp_enabled_tools, mcp_search_results, created_at, updated_at, backup_batch_id)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
@@ -471,7 +429,7 @@ export async function backupToCloud(): Promise<CloudBackupResult> {
   }
 
   // ===== 更新同步状态 =====
-  await d1.setSyncState(SYNC_STATE_KEY, String(startTime));
+  await d1SetSyncState(SYNC_STATE_KEY, String(startTime));
 
   result.duration = Date.now() - startTime;
   return result;
@@ -498,9 +456,6 @@ export async function restoreFromCloud(): Promise<CloudRestoreResult> {
     errors: [],
   };
 
-  const config = getConfigOrThrow();
-  const d1 = new D1Client(config);
-  const r2 = new R2Client(config);
   const db = await getDatabase();
   const todoDb = await getTodoDatabase();
 
@@ -508,10 +463,10 @@ export async function restoreFromCloud(): Promise<CloudRestoreResult> {
   await (todoDb as any).ensureConnection?.();
 
   // 确保表结构
-  await d1.initSchema(D1_INIT_SQL);
+  await d1InitSchema();
 
   // ===== 拉取所有未删除的 entries =====
-  const d1Entries = await d1.query('SELECT * FROM entries WHERE is_deleted = 0', []);
+  const d1Entries = await d1Query('SELECT * FROM entries WHERE is_deleted = 0', []);
   const existingHashes = await db.getAllContentHashes();
 
   for (const row of d1Entries) {
@@ -543,7 +498,7 @@ export async function restoreFromCloud(): Promise<CloudRestoreResult> {
   }
 
   // ===== 拉取 tags =====
-  const d1Tags = await d1.query('SELECT * FROM tags WHERE is_deleted = 0', []);
+  const d1Tags = await d1Query('SELECT * FROM tags WHERE is_deleted = 0', []);
   const existingTagNames = new Set((await db.getAllTags()).map(t => t.name));
 
   for (const row of d1Tags) {
@@ -560,7 +515,7 @@ export async function restoreFromCloud(): Promise<CloudRestoreResult> {
   }
 
   // ===== 拉取 groups =====
-  const d1Groups = await d1.query('SELECT * FROM groups_table WHERE is_deleted = 0', []);
+  const d1Groups = await d1Query('SELECT * FROM groups_table WHERE is_deleted = 0', []);
   const existingGroupNames = new Set((await db.getAllGroups()).map(g => g.name));
 
   for (const row of d1Groups) {
@@ -574,7 +529,7 @@ export async function restoreFromCloud(): Promise<CloudRestoreResult> {
   }
 
   // ===== 拉取 links =====
-  const d1Links = await d1.query('SELECT * FROM links WHERE is_deleted = 0', []);
+  const d1Links = await d1Query('SELECT * FROM links WHERE is_deleted = 0', []);
   for (const row of d1Links) {
     try {
       await db.createLink(row.source_id, row.target_id, row.description || undefined);
@@ -585,7 +540,7 @@ export async function restoreFromCloud(): Promise<CloudRestoreResult> {
   }
 
   // ===== 拉取 todos =====
-  const d1Todos = await d1.query('SELECT * FROM todos WHERE is_deleted = 0', []);
+  const d1Todos = await d1Query('SELECT * FROM todos WHERE is_deleted = 0', []);
   const existingTodos = await todoDb.getAllTodos();
   const existingTodoHashes = new Set<string>();
   for (const t of existingTodos) {
@@ -622,15 +577,14 @@ export async function restoreFromCloud(): Promise<CloudRestoreResult> {
   }
 
   // ===== 拉取 templates =====
-  const d1Templates = await d1.query('SELECT * FROM templates WHERE is_deleted = 0', []);
+  const d1Templates = await d1Query('SELECT * FROM templates WHERE is_deleted = 0', []);
   const existingTplNames = new Set((await todoDb.getAllTemplates()).map(t => t.name));
 
   for (const row of d1Templates) {
     if (existingTplNames.has(row.name)) continue;
     try {
       const newTpl = await todoDb.createTemplate(row.name);
-      // 拉取 template items
-      const items = await d1.query(
+      const items = await d1Query(
         'SELECT * FROM template_items WHERE template_id = ? ORDER BY sort_order',
         [row.id]
       );
@@ -650,21 +604,13 @@ export async function restoreFromCloud(): Promise<CloudRestoreResult> {
   }
 
   // ===== 拉取附件（从 R2 下载到本地）=====
-  const d1Attachments = await d1.query('SELECT * FROM attachments_meta WHERE is_deleted = 0', []);
+  const d1Attachments = await d1Query('SELECT * FROM attachments_meta WHERE is_deleted = 0', []);
   const existingAttIds = new Set((await db.getAllAttachments()).map(a => a.id));
 
   for (const row of d1Attachments) {
     if (existingAttIds.has(row.id)) continue;
 
     try {
-      // 需要找到本地对应的 entry（通过 content hash 匹配）
-      // 这里简化处理：跳过无法匹配的附件
-      // 实际场景中，恢复条目时已经生成了新的 entry id，
-      // 附件的 entry_id 指向的是源设备的 entry id，无法直接映射
-      // TODO: 后续可以通过维护 entry id 映射表来支持附件恢复
-      // 目前先跳过附件下载，用户可以后续通过同步功能补齐
-
-      // 尝试直接用源 entry_id 查找本地条目
       const localEntry = await db.getEntryById(row.entry_id);
       if (!localEntry) continue;
 
@@ -674,7 +620,7 @@ export async function restoreFromCloud(): Promise<CloudRestoreResult> {
 
       // 下载缩略图
       if (row.r2_key_thumb) {
-        const thumbBase64 = await r2.getBase64(row.r2_key_thumb);
+        const thumbBase64 = await r2GetBase64(row.r2_key_thumb);
         await Filesystem.writeFile({
           path: thumbPath,
           data: thumbBase64,
@@ -686,7 +632,7 @@ export async function restoreFromCloud(): Promise<CloudRestoreResult> {
       // 下载原图
       if (row.r2_key_orig) {
         try {
-          const origBase64 = await r2.getBase64(row.r2_key_orig);
+          const origBase64 = await r2GetBase64(row.r2_key_orig);
           await Filesystem.writeFile({
             path: filePath,
             data: origBase64,
@@ -698,7 +644,6 @@ export async function restoreFromCloud(): Promise<CloudRestoreResult> {
         }
       }
 
-      // 写入本地 DB
       await db.addAttachment({
         id: row.id,
         entryId: localEntry.id,
@@ -716,9 +661,9 @@ export async function restoreFromCloud(): Promise<CloudRestoreResult> {
     }
   }
 
-  // ===== v2.0.0: 拉取对话历史 =====
+  // ===== 拉取对话历史 =====
   try {
-    const d1ChatSessions = await d1.query('SELECT * FROM chat_sessions', []);
+    const d1ChatSessions = await d1Query('SELECT * FROM chat_sessions', []);
     const localSessionIds = new Set((await db.getAllChatSessions()).map(s => s.id));
     for (const row of d1ChatSessions) {
       if (localSessionIds.has(row.id)) continue;
@@ -751,9 +696,8 @@ export async function restoreFromCloud(): Promise<CloudRestoreResult> {
  * 获取云端备份历史列表
  */
 export async function listCloudBackups(): Promise<any[]> {
-  const d1 = getD1Client();
-  await d1.initSchema(D1_INIT_SQL);
-  return await d1.query(
+  await d1InitSchema();
+  return await d1Query(
     'SELECT * FROM _backup_manifests ORDER BY timestamp DESC LIMIT 50'
   );
 }
@@ -762,10 +706,9 @@ export async function listCloudBackups(): Promise<any[]> {
  * 获取上次备份时间戳
  */
 export async function getLastCloudBackupTime(): Promise<number | null> {
-  const d1 = getD1Client();
   try {
-    await d1.initSchema(D1_INIT_SQL);
-    const ts = await d1.getSyncState(SYNC_STATE_KEY);
+    await d1InitSchema();
+    const ts = await d1GetSyncState(SYNC_STATE_KEY);
     return ts ? parseInt(ts, 10) : null;
   } catch {
     return null;
