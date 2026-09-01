@@ -19,6 +19,41 @@ const TriangleAlertSvg = () => (
   </svg>
 );
 
+/** 后台任务防重入（React StrictMode 下 useEffect 会执行两次） */
+let backgroundTasksStarted = false;
+
+/**
+ * 后台维护任务：过期归档 + 每日自动备份
+ * 不阻塞界面显示，启动关键路径之外执行
+ */
+async function runBackgroundTasks(): Promise<void> {
+  // 过期自动归档：将过期满 1 个月的待办移入回收站
+  try {
+    const db = await getTodoDatabase();
+    const retentionDays = useSettingsStore.getState().settings.todo?.recycleBinRetentionDays ?? 30;
+    if (retentionDays > 0) {
+      const allTodos = await db.getAllTodos();
+      const threshold = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
+      for (const todo of allTodos) {
+        if (!todo.deletedAt && todo.endTime && todo.endTime < threshold && todo.status === 'pending') {
+          await db.deleteTodo(todo.id);
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('过期归档检查失败:', e);
+  }
+
+  // 每天首次打开时自动备份（索引式，内容去重，增量很快）
+  try {
+    if (await shouldAutoBackup()) {
+      await createBackup('auto');
+    }
+  } catch (e) {
+    console.warn('自动备份失败:', e);
+  }
+}
+
 export function App() {
   const [isReady, setIsReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -30,37 +65,19 @@ export function App() {
   useEffect(() => {
     const init = async () => {
       try {
-        await getDatabase();
-        await getTodoDatabase();
+        // 两个数据库并行初始化
+        await Promise.all([getDatabase(), getTodoDatabase()]);
+        // 四个 store 并行加载
         await Promise.all([loadEntries(), loadTags(), loadSettings(), loadAllTodos()]);
 
-        // 过期自动归档：将过期满 1 个月的待办移入回收站
-        try {
-          const db = await getTodoDatabase();
-          const retentionDays = useSettingsStore.getState().settings.todo?.recycleBinRetentionDays ?? 30;
-          if (retentionDays > 0) {
-            const allTodos = await db.getAllTodos();
-            const threshold = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
-            for (const todo of allTodos) {
-              if (!todo.deletedAt && todo.endTime && todo.endTime < threshold && todo.status === 'pending') {
-                await db.deleteTodo(todo.id);
-              }
-            }
-          }
-        } catch (e) {
-          console.warn('过期归档检查失败:', e);
-        }
-
-        // 每天首次打开时自动备份
-        try {
-          if (await shouldAutoBackup()) {
-            await createBackup('auto');
-          }
-        } catch (e) {
-          console.warn('自动备份失败:', e);
-        }
-
+        // 界面就绪 —— 过期归档 / 自动备份等维护任务全部移到后台，
+        // 不阻塞用户进入应用
         setIsReady(true);
+
+        if (!backgroundTasksStarted) {
+          backgroundTasksStarted = true;
+          runBackgroundTasks();
+        }
       } catch (err) {
         console.error('初始化失败:', err);
         setError((err as Error).message);

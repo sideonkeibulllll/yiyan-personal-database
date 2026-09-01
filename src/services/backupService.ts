@@ -1,15 +1,18 @@
 /**
- * 备份与恢复服务
+ * 备份与恢复服务（v2 索引式架构）
  *
- * 功能：
- * 1. 创建备份副本（私有目录）和导出到公共目录
- * 2. 列出/删除备份副本
- * 3. 从副本覆盖式恢复（恢复前自动备份）
- * 4. 从 zip 文件增量恢复（按内容哈希跳过相同条目）
+ * 核心思想：备份逻辑与备份文件分离
+ * - 数据按内容哈希存入共享块池（backup-store/），相同内容只存一份
+ * - 每次备份只生成一个轻量「清单」（backups/<type>_<date>.json），
+ *   记录该快照引用了哪些块
+ * - 删除某个备份 = 删除清单；没有任何清单引用的块会被垃圾回收
  *
- * 目录约定：
- * - 私有备份目录：应用 Documents/backups/
- * - 公共导出目录：Download/yiyan-backup/
+ * 目录约定（Directory.Documents）：
+ * - backups/            清单目录（新格式 .json；旧格式 .zip 兼容展示/恢复）
+ * - backup-store/data/  数据块（单条 entry/todo/... 的 JSON，按 sha256 命名）
+ * - backup-store/att/   附件缩略图块（jpg 二进制，按内容 sha256 命名）
+ *
+ * 旧版全量 zip 格式仍用于：导出到 Download、局域网同步发送、接收外部 zip 恢复
  */
 import JSZip from 'jszip';
 import { Capacitor } from '@capacitor/core';
@@ -18,6 +21,7 @@ import { getDatabase } from './database';
 import { getTodoDatabase } from './todoDatabase';
 import { loadChatSessions } from './chatSessionService';
 import { contentHash } from '@/features/datamanager/types';
+import type { Entry, Tag, Group, Link, Settings, Attachment, Todo, TodoTag, TodoTemplate, TodoTemplateItem } from '@/types';
 import type {
   BackupManifest,
   BackupItem,
@@ -26,8 +30,16 @@ import type {
 } from './backupTypes';
 
 const BACKUP_DIR = 'backups';
-const EXPORT_DIR = 'yiyan-backup';
-const APP_VERSION = '1.4.0';
+const STORE_DATA_DIR = 'backup-store/data';
+const STORE_ATT_DIR = 'backup-store/att';
+const APP_VERSION = '2.1.4';
+
+/** 索引式备份保留策略 */
+const PRUNE_LIMIT: Record<BackupType, number> = { auto: 14, manual: 10 };
+
+/** ============================================================
+ *  基础工具
+ *  ============================================================ */
 
 /** 设备 ID 哈希（从 localStorage 取，没有则生成） */
 function getDeviceId(): string {
@@ -66,11 +78,11 @@ function hashStr(s: string): string {
   return Math.abs(h).toString(36);
 }
 
-/** 格式化时间戳为文件名：backup_20260723_162200 */
+/** 格式化时间戳为文件名：20260723_162200 */
 function formatTimestamp(ts: number): string {
   const d = new Date(ts);
   const pad = (n: number) => n.toString().padStart(2, '0');
-  return `backup_${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+  return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
 }
 
 /** 确保目录存在 */
@@ -112,34 +124,228 @@ async function deleteFile(path: string, directory: Directory): Promise<void> {
   }
 }
 
+/** 稳定序列化：对象 key 排序，保证相同内容哈希一致 */
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
+  if (Array.isArray(value)) {
+    return '[' + value.map(v => stableStringify(v === undefined ? null : v)).join(',') + ']';
+  }
+  const obj = value as Record<string, unknown>;
+  const keys = Object.keys(obj).filter(k => obj[k] !== undefined).sort();
+  return '{' + keys.map(k => JSON.stringify(k) + ':' + stableStringify(obj[k])).join(',') + '}';
+}
+
+/** SHA-256（纯 JS 同步实现，跨平台结果一致） */
+function sha256Ascii(ascii: string): string {
+  const rightRotate = (value: number, amount: number) => (value >>> amount) | (value << (32 - amount));
+  const maxWord = Math.pow(2, 32);
+  let result = '';
+  const words: number[] = [];
+  const asciiBitLength = ascii.length * 8;
+  const hash: number[] = [];
+  const k: number[] = [];
+  let primeCounter = 0;
+  const isComposite: Record<number, number> = {};
+  for (let candidate = 2; primeCounter < 64; candidate++) {
+    if (!isComposite[candidate]) {
+      for (let i = 0; i < 313; i += candidate) isComposite[i] = candidate;
+      hash[primeCounter] = (Math.pow(candidate, 0.5) * maxWord) | 0;
+      k[primeCounter++] = (Math.pow(candidate, 1 / 3) * maxWord) | 0;
+    }
+  }
+  ascii += '\x80';
+  while (ascii.length % 64 - 56) ascii += '\x00';
+  for (let i = 0; i < ascii.length; i++) {
+    const j = ascii.charCodeAt(i);
+    if (j >> 8) return '';
+    words[i >> 2] |= j << ((3 - i) % 4) * 8;
+  }
+  words[words.length] = (asciiBitLength / maxWord) | 0;
+  words[words.length] = asciiBitLength;
+  for (let j = 0; j < words.length;) {
+    const w = words.slice(j, (j += 16));
+    const oldHash = hash.slice(0);
+    for (let i = 0; i < 64; i++) {
+      const w15 = w[i - 15], w2 = w[i - 2];
+      const a = hash[0], e = hash[4];
+      const temp1 = hash[7]
+        + (rightRotate(e, 6) ^ rightRotate(e, 11) ^ rightRotate(e, 25))
+        + ((e & hash[5]) ^ ((~e) & hash[6]))
+        + k[i]
+        + (w[i] = (i < 16) ? w[i] : (
+            w[i - 16]
+            + (rightRotate(w15, 7) ^ rightRotate(w15, 18) ^ (w15 >>> 3))
+            + w[i - 7]
+            + (rightRotate(w2, 17) ^ rightRotate(w2, 19) ^ (w2 >>> 10))
+          ) | 0
+        );
+      const temp2 = (rightRotate(a, 2) ^ rightRotate(a, 13) ^ rightRotate(a, 22))
+        + ((a & hash[1]) ^ (a & hash[2]) ^ (hash[1] & hash[2]));
+      hash.unshift((temp1 + temp2) | 0);
+      hash.pop();
+      hash[4] = (hash[4] + temp1) | 0;
+    }
+    for (let i = 0; i < 8; i++) {
+      hash[i] = (hash[i] + oldHash[i]) | 0;
+    }
+  }
+  for (let i = 0; i < 8; i++) {
+    for (let jj = 3; jj + 1; jj--) {
+      const b = (hash[i] >> (jj * 8)) & 255;
+      result += ((b < 16) ? 0 : '') + b.toString(16);
+    }
+  }
+  return result;
+}
+
+/** 对 UTF-8 字符串计算 SHA-256（hex） */
+function sha256Hex(input: string): string {
+  const bytes = new TextEncoder().encode(input);
+  let latin1 = '';
+  for (let i = 0; i < bytes.length; i++) latin1 += String.fromCharCode(bytes[i]);
+  return sha256Ascii(latin1);
+}
+
+/** UTF-8 文本 → base64 */
+function utf8ToBase64(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+
+/** base64 → UTF-8 文本 */
+function base64ToUtf8(b64: string): string {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+
+/** 并发批处理执行（限制并发数，避免一次性发起过多 I/O） */
+async function runBatch<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const workers = new Array(Math.min(limit, items.length || 1)).fill(0).map(async () => {
+    while (next < items.length) {
+      const idx = next++;
+      results[idx] = await fn(items[idx]);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
 /** ============================================================
- *  备份创建
+ *  索引式备份：清单与块
  *  ============================================================ */
 
+/** 索引式清单（v2 备份格式） */
+interface IndexedManifest {
+  format: 'indexed';
+  version: '2.0';
+  timestamp: number;
+  type: BackupType;
+  deviceId: string;
+  deviceName: string;
+  appVersion: string;
+  counts: {
+    entries: number; tags: number; groups: number; links: number;
+    todos: number; todoTags: number; templates: number;
+    attachments: number; chatSessions: number;
+  };
+  refs: {
+    entries: string[];
+    tags: string[];
+    groups: string[];
+    links: string[];
+    settings: string | null;
+    todos: string[];
+    todoTags: string[];
+    templates: string[];
+    chatSessions: string[];
+    attachments: string[];
+    thumbs: string[];
+  };
+}
+
+/** 清单文件名：auto_20260901_120000.json */
+function indexedFilename(type: BackupType, ts: number): string {
+  return `${type}_${formatTimestamp(ts)}.json`;
+}
+
+/** 解析清单文件名：{ type, yyyymmdd }，非清单返回 null */
+function parseIndexedFilename(name: string): { type: BackupType; yyyymmdd: string; ts: number } | null {
+  const m = /^(auto|manual)_(\d{8})_(\d{6})\.json$/.exec(name);
+  if (!m) return null;
+  const [, type, ymd, hms] = m;
+  const ts = new Date(
+    Number(ymd.slice(0, 4)), Number(ymd.slice(4, 6)) - 1, Number(ymd.slice(6, 8)),
+    Number(hms.slice(0, 2)), Number(hms.slice(2, 4)), Number(hms.slice(4, 6)),
+  ).getTime();
+  return { type: type as BackupType, yyyymmdd: ymd, ts };
+}
+
+/** 读取索引式清单 */
+async function readIndexedManifest(filename: string): Promise<IndexedManifest> {
+  const result = await Filesystem.readFile({
+    path: `${BACKUP_DIR}/${filename}`,
+    directory: Directory.Documents,
+  });
+  return JSON.parse(base64ToUtf8(result.data as string)) as IndexedManifest;
+}
+
+/** 索引式清单 → 兼容 UI 的 BackupManifest */
+function indexedToCompatManifest(m: IndexedManifest): BackupManifest {
+  return {
+    version: m.version,
+    timestamp: m.timestamp,
+    type: m.type,
+    deviceId: m.deviceId,
+    deviceName: m.deviceName,
+    entryCount: m.counts.entries,
+    todoCount: m.counts.todos,
+    tagCount: m.counts.tags,
+    groupCount: m.counts.groups,
+    appVersion: m.appVersion,
+    chatSessionCount: m.counts.chatSessions,
+  };
+}
+
+/** 读取块池现有块名集合（不含扩展名） */
+async function listStoredChunks(): Promise<{ data: Set<string>; att: Set<string> }> {
+  const [dataFiles, attFiles] = await Promise.all([
+    readDir(STORE_DATA_DIR, Directory.Documents),
+    readDir(STORE_ATT_DIR, Directory.Documents),
+  ]);
+  return {
+    data: new Set(dataFiles.map(f => f.name.replace(/\.json$/, ''))),
+    att: new Set(attFiles.map(f => f.name.replace(/\.jpg$/, ''))),
+  };
+}
+
 /**
- * 创建完整备份 zip
- * 包含：database.db（JSON 形式导出所有数据）+ config + tags + groups + manifest
- *
- * 原图策略：本地备份不打包原图（原图文件就在本地文件系统，恢复数据库记录后 filePath 仍指向已有文件）；
- *           同步发送时通过 includeOrigIds 指定要打包的原图（接收方没有的），实现增量。
- *
- * @param includeOrigIds 要打包原图的附件 id 集合（同步场景：接收方没有的 att id）
- *                      缩略图和元数据始终全量打包；不传=不打包任何原图（本地备份场景）
+ * 收集全部备份数据（批量查询，无 N+1）
  */
-export async function createBackup(
-  type: BackupType = 'manual',
-  includeOrigIds?: Set<string>,
-): Promise<BackupManifest> {
-  const ts = Date.now();
+async function collectBackupData(): Promise<{
+  entries: Entry[];
+  tags: Tag[];
+  groups: Group[];
+  links: Link[];
+  settings: Settings | null;
+  allTodos: Todo[];
+  allTodoTags: TodoTag[];
+  templatesWithItems: { template: TodoTemplate; items: TodoTemplateItem[] }[];
+  allAttachments: Attachment[];
+  chatSessions: Awaited<ReturnType<typeof loadChatSessions>>;
+}> {
   const db = await getDatabase();
   const todoDb = await getTodoDatabase();
 
-  // 确保数据库连接健康（手机端 Capacitor SQLite 连接可能不稳定）
   await (db as any).ensureConnection?.();
   await (todoDb as any).ensureConnection?.();
 
-  // 收集所有数据
-  const [entries, tags, groups, settings, allTodos, allTodoTags, allTemplates, allAttachments, chatSessions] = await Promise.all([
+  const [entries, tags, groups, settings, allTodos, allTodoTags, allTemplates, allTemplateItems, allAttachments, chatSessions, links] = await Promise.all([
     db.getAllEntries(),
     db.getAllTags(),
     db.getAllGroups(),
@@ -147,247 +353,266 @@ export async function createBackup(
     todoDb.getAllTodos(),
     todoDb.getAllTodoTags(),
     todoDb.getAllTemplates(),
+    todoDb.getAllTemplateItems(),
     db.getAllAttachments(),
     loadChatSessions(),
+    db.getAllLinks(),
   ]);
 
-  // 收集所有条目的关联链接
-  const links = [];
+  // 模板与条目内存分组（代替逐模板查询）
+  const itemsByTemplate = new Map<string, TodoTemplateItem[]>();
+  for (const item of allTemplateItems) {
+    const list = itemsByTemplate.get(item.templateId) || [];
+    list.push(item);
+    itemsByTemplate.set(item.templateId, list);
+  }
+  const templatesWithItems = allTemplates.map(t => ({ template: t, items: itemsByTemplate.get(t.id) || [] }));
+
+  return { entries, tags, groups, links, settings, allTodos, allTodoTags, templatesWithItems, allAttachments, chatSessions };
+}
+
+/**
+ * 创建索引式备份（v2 主路径）
+ * 数据写入共享块池（去重），再生成轻量清单
+ */
+export async function createBackup(type: BackupType = 'manual'): Promise<BackupManifest> {
+  const ts = Date.now();
+  const { entries, tags, groups, links, settings, allTodos, allTodoTags, templatesWithItems, allAttachments, chatSessions } = await collectBackupData();
+
+  // 现有块集合（一次 readdir，避免重复写已有块）
+  const stored = await listStoredChunks();
+  const newChunks: string[] = [];
+
+  /** 写入一个数据块（已存在则跳过），返回块哈希 */
+  const writeDataChunk = async (obj: unknown): Promise<string> => {
+    const text = stableStringify(obj);
+    const hash = sha256Hex(text);
+    if (!stored.data.has(hash)) {
+      await Filesystem.writeFile({
+        path: `${STORE_DATA_DIR}/${hash}.json`,
+        data: utf8ToBase64(text),
+        directory: Directory.Documents,
+        recursive: true,
+      });
+      stored.data.add(hash);
+      newChunks.push(hash);
+    }
+    return hash;
+  };
+
+  // === 附件元数据块（含缩略图哈希）+ 缩略图内容块 ===
+  // 先并发读源缩略图（I/O 大头），再写块
+  const thumbContents = await runBatch(allAttachments, 4, async (att) => {
+    try {
+      const res = await Filesystem.readFile({ path: att.thumbPath, directory: Directory.Data });
+      return res.data as string;
+    } catch {
+      return null; // 缩略图缺失（可能已被删除），跳过
+    }
+  });
+
+  const attachmentChunks: string[] = [];
+  const thumbChunks: string[] = [];
+  for (let i = 0; i < allAttachments.length; i++) {
+    const att = allAttachments[i];
+    const thumbBase64 = thumbContents[i];
+    let thumbHash: string | undefined;
+    if (thumbBase64) {
+      thumbHash = sha256Hex(thumbBase64);
+      if (!stored.att.has(thumbHash)) {
+        await Filesystem.writeFile({
+          path: `${STORE_ATT_DIR}/${thumbHash}.jpg`,
+          data: thumbBase64,
+          directory: Directory.Documents,
+          recursive: true,
+        });
+        stored.att.add(thumbHash);
+        newChunks.push(thumbHash);
+      }
+      thumbChunks.push(thumbHash);
+    }
+    // 元数据块（附 thumbHash，恢复时据此找回缩略图）
+    const meta: Record<string, unknown> = {
+      id: att.id, entryId: att.entryId, filePath: att.filePath, thumbPath: att.thumbPath,
+      mimeType: att.mimeType, sortOrder: att.sortOrder, createdAt: att.createdAt,
+    };
+    if (thumbHash) meta.thumbHash = thumbHash;
+    attachmentChunks.push(await writeDataChunk(meta));
+  }
+
+  // === 各类数据块 ===
+  const entryChunks: string[] = [];
   for (const entry of entries) {
-    const entryLinks = await db.getLinksByEntryId(entry.id);
-    links.push(...entryLinks);
+    const { attachments: _drop, ...rest } = entry;
+    entryChunks.push(await writeDataChunk(rest));
   }
-
-  // 收集每个模板的 items
-  const templatesWithItems = [];
-  for (const tpl of allTemplates) {
-    const items = await todoDb.getTemplateItems(tpl.id);
-    templatesWithItems.push({ template: tpl, items });
+  const tagChunks: string[] = [];
+  for (const tag of tags) tagChunks.push(await writeDataChunk(tag));
+  const groupChunks: string[] = [];
+  for (const group of groups) groupChunks.push(await writeDataChunk(group));
+  const linkChunks: string[] = [];
+  for (const link of links) linkChunks.push(await writeDataChunk(link));
+  const settingsChunk = settings ? await writeDataChunk(settings) : null;
+  const todoChunks: string[] = [];
+  for (const todo of allTodos) {
+    const { tags: _dropTags, attachments: _dropAtts, ...rest } = todo;
+    todoChunks.push(await writeDataChunk(rest));
   }
+  const todoTagChunks: string[] = [];
+  for (const tt of allTodoTags) todoTagChunks.push(await writeDataChunk(tt));
+  const templateChunks: string[] = [];
+  for (const twi of templatesWithItems) templateChunks.push(await writeDataChunk(twi));
+  const chatChunks: string[] = [];
+  for (const cs of chatSessions) chatChunks.push(await writeDataChunk(cs));
 
-  const manifest: BackupManifest = {
-    version: '1.0',
+  // === 写清单 ===
+  const manifest: IndexedManifest = {
+    format: 'indexed',
+    version: '2.0',
     timestamp: ts,
     type,
     deviceId: getDeviceId(),
     deviceName: getDeviceName(),
-    entryCount: entries.length,
-    todoCount: allTodos.length,
-    tagCount: tags.length,
-    groupCount: groups.length,
     appVersion: APP_VERSION,
-    chatSessionCount: chatSessions.length,
+    counts: {
+      entries: entries.length, tags: tags.length, groups: groups.length, links: links.length,
+      todos: allTodos.length, todoTags: allTodoTags.length, templates: templatesWithItems.length,
+      attachments: allAttachments.length, chatSessions: chatSessions.length,
+    },
+    refs: {
+      entries: entryChunks, tags: tagChunks, groups: groupChunks, links: linkChunks,
+      settings: settingsChunk, todos: todoChunks, todoTags: todoTagChunks,
+      templates: templateChunks, chatSessions: chatChunks,
+      attachments: attachmentChunks, thumbs: thumbChunks,
+    },
   };
 
-  // 打包 zip
-  const zip = new JSZip();
-  zip.file('manifest.json', JSON.stringify(manifest, null, 2));
-  // entries.json 中剥离 attachments（独立打到 attachments.json，避免冗余）
-  zip.file('entries.json', JSON.stringify(
-    entries.map(e => { const { attachments, ...rest } = e; return rest; }),
-    null,
-    2
-  ));
-  zip.file('tags.json', JSON.stringify(tags, null, 2));
-  zip.file('groups.json', JSON.stringify(groups, null, 2));
-  zip.file('links.json', JSON.stringify(links, null, 2));
-  zip.file('settings.json', JSON.stringify(settings, null, 2));
-  zip.file('todos.json', JSON.stringify(allTodos, null, 2));
-  zip.file('todoTags.json', JSON.stringify(allTodoTags, null, 2));
-  zip.file('templates.json', JSON.stringify(templatesWithItems, null, 2));
-
-  // 附件元数据（全量）+ 缩略图（全量）+ 原图（增量：排除接收方已有的）
-  zip.file('attachments.json', JSON.stringify(allAttachments, null, 2));
-  // v2.0.0: 对话历史数据
-  zip.file('chatSessions.json', JSON.stringify(chatSessions, null, 2));
-  for (const att of allAttachments) {
-    // 缩略图：全量打包（体积小，新设备需要）
-    try {
-      const thumbRes = await Filesystem.readFile({
-        path: att.thumbPath,
-        directory: Directory.Data,
-      });
-      zip.file(`attachments/${att.id}_thumb.jpg`, thumbRes.data, { base64: true });
-    } catch (err) {
-      // 缩略图读取失败（可能已被删除），跳过
-      console.warn(`[backup] 缩略图读取失败 att=${att.id}:`, err);
-    }
-
-    // 原图：仅打包 includeOrigIds 指定的（同步场景=接收方没有的 att id）
-    // 不传 includeOrigIds 时（本地备份）不打包任何原图，省空间
-    if (!includeOrigIds || !includeOrigIds.has(att.id)) continue;
-    try {
-      const origRes = await Filesystem.readFile({
-        path: att.filePath,
-        directory: Directory.Data,
-      });
-      zip.file(`attachments/${att.id}_orig.jpg`, origRes.data, { base64: true });
-    } catch (err) {
-      // 原图读取失败（按需拉取未完成/文件缺失），跳过
-      console.warn(`[backup] 原图读取失败 att=${att.id}:`, err);
-    }
-  }
-
-  const zipBlob = await zip.generateAsync({ type: 'base64', compression: 'DEFLATE' });
-  const filename = `${formatTimestamp(ts)}.zip`;
-
-  // 保存到私有备份目录
   await ensureDir(BACKUP_DIR, Directory.Documents);
   await Filesystem.writeFile({
-    path: `${BACKUP_DIR}/${filename}`,
-    data: zipBlob,
+    path: `${BACKUP_DIR}/${indexedFilename(type, ts)}`,
+    data: utf8ToBase64(JSON.stringify(manifest)),
     directory: Directory.Documents,
     recursive: true,
   });
 
-  // 清理旧备份
-  await pruneOldBackups(type);
+  // 清理超限清单 + 回收孤儿块
+  await pruneIndexedBackups(type);
 
-  return manifest;
+  return indexedToCompatManifest(manifest);
 }
 
-/**
- * 导出备份到公共 Download 目录
- */
-export async function exportToDownload(type: BackupType = 'manual'): Promise<BackupManifest> {
-  const ts = Date.now();
-  const db = await getDatabase();
-  const todoDb = await getTodoDatabase();
+/** 清理超限的索引式备份（按文件名时间戳，无需读文件内容） */
+async function pruneIndexedBackups(type: BackupType): Promise<void> {
+  const files = await readDir(BACKUP_DIR, Directory.Documents);
+  const sameType = files
+    .map(f => ({ name: f.name, parsed: parseIndexedFilename(f.name) }))
+    .filter(x => x.parsed && x.parsed.type === type)
+    .sort((a, b) => a.parsed!.ts - b.parsed!.ts);
 
-  // 确保数据库连接健康（手机端 Capacitor SQLite 连接可能不稳定）
-  await (db as any).ensureConnection?.();
-  await (todoDb as any).ensureConnection?.();
-
-  const [entries, tags, groups, settings, allTodos, allTodoTags, allTemplates, allAttachments, chatSessions] = await Promise.all([
-    db.getAllEntries(),
-    db.getAllTags(),
-    db.getAllGroups(),
-    db.getSettings(),
-    todoDb.getAllTodos(),
-    todoDb.getAllTodoTags(),
-    todoDb.getAllTemplates(),
-    db.getAllAttachments(),
-    loadChatSessions(),
-  ]);
-
-  const links = [];
-  for (const entry of entries) {
-    const entryLinks = await db.getLinksByEntryId(entry.id);
-    links.push(...entryLinks);
+  const limit = PRUNE_LIMIT[type];
+  if (sameType.length > limit) {
+    const toDelete = sameType.slice(0, sameType.length - limit);
+    for (const item of toDelete) {
+      await deleteFile(`${BACKUP_DIR}/${item.name}`, Directory.Documents);
+    }
+    await gcOrphanChunks();
   }
+}
 
-  const templatesWithItems = [];
-  for (const tpl of allTemplates) {
-    const items = await todoDb.getTemplateItems(tpl.id);
-    templatesWithItems.push({ template: tpl, items });
-  }
+/** 垃圾回收：删除没有任何清单引用的块 */
+async function gcOrphanChunks(): Promise<number> {
+  // 收集全部清单的引用
+  const files = await readDir(BACKUP_DIR, Directory.Documents);
+  const referenced = new Set<string>();
+  const manifests = files.filter(f => f.name.endsWith('.json'));
 
-  const manifest: BackupManifest = {
-    version: '1.0',
-    timestamp: ts,
-    type,
-    deviceId: getDeviceId(),
-    deviceName: getDeviceName(),
-    entryCount: entries.length,
-    todoCount: allTodos.length,
-    tagCount: tags.length,
-    groupCount: groups.length,
-    appVersion: APP_VERSION,
-    chatSessionCount: chatSessions.length,
-  };
-
-  const zip = new JSZip();
-  zip.file('manifest.json', JSON.stringify(manifest, null, 2));
-  zip.file('entries.json', JSON.stringify(
-    entries.map(e => { const { attachments, ...rest } = e; return rest; }),
-    null,
-    2
-  ));
-  zip.file('tags.json', JSON.stringify(tags, null, 2));
-  zip.file('groups.json', JSON.stringify(groups, null, 2));
-  zip.file('links.json', JSON.stringify(links, null, 2));
-  zip.file('settings.json', JSON.stringify(settings, null, 2));
-  zip.file('todos.json', JSON.stringify(allTodos, null, 2));
-  zip.file('todoTags.json', JSON.stringify(allTodoTags, null, 2));
-  zip.file('templates.json', JSON.stringify(templatesWithItems, null, 2));
-
-  // 附件元数据 + 缩略图（原图不打包，按需拉取）
-  zip.file('attachments.json', JSON.stringify(allAttachments, null, 2));
-  // v2.0.0: 对话历史数据
-  zip.file('chatSessions.json', JSON.stringify(chatSessions, null, 2));
-  for (const att of allAttachments) {
+  await runBatch(manifests, 4, async (f) => {
     try {
-      const thumbRes = await Filesystem.readFile({
-        path: att.thumbPath,
-        directory: Directory.Data,
-      });
-      zip.file(`attachments/${att.id}_thumb.jpg`, thumbRes.data, { base64: true });
-    } catch (err) {
-      console.warn(`[export] 缩略图读取失败 att=${att.id}:`, err);
+      const m = await readIndexedManifest(f.name);
+      for (const list of [
+        m.refs.entries, m.refs.tags, m.refs.groups, m.refs.links,
+        m.refs.todos, m.refs.todoTags, m.refs.templates,
+        m.refs.chatSessions, m.refs.attachments, m.refs.thumbs,
+      ]) {
+        for (const h of list) referenced.add(h);
+      }
+      if (m.refs.settings) referenced.add(m.refs.settings);
+    } catch {
+      // 坏清单跳过（保守起见不清理其块）
+    }
+  });
+
+  // 删除未引用块
+  let removed = 0;
+  for (const dir of [STORE_DATA_DIR, STORE_ATT_DIR]) {
+    const chunks = await readDir(dir, Directory.Documents);
+    for (const c of chunks) {
+      const hash = c.name.replace(/\.(json|jpg)$/, '');
+      if (!referenced.has(hash)) {
+        await deleteFile(`${dir}/${c.name}`, Directory.Documents);
+        removed++;
+      }
     }
   }
-
-  // 生成 zip 为 Blob，通过 <a download> 方式触发浏览器/WebView 下载
-  // 这种方式在所有平台都能正常工作：
-  // - Web/Electron: 保存到 Downloads 目录
-  // - Android APK: WebView 下载管理器保存到 /storage/emulated/0/Download/
-  // - 不需要任何存储权限
-  const zipBlobBytes = await zip.generateAsync({ type: 'arraybuffer', compression: 'DEFLATE' });
-  const filename = `${formatTimestamp(ts)}_${getDeviceId()}.zip`;
-
-  const blob = new Blob([new Uint8Array(zipBlobBytes)], { type: 'application/zip' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  // 延迟释放 URL，确保下载已触发
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-
-  return manifest;
+  return removed;
 }
 
 /** ============================================================
- *  备份列表管理
+ *  备份列表 / 删除 / 自动备份判断
  *  ============================================================ */
 
 /**
- * 列出所有备份副本
+ * 列出所有备份（索引式 + 旧 zip 合并）
+ * 索引式清单是小文件，读取很快；旧 zip 较慢但已不在启动路径
  */
 export async function listBackups(): Promise<BackupItem[]> {
   await ensureDir(BACKUP_DIR, Directory.Documents);
   const files = await readDir(BACKUP_DIR, Directory.Documents);
-
   const items: BackupItem[] = [];
 
-  for (const file of files) {
-    if (!file.name.endsWith('.zip')) continue;
+  // 索引式清单（快）
+  const jsonFiles = files.filter(f => f.name.endsWith('.json'));
+  const indexed = await runBatch(jsonFiles, 6, async (f): Promise<BackupItem | null> => {
+    try {
+      const m = await readIndexedManifest(f.name);
+      return {
+        filename: f.name,
+        path: `${BACKUP_DIR}/${f.name}`,
+        manifest: indexedToCompatManifest(m),
+        size: f.size,
+        format: 'indexed',
+      };
+    } catch {
+      return null; // 无法解析的文件跳过
+    }
+  });
+  for (const item of indexed) if (item) items.push(item);
 
+  // 旧 zip 备份（兼容展示）
+  const zipFiles = files.filter(f => f.name.endsWith('.zip'));
+  const legacy = await runBatch(zipFiles, 3, async (f): Promise<BackupItem | null> => {
     try {
       const result = await Filesystem.readFile({
-        path: `${BACKUP_DIR}/${file.name}`,
+        path: `${BACKUP_DIR}/${f.name}`,
         directory: Directory.Documents,
       });
       const zipData = result.data as string;
       const zip = await JSZip.loadAsync(zipData, { base64: true });
       const manifestFile = zip.file('manifest.json');
-      if (!manifestFile) continue;
-
-      const manifestText = await manifestFile.async('string');
-      const manifest = JSON.parse(manifestText) as BackupManifest;
-
-      items.push({
-        filename: file.name,
-        path: `${BACKUP_DIR}/${file.name}`,
+      if (!manifestFile) return null;
+      const manifest = JSON.parse(await manifestFile.async('string')) as BackupManifest;
+      return {
+        filename: f.name,
+        path: `${BACKUP_DIR}/${f.name}`,
         manifest,
-        size: file.size,
-      });
+        size: f.size,
+        format: 'zip',
+      };
     } catch {
-      // 跳过无法读取的文件
+      return null;
     }
-  }
+  });
+  for (const item of legacy) if (item) items.push(item);
 
   // 按时间戳降序
   items.sort((a, b) => b.manifest.timestamp - a.manifest.timestamp);
@@ -395,45 +620,33 @@ export async function listBackups(): Promise<BackupItem[]> {
 }
 
 /**
- * 删除指定备份
- */
-export async function deleteBackup(filename: string): Promise<void> {
-  await deleteFile(`${BACKUP_DIR}/${filename}`, Directory.Documents);
-}
-
-/**
- * 清理过期备份
- * - 自动备份：最多保留 14 份
- * - 手动备份：最多保留 10 份
- */
-async function pruneOldBackups(type: BackupType): Promise<void> {
-  const all = await listBackups();
-  const filtered = all.filter(item => item.manifest.type === type);
-  const limit = type === 'auto' ? 14 : 10;
-
-  if (filtered.length >= limit) {
-    // 按时间戳升序，删除最旧的
-    const sorted = [...filtered].sort((a, b) => a.manifest.timestamp - b.manifest.timestamp);
-    const toDelete = sorted.slice(0, sorted.length - limit + 1);
-    for (const item of toDelete) {
-      await deleteBackup(item.filename);
-    }
-  }
-}
-
-/**
  * 检查今天是否已自动备份
+ * 只看清单文件名（auto_YYYYMMDD_*.json），不读任何文件内容 —— 启动零开销
  */
 export async function shouldAutoBackup(): Promise<boolean> {
-  const all = await listBackups();
+  const files = await readDir(BACKUP_DIR, Directory.Documents);
   const today = new Date();
-  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  const ymd = `${today.getFullYear()}${pad(today.getMonth() + 1)}${pad(today.getDate())}`;
 
-  const todayAuto = all.find(item =>
-    item.manifest.type === 'auto' && item.manifest.timestamp >= todayStart
-  );
+  return !files.some(f => {
+    const parsed = parseIndexedFilename(f.name);
+    return parsed !== null && parsed.type === 'auto' && parsed.yyyymmdd === ymd;
+  });
+}
 
-  return !todayAuto;
+/**
+ * 删除指定备份
+ * 索引式：删清单 + 垃圾回收（无人引用的块随之消失）
+ * 旧 zip：直接删除文件
+ */
+export async function deleteBackup(filename: string): Promise<void> {
+  if (filename.endsWith('.json')) {
+    await deleteFile(`${BACKUP_DIR}/${filename}`, Directory.Documents);
+    await gcOrphanChunks();
+  } else {
+    await deleteFile(`${BACKUP_DIR}/${filename}`, Directory.Documents);
+  }
 }
 
 /** ============================================================
@@ -441,14 +654,18 @@ export async function shouldAutoBackup(): Promise<boolean> {
  *  ============================================================ */
 
 /**
- * 从备份副本覆盖式恢复
+ * 从备份恢复（自动分发索引式 / 旧 zip）
  * 恢复前自动创建当前数据的备份
  */
 export async function restoreFromBackup(filename: string): Promise<RestoreResult> {
   // 1. 自动备份当前数据
   await createBackup('manual');
 
-  // 2. 读取备份文件
+  if (filename.endsWith('.json')) {
+    return await restoreFromIndexed(filename);
+  }
+
+  // 2. 旧 zip 路径
   const result = await Filesystem.readFile({
     path: `${BACKUP_DIR}/${filename}`,
     directory: Directory.Documents,
@@ -459,6 +676,383 @@ export async function restoreFromBackup(filename: string): Promise<RestoreResult
   // 3. 清空当前数据库并重新导入
   return await restoreFromZip(zip, true);
 }
+
+/**
+ * 从索引式清单恢复（覆盖式，保留原始 id 保证块哈希稳定）
+ */
+async function restoreFromIndexed(filename: string): Promise<RestoreResult> {
+  const result: RestoreResult = {
+    entriesImported: 0, entriesSkipped: 0,
+    todosImported: 0, todosSkipped: 0,
+    tagsImported: 0, tagsSkipped: 0,
+    groupsImported: 0, groupsSkipped: 0,
+    errors: [],
+  };
+
+  const manifest = await readIndexedManifest(filename);
+  const db = await getDatabase();
+  const todoDb = await getTodoDatabase();
+
+  // 并发读块
+  const readChunk = async (hash: string): Promise<any | null> => {
+    try {
+      const res = await Filesystem.readFile({
+        path: `${STORE_DATA_DIR}/${hash}.json`,
+        directory: Directory.Documents,
+      });
+      return JSON.parse(base64ToUtf8(res.data as string));
+    } catch {
+      result.errors.push(`数据块缺失: ${hash.slice(0, 12)}...`);
+      return null;
+    }
+  };
+
+  const [entries, tags, groups, links, settings, todos, todoTags, templates, chatSessions, attachments] = await Promise.all([
+    runBatch(manifest.refs.entries, 8, readChunk),
+    runBatch(manifest.refs.tags, 8, readChunk),
+    runBatch(manifest.refs.groups, 8, readChunk),
+    runBatch(manifest.refs.links, 8, readChunk),
+    manifest.refs.settings ? readChunk(manifest.refs.settings) : Promise.resolve(null),
+    runBatch(manifest.refs.todos, 8, readChunk),
+    runBatch(manifest.refs.todoTags, 8, readChunk),
+    runBatch(manifest.refs.templates, 8, readChunk),
+    runBatch(manifest.refs.chatSessions, 8, readChunk),
+    runBatch(manifest.refs.attachments, 8, readChunk),
+  ]);
+
+  // === 清空现有数据（覆盖式） ===
+  const existingEntries = await db.getAllEntries();
+  for (const e of existingEntries) await db.deleteEntry(e.id);
+  const existingTags = await db.getAllTags();
+  for (const t of existingTags) await db.deleteTag(t.id);
+  const existingGroups = await db.getAllGroups();
+  for (const g of existingGroups) await db.deleteGroup(g.id);
+  const existingLinks = await db.getAllLinks();
+  for (const l of existingLinks) await db.deleteLink(l.id);
+  const existingAttachments = await db.getAllAttachments();
+  for (const a of existingAttachments) await db.deleteAttachment(a.id);
+  await db.deleteAllChatSessions();
+
+  const existingTodos = await todoDb.getAllTodos({ includeDeleted: true });
+  for (const t of existingTodos) await todoDb.permanentDeleteTodo(t.id);
+  const existingTodoTags = await todoDb.getAllTodoTags();
+  for (const t of existingTodoTags) await todoDb.deleteTodoTag(t.id);
+  const existingTemplates = await todoDb.getAllTemplates();
+  for (const t of existingTemplates) await todoDb.deleteTemplate(t.id);
+
+  // === 导入标签（保留原 id） ===
+  for (const tag of tags) {
+    if (!tag) { result.tagsSkipped++; continue; }
+    try {
+      await db.createTag(tag.name, {
+        id: tag.id,
+        isSmart: tag.isSmart,
+        searchCriteria: tag.searchCriteria,
+      });
+      result.tagsImported++;
+    } catch (err) {
+      result.errors.push(`标签导入失败 ${tag.name}: ${String(err)}`);
+    }
+  }
+
+  // === 导入组（保留原 id） ===
+  for (const group of groups) {
+    if (!group) { result.groupsSkipped++; continue; }
+    try {
+      await db.createGroup(group.name, { id: group.id });
+      result.groupsImported++;
+    } catch (err) {
+      result.errors.push(`组导入失败 ${group.name}: ${String(err)}`);
+    }
+  }
+
+  // === 导入条目（保留原 id + 标签关联） ===
+  for (const entry of entries) {
+    if (!entry) { result.entriesSkipped++; continue; }
+    try {
+      await db.createEntry({
+        id: entry.id,
+        content: entry.content,
+        source: entry.source,
+        groupId: entry.groupId,
+        supplement: entry.supplement,
+        isStarred: entry.isStarred ?? false,
+        createdAt: entry.createdAt,
+        updatedAt: entry.updatedAt,
+        lastUsedAt: entry.lastUsedAt,
+        copyCount: entry.copyCount ?? 0,
+      });
+      if (Array.isArray(entry.tags)) {
+        for (const tag of entry.tags) {
+          if (tag?.id) await db.addTagToEntry(entry.id, tag.id);
+        }
+      }
+      result.entriesImported++;
+    } catch (err) {
+      result.errors.push(`条目导入失败 ${entry.id}: ${String(err)}`);
+    }
+  }
+
+  // === 导入链接（保留原 id） ===
+  for (const link of links) {
+    if (!link) continue;
+    try {
+      await db.createLink(link.sourceId, link.targetId, link.description, { id: link.id });
+    } catch (err) {
+      result.errors.push(`链接导入失败 ${link.id}: ${String(err)}`);
+    }
+  }
+
+  // === 导入设置 ===
+  if (settings) {
+    try {
+      await db.saveSettings(settings as Settings);
+    } catch (err) {
+      result.errors.push(`设置导入失败: ${String(err)}`);
+    }
+  }
+
+  // === 导入待办标签（保留原 id） ===
+  for (const tt of todoTags) {
+    if (!tt) continue;
+    try {
+      await todoDb.createTodoTag(tt.name, tt.color, { id: tt.id });
+    } catch (err) {
+      result.errors.push(`待办标签导入失败 ${tt.name}: ${String(err)}`);
+    }
+  }
+
+  // === 导入待办（保留原 id + 标签关联） ===
+  for (const todo of todos) {
+    if (!todo) { result.todosSkipped++; continue; }
+    try {
+      await todoDb.createTodo({
+        id: todo.id,
+        title: todo.title,
+        note: todo.note,
+        status: todo.status || 'pending',
+        startTime: todo.startTime,
+        endTime: todo.endTime,
+        isToday: todo.isToday ?? false,
+        tagIds: todo.tagIds,
+        createdAt: todo.createdAt,
+        updatedAt: todo.updatedAt,
+        completedAt: todo.completedAt,
+        deletedAt: todo.deletedAt,
+        folderDate: todo.folderDate,
+      } as any);
+      result.todosImported++;
+    } catch (err) {
+      result.errors.push(`待办导入失败 ${todo.title}: ${String(err)}`);
+    }
+  }
+
+  // === 导入模板 + 条目（保留原 id） ===
+  for (const twi of templates) {
+    if (!twi?.template) continue;
+    try {
+      await todoDb.createTemplate(twi.template.name, { id: twi.template.id });
+      if (Array.isArray(twi.items)) {
+        for (const item of twi.items) {
+          await todoDb.addTemplateItem({
+            id: item.id,
+            templateId: twi.template.id,
+            title: item.title,
+            note: item.note,
+            startTime: item.startTime,
+            endTime: item.endTime,
+            isToday: item.isToday,
+            tagIds: item.tagIds,
+            sortOrder: item.sortOrder,
+          } as any);
+        }
+      }
+    } catch (err) {
+      result.errors.push(`模板导入失败 ${twi.template.name}: ${String(err)}`);
+    }
+  }
+
+  // === 导入对话历史 ===
+  if (chatSessions && Array.isArray(chatSessions)) {
+    for (const session of chatSessions) {
+      if (!session) continue;
+      try {
+        await db.saveChatSession({
+          id: session.id,
+          title: session.title || '未命名对话',
+          messages: session.messages || [],
+          createdAt: session.createdAt || Date.now(),
+          updatedAt: session.updatedAt || Date.now(),
+          model: session.model,
+          mcpEnabledTools: session.mcpEnabledTools,
+          mcpSearchResults: session.mcpSearchResults,
+        });
+        result.chatSessionsImported = (result.chatSessionsImported ?? 0) + 1;
+      } catch (err) {
+        result.errors.push(`对话恢复失败 id=${session.id}: ${String(err)}`);
+      }
+    }
+  }
+
+  // === 导入附件（写缩略图文件 + 元数据，保留原 id） ===
+  for (const att of attachments) {
+    if (!att) continue;
+    try {
+      // 从块池恢复缩略图
+      if (att.thumbHash) {
+        try {
+          const thumbRes = await Filesystem.readFile({
+            path: `${STORE_ATT_DIR}/${att.thumbHash}.jpg`,
+            directory: Directory.Documents,
+          });
+          await Filesystem.writeFile({
+            path: att.thumbPath,
+            data: thumbRes.data as string,
+            directory: Directory.Data,
+            recursive: true,
+          });
+        } catch (err) {
+          result.errors.push(`缩略图恢复失败 att=${att.id}: ${String(err)}`);
+        }
+      }
+      await db.addAttachment({
+        id: att.id,
+        entryId: att.entryId,
+        filePath: att.filePath,
+        thumbPath: att.thumbPath,
+        mimeType: att.mimeType || 'image/jpeg',
+        sortOrder: att.sortOrder ?? 0,
+        createdAt: att.createdAt || Date.now(),
+      });
+    } catch (err) {
+      result.errors.push(`附件元数据导入失败 att=${att.id}: ${String(err)}`);
+    }
+  }
+
+  return result;
+}
+
+/** ============================================================
+ *  全量 zip 备份（导出 / 局域网同步发送用）
+ *  ============================================================ */
+
+/**
+ * 构建全量备份 zip（不落盘到备份目录）
+ *
+ * 原图策略：本地备份不打包原图；同步发送时通过 includeOrigIds 指定
+ * 要打包的原图（接收方没有的），实现增量
+ *
+ * @param includeOrigIds 要打包原图的附件 id 集合（同步场景）；不传=不打包原图
+ */
+export async function buildBackupZip(
+  type: BackupType = 'manual',
+  includeOrigIds?: Set<string>,
+): Promise<{ zip: JSZip; manifest: BackupManifest; filename: string }> {
+  const ts = Date.now();
+  const { entries, tags, groups, links, settings, allTodos, allTodoTags, templatesWithItems, allAttachments, chatSessions } = await collectBackupData();
+
+  const manifest: BackupManifest = {
+    version: '1.0',
+    timestamp: ts,
+    type,
+    deviceId: getDeviceId(),
+    deviceName: getDeviceName(),
+    entryCount: entries.length,
+    todoCount: allTodos.length,
+    tagCount: tags.length,
+    groupCount: groups.length,
+    appVersion: APP_VERSION,
+    chatSessionCount: chatSessions.length,
+  };
+
+  const zip = new JSZip();
+  zip.file('manifest.json', JSON.stringify(manifest, null, 2));
+  zip.file('entries.json', JSON.stringify(
+    entries.map(e => { const { attachments, ...rest } = e; return rest; }),
+    null,
+    2
+  ));
+  zip.file('tags.json', JSON.stringify(tags, null, 2));
+  zip.file('groups.json', JSON.stringify(groups, null, 2));
+  zip.file('links.json', JSON.stringify(links, null, 2));
+  zip.file('settings.json', JSON.stringify(settings, null, 2));
+  zip.file('todos.json', JSON.stringify(allTodos, null, 2));
+  zip.file('todoTags.json', JSON.stringify(allTodoTags, null, 2));
+  zip.file('templates.json', JSON.stringify(templatesWithItems, null, 2));
+
+  // 附件元数据（全量）+ 缩略图（全量）+ 原图（增量：接收方没有的）
+  zip.file('attachments.json', JSON.stringify(allAttachments, null, 2));
+  zip.file('chatSessions.json', JSON.stringify(chatSessions, null, 2));
+
+  // 并发读缩略图（I/O 批处理）
+  const thumbResults = await runBatch(allAttachments, 4, async (att) => {
+    try {
+      const thumbRes = await Filesystem.readFile({
+        path: att.thumbPath,
+        directory: Directory.Data,
+      });
+      return { att, data: thumbRes.data as string };
+    } catch {
+      return null; // 缩略图缺失，跳过
+    }
+  });
+  for (const item of thumbResults) {
+    if (item) zip.file(`attachments/${item.att.id}_thumb.jpg`, item.data, { base64: true });
+  }
+
+  // 原图：仅打包 includeOrigIds 指定的（同步增量场景）
+  if (includeOrigIds && includeOrigIds.size > 0) {
+    const origAtts = allAttachments.filter(a => includeOrigIds.has(a.id));
+    const origResults = await runBatch(origAtts, 4, async (att) => {
+      try {
+        const origRes = await Filesystem.readFile({
+          path: att.filePath,
+          directory: Directory.Data,
+        });
+        return { att, data: origRes.data as string };
+      } catch {
+        return null; // 原图缺失，跳过
+      }
+    });
+    for (const item of origResults) {
+      if (item) zip.file(`attachments/${item.att.id}_orig.jpg`, item.data, { base64: true });
+    }
+  }
+
+  return { zip, manifest, filename: `${formatTimestamp(ts)}.zip` };
+}
+
+/**
+ * 导出备份到公共 Download 目录（全量 zip 快照）
+ */
+export async function exportToDownload(type: BackupType = 'manual'): Promise<BackupManifest> {
+  const { zip, manifest, filename } = await buildBackupZip(type);
+
+  // 生成 zip 为 Blob，通过 <a download> 方式触发浏览器/WebView 下载
+  // 这种方式在所有平台都能正常工作：
+  // - Web/Electron: 保存到 Downloads 目录
+  // - Android APK: WebView 下载管理器保存到 /storage/emulated/0/Download/
+  // - 不需要任何存储权限
+  const zipBlobBytes = await zip.generateAsync({ type: 'arraybuffer', compression: 'DEFLATE' });
+  const outName = `${filename.replace(/\.zip$/, '')}_${getDeviceId()}.zip`;
+
+  const blob = new Blob([new Uint8Array(zipBlobBytes)], { type: 'application/zip' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = outName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  // 延迟释放 URL，确保下载已触发
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+  return manifest;
+}
+
+/** ============================================================
+ *  旧 zip 恢复逻辑（接收外部 zip / 恢复旧备份，保持兼容）
+ *  ============================================================ */
 
 /**
  * 从 zip 文件增量恢复
@@ -696,6 +1290,9 @@ async function restoreFromZip(zip: JSZip, overwrite: boolean): Promise<RestoreRe
             title: tplItem.title,
             note: tplItem.note,
             time: tplItem.time,
+            startTime: tplItem.startTime,
+            endTime: tplItem.endTime,
+            isToday: tplItem.isToday,
             sortOrder: tplItem.sortOrder,
           } as any);
         }

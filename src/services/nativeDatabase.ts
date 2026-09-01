@@ -215,11 +215,11 @@ class NativeDatabaseService implements IDatabaseService {
   async getAllEntries(): Promise<Entry[]> {
     if (!this.db) throw new Error('Database not initialized');
     const result = await this.db.query('SELECT * FROM entries ORDER BY created_at DESC');
+    const tagsMap = await this.getTagsForEntries();
     const entries: Entry[] = [];
     if (result.values) {
       for (const row of result.values) {
-        const tags = await this.getTagsByEntryId(row.id as string);
-        entries.push(this.rowToEntry(row, tags));
+        entries.push(this.rowToEntry(row, tagsMap.get(row.id as string) || []));
       }
     }
     await this.fillAttachmentsForEntries(entries);
@@ -278,11 +278,11 @@ class NativeDatabaseService implements IDatabaseService {
     if (conditions.length > 0) sql += ' WHERE ' + conditions.join(' AND ');
     sql += ' ORDER BY e.created_at DESC';
     const result = await this.db.query(sql, values);
+    const tagsMap = await this.getTagsForEntries();
     const entries: Entry[] = [];
     if (result.values) {
       for (const row of result.values) {
-        const tags = await this.getTagsByEntryId(row.id as string);
-        entries.push(this.rowToEntry(row, tags));
+        entries.push(this.rowToEntry(row, tagsMap.get(row.id as string) || []));
       }
     }
     await this.fillAttachmentsForEntries(entries);
@@ -292,21 +292,21 @@ class NativeDatabaseService implements IDatabaseService {
   async getRecentEntries(limit: number): Promise<Entry[]> {
     if (!this.db) throw new Error('Database not initialized');
     const result = await this.db.query('SELECT * FROM entries ORDER BY created_at DESC LIMIT ?', [limit]);
+    const tagsMap = await this.getTagsForEntries();
     const entries: Entry[] = [];
     if (result.values) {
       for (const row of result.values) {
-        const tags = await this.getTagsByEntryId(row.id as string);
-        entries.push(this.rowToEntry(row, tags));
+        entries.push(this.rowToEntry(row, tagsMap.get(row.id as string) || []));
       }
     }
     await this.fillAttachmentsForEntries(entries);
     return entries;
   }
 
-  async createTag(name: string, options?: { isSmart?: boolean; searchCriteria?: { keyword?: string; tagIds?: string[]; isStarred?: boolean } }): Promise<Tag> {
+  async createTag(name: string, options?: { id?: string; isSmart?: boolean; searchCriteria?: { keyword?: string; tagIds?: string[]; isStarred?: boolean } }): Promise<Tag> {
     if (!this.db) throw new Error('Database not initialized');
     const tag: Tag = {
-      id: this.generateId(),
+      id: options?.id || this.generateId(),
       name,
       createdAt: Date.now(),
       ...(options?.isSmart ? { isSmart: true, searchCriteria: options.searchCriteria } : {}),
@@ -345,6 +345,30 @@ class NativeDatabaseService implements IDatabaseService {
     return result.values?.map(row => ({ id: row.id as string, name: row.name as string, createdAt: row.created_at as number })) || [];
   }
 
+  /**
+   * 批量获取多个条目的标签（一次全量查询 + 内存 join，消除 N+1）
+   * 不传 ids 时返回全部条目的标签映射
+   */
+  private async getTagsForEntries(ids?: string[]): Promise<Map<string, Tag[]>> {
+    if (!this.db) throw new Error('Database not initialized');
+    const map = new Map<string, Tag[]>();
+    const filter = ids && ids.length > 0 ? new Set(ids) : null;
+    const result = await this.db.query(
+      'SELECT et.entry_id, t.id AS tag_id, t.name, t.created_at FROM entry_tags et JOIN tags t ON t.id = et.tag_id'
+    );
+    if (result.values) {
+      for (const row of result.values) {
+        const entryId = row.entry_id as string;
+        if (filter && !filter.has(entryId)) continue;
+        const tag: Tag = { id: row.tag_id as string, name: row.name as string, createdAt: row.created_at as number };
+        const list = map.get(entryId) || [];
+        list.push(tag);
+        map.set(entryId, list);
+      }
+    }
+    return map;
+  }
+
   async addTagToEntry(entryId: string, tagId: string): Promise<void> {
     if (!this.db) throw new Error('Database not initialized');
     await this.db.run('INSERT OR IGNORE INTO entry_tags (entry_id, tag_id) VALUES (?, ?)', [entryId, tagId]);
@@ -365,9 +389,9 @@ class NativeDatabaseService implements IDatabaseService {
     await this.db.run('UPDATE tags SET name = ? WHERE id = ?', [newName, tagId]);
   }
 
-  async createLink(sourceId: string, targetId: string, description?: string): Promise<Link> {
+  async createLink(sourceId: string, targetId: string, description?: string, options?: { id?: string }): Promise<Link> {
     if (!this.db) throw new Error('Database not initialized');
-    const link: Link = { id: this.generateId(), sourceId, targetId, description, createdAt: Date.now() };
+    const link: Link = { id: options?.id || this.generateId(), sourceId, targetId, description, createdAt: Date.now() };
     await this.db.run(
       'INSERT INTO links (id, source_id, target_id, description, created_at) VALUES (?, ?, ?, ?, ?)',
       [link.id, link.sourceId, link.targetId, link.description || null, link.createdAt]
@@ -388,14 +412,24 @@ class NativeDatabaseService implements IDatabaseService {
     })) || [];
   }
 
+  async getAllLinks(): Promise<Link[]> {
+    if (!this.db) throw new Error('Database not initialized');
+    const result = await this.db.query('SELECT * FROM links ORDER BY created_at ASC');
+    return result.values?.map(row => ({
+      id: row.id as string, sourceId: row.source_id as string,
+      targetId: row.target_id as string, description: row.description as string | undefined,
+      createdAt: row.created_at as number,
+    })) || [];
+  }
+
   async deleteLink(linkId: string): Promise<void> {
     if (!this.db) throw new Error('Database not initialized');
     await this.db.run('DELETE FROM links WHERE id = ?', [linkId]);
   }
 
-  async createGroup(name: string): Promise<Group> {
+  async createGroup(name: string, options?: { id?: string }): Promise<Group> {
     if (!this.db) throw new Error('Database not initialized');
-    const group: Group = { id: this.generateId(), name, sortOrder: 0 };
+    const group: Group = { id: options?.id || this.generateId(), name, sortOrder: 0 };
     await this.db.run('INSERT INTO groups (id, name, sort_order) VALUES (?, ?, ?)', [group.id, group.name, group.sortOrder]);
     return group;
   }
@@ -428,11 +462,11 @@ class NativeDatabaseService implements IDatabaseService {
       'SELECT DISTINCT e.* FROM entries e JOIN entry_tags et ON e.id = et.entry_id WHERE et.tag_id = ? ORDER BY e.created_at DESC',
       [tagId]
     );
+    const tagsMap = await this.getTagsForEntries();
     const entries: Entry[] = [];
     if (result.values) {
       for (const row of result.values) {
-        const tags = await this.getTagsByEntryId(row.id as string);
-        entries.push(this.rowToEntry(row, tags));
+        entries.push(this.rowToEntry(row, tagsMap.get(row.id as string) || []));
       }
     }
     await this.fillAttachmentsForEntries(entries);
@@ -445,11 +479,11 @@ class NativeDatabaseService implements IDatabaseService {
       'SELECT * FROM entries WHERE group_id = ? ORDER BY created_at DESC',
       [groupId]
     );
+    const tagsMap = await this.getTagsForEntries();
     const entries: Entry[] = [];
     if (result.values) {
       for (const row of result.values) {
-        const tags = await this.getTagsByEntryId(row.id as string);
-        entries.push(this.rowToEntry(row, tags));
+        entries.push(this.rowToEntry(row, tagsMap.get(row.id as string) || []));
       }
     }
     await this.fillAttachmentsForEntries(entries);

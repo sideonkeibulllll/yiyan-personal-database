@@ -221,6 +221,6 @@
   border-radius: var(--radius-full);
   font-size: var(--text-sm);
   color: var(--color-text-primary);
-  animation: slideUp var(--duration-normal) var(--ease-out);
+  animation: fadeIn 0.3s var(--ease-out);
   z-index: 200;
 }

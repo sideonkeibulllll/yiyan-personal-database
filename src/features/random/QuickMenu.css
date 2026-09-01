@@ -22,7 +22,7 @@
   border-radius: var(--radius-xl) var(--radius-xl) 0 0;
   padding: var(--space-5);
   padding-bottom: calc(var(--space-5) + var(--safe-bottom));
-  animation: slideUp var(--duration-normal) var(--ease-out);
+  animation: fadeIn 0.3s var(--ease-out);
   max-height: 85vh;
   overflow-y: auto;
 }

@@ -23,6 +23,13 @@ import './RandomPage.css';
 /** 卡片间距 (px) */
 const CARD_GAP = 12;
 
+/** 计算折叠文本：截取到第 limit 字所在行的行尾，避免半截行 */
+function getCollapsedText(content: string, limit: number): string {
+  const nl = content.indexOf('\n', limit);
+  if (nl !== -1) return content.slice(0, nl);
+  return content.slice(0, limit) + '…';
+}
+
 /** SVG icons (stroke-based, viewBox="0 0 24 24", strokeWidth="1.5") */
 const FunnelIcon = () => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -77,10 +84,15 @@ export function RandomPage() {
   const settings = useSettingsStore(state => state.settings);
   const cardsPerPage = settings.random?.cardsPerPage ?? 7;
   const attachmentMode = settings.random?.attachmentDisplayMode ?? 'inline';
+  const collapseLen = settings.random?.contentCollapseLength ?? 300;
 
   // 当前展示的一批条目
   const [currentEntries, setCurrentEntries] = useState<Entry[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  // 已展开全文的卡片 id 集合（长文本折叠）
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  // 卡片堆叠滚动容器（刷新后回顶部）
+  const cardsStackRef = useRef<HTMLDivElement>(null);
   // 上次抽取的 id 列表，用于避免连续两屏重复
   const lastIdsRef = useRef<Set<string>>(new Set());
 
@@ -184,6 +196,7 @@ export function RandomPage() {
     lastIdsRef.current = new Set(result.map(e => e.id));
 
     setCurrentEntries(result);
+    setExpandedIds(new Set());
     // a: 保存快照
     saveSnapshot(result);
     setIsLoading(false);
@@ -340,10 +353,21 @@ export function RandomPage() {
     }
   }, [currentEntries, toggleStar, menuEntry]);
 
-  // 下一屏（重新随机抽取）
+  // 切换长文本展开/收起
+  const handleToggleExpand = useCallback((entryId: string) => {
+    setExpandedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(entryId)) next.delete(entryId);
+      else next.add(entryId);
+      return next;
+    });
+  }, []);
+
+  // 下一屏（重新随机抽取，并回到顶部）
   const handleRefresh = useCallback(() => {
     setIsLoading(true);
     getRandomEntries();
+    cardsStackRef.current?.scrollTo({ top: 0 });
   }, [getRandomEntries]);
 
   // 筛选变更
@@ -381,6 +405,8 @@ export function RandomPage() {
 
     lastIdsRef.current = new Set(result.map(e => e.id));
     setCurrentEntries(result);
+    setExpandedIds(new Set());
+    cardsStackRef.current?.scrollTo({ top: 0 });
     // a: 保存快照
     saveSnapshot(result);
     setIsLoading(false);
@@ -436,8 +462,10 @@ export function RandomPage() {
       <main className="page-content">
         {currentEntries.length > 0 ? (
           <>
-            <div className="cards-stack">
+            <div className="cards-stack" ref={cardsStackRef}>
               {currentEntries.map((entry) => {
+                const needsCollapse = collapseLen > 0 && entry.content.length > collapseLen;
+                const isExpanded = expandedIds.has(entry.id);
                 return (
                   <div
                     key={entry.id}
@@ -451,8 +479,24 @@ export function RandomPage() {
                   >
                     <div className="entry-card glass">
                       <div className="card-content">
-                        {entry.content}
+                        {needsCollapse && !isExpanded
+                          ? getCollapsedText(entry.content, collapseLen)
+                          : entry.content}
                       </div>
+
+                      {/* 长文本折叠：展开/收起 */}
+                      {needsCollapse && (
+                        <button
+                          className="card-expand-btn"
+                          onClick={(e) => { e.stopPropagation(); handleToggleExpand(entry.id); }}
+                          onMouseDown={stopPropagation}
+                          onMouseUp={stopPropagation}
+                          onTouchStart={stopPropagation}
+                          onTouchEnd={stopPropagation}
+                        >
+                          {isExpanded ? '收起' : '展开'}
+                        </button>
+                      )}
 
                       {/* 图片附件展示 - inline 模式：纵向堆叠在文本下方 */}
                       {attachmentMode === 'inline'

@@ -677,28 +677,15 @@ export async function prepareZipForSend(device?: DiscoveredDevice): Promise<{ ba
     }
   }
 
-  // 复用 backupService 创建备份
-  const { createBackup } = await import('./backupService');
-  await createBackup('manual', includeOrigIds);
+  // 复用 backupService 生成全量 zip（不落盘到备份目录，避免重复存储）
+  const { buildBackupZip } = await import('./backupService');
+  const { zip, filename } = await buildBackupZip('manual', includeOrigIds);
 
-  // 读取最新创建的备份
-  const { listBackups } = await import('./backupService');
-  const backups = await listBackups();
-  if (backups.length === 0) throw new Error('创建备份失败');
-
-  // 读取最新的备份文件（使用适配器，兼容 Electron 环境）
-  const { Filesystem, Directory } = await import('./filesystemAdapter');
-  const latest = backups[0];
-  const result = await Filesystem.readFile({
-    path: latest.path,
-    directory: Directory.Documents,
-  });
-
-  const base64 = result.data as string;
+  const base64 = await zip.generateAsync({ type: 'base64', compression: 'DEFLATE' });
   return {
     base64,
-    filename: latest.filename,
-    size: latest.size,
+    filename,
+    size: base64.length,
   };
 }
 

@@ -1216,6 +1216,19 @@ export function SettingsPage() {
               </div>
               <span className="form-hint">控制随机卡片中图片附件的展示方式</span>
             </div>
+            <div className="form-group">
+              <label className="form-label">长文本折叠字数</label>
+              <input
+                type="number"
+                className="form-input glass"
+                value={settings.random?.contentCollapseLength ?? 300}
+                onChange={e => { updateRandomConfig({
+                  contentCollapseLength: Math.max(0, Math.min(5000, parseInt(e.target.value) || 0)),
+                }); markDirty('random.contentCollapseLength'); }}
+                min="0" max="5000" step="50"
+              />
+              <span className="form-hint">超过该字数的卡片内容将折叠，点击「展开」查看全文；设为 0 表示不折叠</span>
+            </div>
           </div>
         );
 
@@ -1341,6 +1354,7 @@ export function SettingsPage() {
                         {new Date(item.manifest.timestamp).toLocaleString('zh-CN')}
                       </div>
                       <div className="backup-item-meta">
+                        {item.format === 'indexed' ? '索引式 · ' : ''}
                         {item.manifest.entryCount} 条 · {item.manifest.todoCount} 待办 · {(item.size / 1024).toFixed(1)}KB
                       </div>
                     </div>

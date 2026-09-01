@@ -15,11 +15,11 @@ class WebTodoDatabaseService implements ITodoDatabaseService {
 
   // ==================== 待办 CRUD ====================
 
-  async createTodo(todo: Omit<Todo, 'id'>): Promise<Todo> {
+  async createTodo(todo: Omit<Todo, 'id'> & { id?: string }): Promise<Todo> {
     const todos = this.getTodosFromStorage();
     const newTodo: Todo = {
       ...todo,
-      id: this.generateId(),
+      id: todo.id || this.generateId(),
     };
     todos.unshift(newTodo);
     this.saveTodosToStorage(todos);
@@ -129,13 +129,17 @@ class WebTodoDatabaseService implements ITodoDatabaseService {
 
   // ==================== 待办标签 ====================
 
-  async createTodoTag(name: string, color?: string): Promise<TodoTag> {
+  async createTodoTag(name: string, color?: string, options?: { id?: string }): Promise<TodoTag> {
     const tags = this.getTodoTagsFromStorage();
+    // 显式指定 id 时（恢复场景）先按 id 去重
+    if (options?.id && tags.some(t => t.id === options.id)) {
+      return tags.find(t => t.id === options.id)!;
+    }
     const existing = tags.find(t => t.name === name);
     if (existing) return existing;
 
     const tag: TodoTag = {
-      id: this.generateId(),
+      id: options?.id || this.generateId(),
       name,
       color,
       createdAt: Date.now(),
@@ -185,10 +189,10 @@ class WebTodoDatabaseService implements ITodoDatabaseService {
 
   // ==================== 模板 ====================
 
-  async createTemplate(name: string): Promise<TodoTemplate> {
+  async createTemplate(name: string, options?: { id?: string }): Promise<TodoTemplate> {
     const templates = this.getTemplatesFromStorage();
     const template: TodoTemplate = {
-      id: this.generateId(),
+      id: options?.id || this.generateId(),
       name,
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -234,11 +238,15 @@ class WebTodoDatabaseService implements ITodoDatabaseService {
       .sort((a, b) => a.sortOrder - b.sortOrder);
   }
 
-  async addTemplateItem(item: Omit<TodoTemplateItem, 'id'>): Promise<TodoTemplateItem> {
+  async getAllTemplateItems(): Promise<TodoTemplateItem[]> {
+    return this.getTemplateItemsFromStorage();
+  }
+
+  async addTemplateItem(item: Omit<TodoTemplateItem, 'id'> & { id?: string }): Promise<TodoTemplateItem> {
     const items = this.getTemplateItemsFromStorage();
     const newItem: TodoTemplateItem = {
       ...item,
-      id: this.generateId(),
+      id: item.id || this.generateId(),
     };
     items.push(newItem);
     this.saveTemplateItemsToStorage(items);

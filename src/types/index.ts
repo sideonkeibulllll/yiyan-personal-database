@@ -73,6 +73,8 @@ export interface RandomConfig {
   cardsPerPage: number;
   /** 图片附件展示模式：inline=原图直接展示，badge=仅显示附件标识 */
   attachmentDisplayMode: AttachmentDisplayMode;
+  /** 长文本折叠阈值（字数），超过则折叠并显示「展开」按钮；0 表示不折叠 */
+  contentCollapseLength: number;
 }
 
 // ==================== 待办相关类型 ====================
@@ -436,6 +438,7 @@ export const DEFAULT_SETTINGS: Settings = {
   random: {
     cardsPerPage: 7,
     attachmentDisplayMode: 'inline',
+    contentCollapseLength: 300,
   },
   todo: DEFAULT_TODO_CONFIG,
 };

@@ -169,9 +169,9 @@ class NativeTodoDatabaseService implements ITodoDatabaseService {
 
   // ==================== 待办 CRUD ====================
 
-  async createTodo(todo: Omit<Todo, 'id'>): Promise<Todo> {
+  async createTodo(todo: Omit<Todo, 'id'> & { id?: string }): Promise<Todo> {
     if (!this.db) throw new Error('Database not initialized');
-    const id = this.generateId();
+    const id = todo.id || this.generateId();
     await this.db.run(
       `INSERT INTO todos (id, title, note, status, start_time, end_time, is_today, created_at, updated_at, completed_at, deleted_at, folder_date)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -240,10 +240,11 @@ class NativeTodoDatabaseService implements ITodoDatabaseService {
       'SELECT * FROM todos WHERE folder_date = ? AND deleted_at IS NULL ORDER BY start_time ASC',
       [folderDate]
     );
+    const tagMap = await this.getTagRelationsMap();
     const todos: Todo[] = [];
     if (result.values) {
       for (const row of result.values) {
-        todos.push(await this.rowToTodo(row));
+        todos.push(await this.rowToTodo(row, tagMap.get(row.id as string)));
       }
     }
     return todos;
@@ -255,10 +256,11 @@ class NativeTodoDatabaseService implements ITodoDatabaseService {
       ? 'SELECT * FROM todos ORDER BY created_at DESC'
       : 'SELECT * FROM todos WHERE deleted_at IS NULL ORDER BY created_at DESC';
     const result = await this.db.query(sql);
+    const tagMap = await this.getTagRelationsMap();
     const todos: Todo[] = [];
     if (result.values) {
       for (const row of result.values) {
-        todos.push(await this.rowToTodo(row));
+        todos.push(await this.rowToTodo(row, tagMap.get(row.id as string)));
       }
     }
     return todos;
@@ -267,10 +269,11 @@ class NativeTodoDatabaseService implements ITodoDatabaseService {
   async getDeletedTodos(): Promise<Todo[]> {
     if (!this.db) throw new Error('Database not initialized');
     const result = await this.db.query('SELECT * FROM todos WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC');
+    const tagMap = await this.getTagRelationsMap();
     const todos: Todo[] = [];
     if (result.values) {
       for (const row of result.values) {
-        todos.push(await this.rowToTodo(row));
+        todos.push(await this.rowToTodo(row, tagMap.get(row.id as string)));
       }
     }
     return todos;
@@ -301,10 +304,11 @@ class NativeTodoDatabaseService implements ITodoDatabaseService {
     sql += ' ORDER BY created_at DESC';
 
     const result = await this.db.query(sql, values);
+    const tagMap = await this.getTagRelationsMap();
     const todos: Todo[] = [];
     if (result.values) {
       for (const row of result.values) {
-        todos.push(await this.rowToTodo(row));
+        todos.push(await this.rowToTodo(row, tagMap.get(row.id as string)));
       }
     }
     return todos;
@@ -336,10 +340,10 @@ class NativeTodoDatabaseService implements ITodoDatabaseService {
 
   // ==================== 待办标签 ====================
 
-  async createTodoTag(name: string, color?: string): Promise<TodoTag> {
+  async createTodoTag(name: string, color?: string, options?: { id?: string }): Promise<TodoTag> {
     if (!this.db) throw new Error('Database not initialized');
     const tag: TodoTag = {
-      id: this.generateId(),
+      id: options?.id || this.generateId(),
       name,
       color,
       createdAt: Date.now(),
@@ -392,10 +396,10 @@ class NativeTodoDatabaseService implements ITodoDatabaseService {
 
   // ==================== 模板 ====================
 
-  async createTemplate(name: string): Promise<TodoTemplate> {
+  async createTemplate(name: string, options?: { id?: string }): Promise<TodoTemplate> {
     if (!this.db) throw new Error('Database not initialized');
     const template: TodoTemplate = {
-      id: this.generateId(),
+      id: options?.id || this.generateId(),
       name,
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -464,9 +468,25 @@ class NativeTodoDatabaseService implements ITodoDatabaseService {
     })) || [];
   }
 
-  async addTemplateItem(item: Omit<TodoTemplateItem, 'id'>): Promise<TodoTemplateItem> {
+  async getAllTemplateItems(): Promise<TodoTemplateItem[]> {
     if (!this.db) throw new Error('Database not initialized');
-    const id = this.generateId();
+    const result = await this.db.query('SELECT * FROM todo_template_items ORDER BY template_id ASC, sort_order ASC');
+    return result.values?.map(row => ({
+      id: row.id as string,
+      templateId: row.template_id as string,
+      title: row.title as string,
+      note: row.note as string | undefined,
+      startTime: row.start_time as number | undefined,
+      endTime: row.end_time as number | undefined,
+      isToday: Boolean(row.is_today),
+      tagIds: row.tag_ids as string | undefined,
+      sortOrder: row.sort_order as number,
+    })) || [];
+  }
+
+  async addTemplateItem(item: Omit<TodoTemplateItem, 'id'> & { id?: string }): Promise<TodoTemplateItem> {
+    if (!this.db) throw new Error('Database not initialized');
+    const id = item.id || this.generateId();
     await this.db.run(
       `INSERT INTO todo_template_items (id, template_id, title, note, start_time, end_time, is_today, tag_ids, sort_order)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -525,9 +545,29 @@ class NativeTodoDatabaseService implements ITodoDatabaseService {
 
   // ==================== 工具 ====================
 
-  private async rowToTodo(row: Record<string, unknown>): Promise<Todo> {
+  /**
+   * 批量获取待办标签关系（一次全量查询 + 内存分组，消除 N+1）
+   */
+  private async getTagRelationsMap(): Promise<Map<string, string[]>> {
+    const map = new Map<string, string[]>();
+    if (!this.db) return map;
+    const result = await this.db.query('SELECT todo_id, tag_id FROM todo_tag_relations');
+    if (result.values) {
+      for (const row of result.values) {
+        const todoId = row.todo_id as string;
+        const list = map.get(todoId) || [];
+        list.push(row.tag_id as string);
+        map.set(todoId, list);
+      }
+    }
+    return map;
+  }
+
+  private async rowToTodo(row: Record<string, unknown>, presetTagIds?: string[]): Promise<Todo> {
     let tagIds: string[] | undefined;
-    if (this.db) {
+    if (presetTagIds) {
+      tagIds = presetTagIds.length > 0 ? presetTagIds : undefined;
+    } else if (this.db) {
       const tagResult = await this.db.query(
         'SELECT tag_id FROM todo_tag_relations WHERE todo_id = ?',
         [row.id as string]

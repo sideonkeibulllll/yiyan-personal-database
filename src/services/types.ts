@@ -28,7 +28,7 @@ export interface IDatabaseService {
   getRecentEntries(limit: number): Promise<Entry[]>;
 
   // 标签操作
-  createTag(name: string, options?: { isSmart?: boolean; searchCriteria?: { keyword?: string; tagIds?: string[]; isStarred?: boolean; hasAttachment?: boolean } }): Promise<Tag>;
+  createTag(name: string, options?: { id?: string; isSmart?: boolean; searchCriteria?: { keyword?: string; tagIds?: string[]; isStarred?: boolean; hasAttachment?: boolean } }): Promise<Tag>;
   getAllTags(): Promise<Tag[]>;
   getTagsByEntryId(entryId: string): Promise<Tag[]>;
   addTagToEntry(entryId: string, tagId: string): Promise<void>;
@@ -37,12 +37,14 @@ export interface IDatabaseService {
   renameTag(tagId: string, newName: string): Promise<void>;
 
   // 连线操作
-  createLink(sourceId: string, targetId: string, description?: string): Promise<Link>;
+  createLink(sourceId: string, targetId: string, description?: string, options?: { id?: string }): Promise<Link>;
   getLinksByEntryId(entryId: string): Promise<Link[]>;
+  /** 全量连线（备份用，避免逐条查询 N+1） */
+  getAllLinks(): Promise<Link[]>;
   deleteLink(linkId: string): Promise<void>;
 
   // 组操作
-  createGroup(name: string): Promise<Group>;
+  createGroup(name: string, options?: { id?: string }): Promise<Group>;
   getAllGroups(): Promise<Group[]>;
   updateGroup(groupId: string, updates: Partial<Group>): Promise<void>;
   deleteGroup(groupId: string): Promise<void>;
@@ -79,7 +81,7 @@ export interface ITodoDatabaseService {
   init(): Promise<void>;
 
   // 待办 CRUD
-  createTodo(todo: Omit<Todo, 'id'>): Promise<Todo>;
+  createTodo(todo: Omit<Todo, 'id'> & { id?: string }): Promise<Todo>;
   getTodoById(id: string): Promise<Todo | null>;
   updateTodo(id: string, updates: Partial<Todo>): Promise<void>;
   /** 软删除：移入回收站 */
@@ -104,20 +106,22 @@ export interface ITodoDatabaseService {
   batchAddTags(ids: string[], tagIds: string[]): Promise<void>;
 
   // 待办标签
-  createTodoTag(name: string, color?: string): Promise<TodoTag>;
+  createTodoTag(name: string, color?: string, options?: { id?: string }): Promise<TodoTag>;
   getAllTodoTags(): Promise<TodoTag[]>;
   updateTodoTag(tagId: string, updates: Partial<TodoTag>): Promise<void>;
   deleteTodoTag(tagId: string): Promise<void>;
   setTodoTags(todoId: string, tagIds: string[]): Promise<void>;
 
   // 模板
-  createTemplate(name: string): Promise<TodoTemplate>;
+  createTemplate(name: string, options?: { id?: string }): Promise<TodoTemplate>;
   getAllTemplates(): Promise<TodoTemplate[]>;
   getTemplateById(id: string): Promise<TodoTemplate | null>;
   updateTemplate(id: string, updates: Partial<TodoTemplate>): Promise<void>;
   deleteTemplate(id: string): Promise<void>;
   getTemplateItems(templateId: string): Promise<TodoTemplateItem[]>;
-  addTemplateItem(item: Omit<TodoTemplateItem, 'id'>): Promise<TodoTemplateItem>;
+  /** 全量模板条目（备份用，避免逐模板查询 N+1） */
+  getAllTemplateItems(): Promise<TodoTemplateItem[]>;
+  addTemplateItem(item: Omit<TodoTemplateItem, 'id'> & { id?: string }): Promise<TodoTemplateItem>;
   updateTemplateItem(id: string, updates: Partial<TodoTemplateItem>): Promise<void>;
   deleteTemplateItem(id: string): Promise<void>;
   /** 将模板应用到指定日期 */

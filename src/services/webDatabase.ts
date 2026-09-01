@@ -146,13 +146,17 @@ class WebDatabaseService implements IDatabaseService {
 
   // ==================== 标签操作 ====================
 
-  async createTag(name: string, options?: { isSmart?: boolean; searchCriteria?: { keyword?: string; tagIds?: string[]; isStarred?: boolean } }): Promise<Tag> {
+  async createTag(name: string, options?: { id?: string; isSmart?: boolean; searchCriteria?: { keyword?: string; tagIds?: string[]; isStarred?: boolean } }): Promise<Tag> {
     const tags = this.getTagsFromStorage();
+    // 显式指定 id 时（恢复场景）先按 id 去重，避免重复导入
+    if (options?.id && tags.some(t => t.id === options.id)) {
+      return tags.find(t => t.id === options.id)!;
+    }
     const existing = tags.find(t => t.name === name && !t.isSmart && !options?.isSmart);
     if (existing && !options?.isSmart) return existing;
 
     const tag: Tag = {
-      id: this.generateId(),
+      id: options?.id || this.generateId(),
       name,
       createdAt: Date.now(),
       ...(options?.isSmart ? { isSmart: true, searchCriteria: options.searchCriteria } : {}),
@@ -227,10 +231,10 @@ class WebDatabaseService implements IDatabaseService {
 
   // ==================== 连线操作 ====================
 
-  async createLink(sourceId: string, targetId: string, description?: string): Promise<Link> {
+  async createLink(sourceId: string, targetId: string, description?: string, options?: { id?: string }): Promise<Link> {
     const links = this.getLinksFromStorage();
     const link: Link = {
-      id: this.generateId(),
+      id: options?.id || this.generateId(),
       sourceId,
       targetId,
       description,
@@ -246,6 +250,10 @@ class WebDatabaseService implements IDatabaseService {
     return links.filter(l => l.sourceId === entryId || l.targetId === entryId);
   }
 
+  async getAllLinks(): Promise<Link[]> {
+    return this.getLinksFromStorage();
+  }
+
   async deleteLink(linkId: string): Promise<void> {
     const links = this.getLinksFromStorage();
     const filtered = links.filter(l => l.id !== linkId);
@@ -254,10 +262,10 @@ class WebDatabaseService implements IDatabaseService {
 
   // ==================== 组操作 ====================
 
-  async createGroup(name: string): Promise<Group> {
+  async createGroup(name: string, options?: { id?: string }): Promise<Group> {
     const groups = this.getGroupsFromStorage();
     const group: Group = {
-      id: this.generateId(),
+      id: options?.id || this.generateId(),
       name,
       sortOrder: groups.length,
     };

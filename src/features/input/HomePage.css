@@ -502,7 +502,7 @@
   border-radius: var(--radius-full);
   font-size: var(--text-sm);
   color: var(--color-text-primary);
-  animation: slideUp var(--duration-normal) var(--ease-out);
+  animation: fadeIn 0.3s var(--ease-out);
   z-index: 200;
   box-shadow: 0 4px 24px rgba(247, 103, 7, 0.1), 0 0 12px rgba(247, 103, 7, 0.06);
 }

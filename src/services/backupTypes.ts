@@ -41,6 +41,8 @@ export interface BackupItem {
   manifest: BackupManifest;
   /** 文件大小（字节） */
   size: number;
+  /** 备份格式：indexed=索引式（v2，内容去重）；zip=旧全量 zip */
+  format?: 'indexed' | 'zip';
 }
 
 /** 恢复结果 */
