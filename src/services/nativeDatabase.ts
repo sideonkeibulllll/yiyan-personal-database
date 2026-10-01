@@ -55,10 +55,10 @@ class NativeDatabaseService implements IDatabaseService {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         // 快速路径：直接尝试 retrieveConnection（如果连接已存在）
+        // 优化：open() 成功即认为连接可用，省掉一次多余的 `SELECT 1` 跨桥往返
         try {
           this.db = await this.sqlite.retrieveConnection(DB_NAME, false);
           await this.db.open();
-          await this.db.query('SELECT 1 as test');
           return; // 成功
         } catch {
           // retrieveConnection 失败，说明连接不存在或不一致，继续创建新连接
@@ -77,9 +77,6 @@ class NativeDatabaseService implements IDatabaseService {
           }
         }
         await this.db.open();
-
-        // 验证连接是否真的可用
-        await this.db.query('SELECT 1 as test');
         return; // 成功
       } catch (err) {
         console.warn(`[NativeDatabase] initConnection attempt ${attempt + 1} failed:`, err);
@@ -193,11 +190,19 @@ class NativeDatabaseService implements IDatabaseService {
         updated_at INTEGER NOT NULL
       )`,
       `CREATE INDEX IF NOT EXISTS idx_chat_sessions_updated ON chat_sessions(updated_at DESC)`,
+      // ============ 启动性能索引（v2.4.2 新增）============
+      // getAllEntries() 固定 ORDER BY created_at DESC，无索引时全表扫描 + 排序
+      `CREATE INDEX IF NOT EXISTS idx_entries_created ON entries(created_at DESC)`,
+      // getEntriesByTagId / deleteTag 走 tag_id 反查
+      `CREATE INDEX IF NOT EXISTS idx_entry_tags_tag ON entry_tags(tag_id)`,
+      // getLinksByEntryId 双向查询
+      `CREATE INDEX IF NOT EXISTS idx_links_source ON links(source_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_links_target ON links(target_id)`,
     ];
 
-    for (const sql of schemas) {
-      await this.db.run(sql, []);
-    }
+    // 批量执行：一次跨桥提交全部 DDL，替代原来 12 次串行 db.run()
+    // （Capacitor SQLite 的 execute 支持分号分隔的多语句）
+    await this.db.execute(schemas.join(';\n') + ';');
   }
 
   async createEntry(entry: Omit<Entry, 'tags'>): Promise<Entry> {

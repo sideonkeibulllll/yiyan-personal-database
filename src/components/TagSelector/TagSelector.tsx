@@ -5,7 +5,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useTagStore } from '@/stores/tagStore';
 import { useSettingsStore } from '@/stores/settingsStore';
-import { ai } from '@/services/ai';
 import { getDatabase } from '@/services/database';
 import type { Tag } from '@/types';
 import './TagSelector.css';
@@ -129,6 +128,8 @@ export function TagSelector({
     }
     setAiState('loading');
     try {
+      // 性能优化（v2.4.2）：ai 服务按需动态加载，避免 AI 相关代码进入首屏包
+      const { ai } = await import('@/services/ai');
       ai.setConfig(settings.ai);
       const recentTags = await getRecentTagNames();
       const customPrompt = settings.ai.smartTag?.tagSuggestPrompt;

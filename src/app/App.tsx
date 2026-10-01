@@ -10,7 +10,6 @@ import { useEntryStore } from '@/stores/entryStore';
 import { useTagStore } from '@/stores/tagStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useTodoStore } from '@/stores/todoStore';
-import { shouldAutoBackup, createBackup } from '@/services/backupService';
 
 /** Triangle alert icon */
 const TriangleAlertSvg = () => (
@@ -45,7 +44,10 @@ async function runBackgroundTasks(): Promise<void> {
   }
 
   // 每天首次打开时自动备份（索引式，内容去重，增量很快）
+  // 性能优化（v2.4.2）：backupService 静态引入了 jszip（约 100KB），
+  // 改为此处按需动态 import，避免把 jszip 打进首屏主包。
   try {
+    const { shouldAutoBackup, createBackup } = await import('@/services/backupService');
     if (await shouldAutoBackup()) {
       await createBackup('auto');
     }
@@ -67,12 +69,22 @@ export function App() {
       try {
         // 两个数据库并行初始化
         await Promise.all([getDatabase(), getTodoDatabase()]);
-        // 四个 store 并行加载
-        await Promise.all([loadEntries(), loadTags(), loadSettings(), loadAllTodos()]);
 
-        // 界面就绪 —— 过期归档 / 自动备份等维护任务全部移到后台，
-        // 不阻塞用户进入应用
+        // ===== 启动性能优化（v2.4.2）=====
+        // 原实现：await Promise.all([4 个 store 全量加载]) 之后才撤 Loading，
+        // 数据量一大就要空等「条目全表 + 待办全表 + 标签关联」。
+        // 现在拆成两段：
+        //   ① 轻量关键数据（settings / tags）→ 决定「能否渲染界面」
+        //   ② 重量业务数据（entries / todos）→ 后台填充，首屏骨架立即显示
+        await Promise.all([loadSettings(), loadTags()]);
+
+        // 界面就绪 —— 立即放行到首页骨架
         setIsReady(true);
+
+        // 重量数据与维护任务全部移出关键路径
+        Promise.all([loadEntries(), loadAllTodos()]).catch(e =>
+          console.warn('后台数据加载失败:', e)
+        );
 
         if (!backgroundTasksStarted) {
           backgroundTasksStarted = true;

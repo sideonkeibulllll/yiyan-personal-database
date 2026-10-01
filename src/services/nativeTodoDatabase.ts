@@ -50,10 +50,10 @@ class NativeTodoDatabaseService implements ITodoDatabaseService {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         // 快速路径：直接尝试 retrieveConnection
+        // 优化：open() 成功即认为连接可用，省掉一次多余的 `SELECT 1` 跨桥往返
         try {
           this.db = await this.sqlite.retrieveConnection(DB_NAME, false);
           await this.db.open();
-          await this.db.query('SELECT 1 as test');
           return;
         } catch {
           // retrieveConnection 失败，创建新连接
@@ -70,7 +70,6 @@ class NativeTodoDatabaseService implements ITodoDatabaseService {
           }
         }
         await this.db.open();
-        await this.db.query('SELECT 1 as test');
         return;
       } catch (err) {
         console.warn(`[NativeTodoDatabase] initConnection attempt ${attempt + 1} failed:`, err);
@@ -160,11 +159,16 @@ class NativeTodoDatabaseService implements ITodoDatabaseService {
         sort_order INTEGER DEFAULT 0,
         FOREIGN KEY (template_id) REFERENCES todo_templates(id) ON DELETE CASCADE
       )`,
+      // ============ 启动性能索引（v2.4.2 新增）============
+      // getAllTodos 走 deleted_at 过滤 + created_at 排序
+      `CREATE INDEX IF NOT EXISTS idx_todos_created_at ON todos(created_at DESC)`,
+      // getTagRelationsMap 全表 + 按 todo_id 分组，反查亦需
+      `CREATE INDEX IF NOT EXISTS idx_todo_tag_rel_todo ON todo_tag_relations(todo_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_todo_tag_rel_tag ON todo_tag_relations(tag_id)`,
     ];
 
-    for (const sql of schemas) {
-      await this.db.run(sql, []);
-    }
+    // 批量执行：一次跨桥提交全部 DDL，替代原来 5 次串行 db.run()
+    await this.db.execute(schemas.join(';\n') + ';');
   }
 
   // ==================== 待办 CRUD ====================
