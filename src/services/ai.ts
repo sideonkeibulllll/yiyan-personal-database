@@ -7,7 +7,7 @@
  * - e.4: 支持 GLM 模型智能切换
  * - e.2: chatSoul 系统提示注入
  */
-import type { AIConfig, PromptConfig, GLMConfig } from '@/types';
+import type { AIConfig, PromptConfig, GLMConfig, AIProviderId } from '@/types';
 import { GLM_FREE_MODEL_POOL } from '@/types';
 
 /** 解析后的生效请求参数 */
@@ -49,7 +49,7 @@ class AIService {
       return { model: 'deepseek-v4-flash', baseURL: 'https://api.deepseek.com', apiKey: '' };
     }
 
-    const providerId = cfg.provider || (cfg.isDeepSeek ? 'deepseek' : 'openai');
+    const providerId: AIProviderId = cfg.provider || (cfg.isDeepSeek ? 'deepseek' : 'deepseek');
     const entry = cfg.providers?.[providerId];
 
     return {

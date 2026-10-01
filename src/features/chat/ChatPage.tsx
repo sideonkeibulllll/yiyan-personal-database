@@ -40,7 +40,7 @@ import {
   saveChatSession as saveSessionDb,
   deleteChatSession as deleteSessionDb,
 } from '@/services/chatSessionService';
-import { loadSessionsSync, createId, generateTitle, buildModelOptions } from './chatUtils';
+import { loadSessionsSync, createId, generateTitle, buildModelOptions, parseModelValue } from './chatUtils';
 import type { ChatMessage, ChatSession, SearchSelectedResult, ThinkingEffort } from './chatTypes';
 import { streamChatCompletion } from './chatStream';
 import { ChatSidebar } from './components/ChatSidebar';
@@ -169,28 +169,43 @@ export function ChatPage() {
 
   const currentSession = sessions.find(s => s.id === currentSessionId) || null;
   const messages = currentSession?.messages ?? [];
-  const currentModel = currentSession?.model || settings.ai.model || 'deepseek-v4-flash';
+  const currentModel = currentSession?.model || '';
 
-  // v2.5.0: 当前激活的付费提供商（providers[provider] 优先，回落扁平字段）
-  const activeProviderId: AIProviderId = settings.ai.provider
-    || (settings.ai.isDeepSeek ? 'deepseek' : 'openai');
+  // v2.5.1: 当前激活的付费提供商（会话未指定模型时的兜底）
+  const activeProviderId: AIProviderId = settings.ai.provider || 'deepseek';
   const activeProvider = settings.ai.providers?.[activeProviderId];
   const providerModel = activeProvider?.model || settings.ai.model || 'deepseek-v4-flash';
   const providerBaseURL = activeProvider?.baseURL || settings.ai.baseURL || 'https://api.deepseek.com';
   const providerAPIKey = activeProvider?.apiKey || settings.ai.apiKey || '';
 
-  // e.4: 智能GLM处理
-  const effectiveModel = currentModel === '__glm_smart__' && settings.ai.glm?.enabled
-    ? (settings.ai.glm.model || 'glm-4-flash')
-    : (currentModel === '' || currentModel === providerModel ? providerModel : currentModel);
-  const effectiveBaseURL = currentModel === '__glm_smart__' && settings.ai.glm?.enabled
-    ? (settings.ai.glm.baseURL || 'https://open.bigmodel.cn/api/paas/v4')
-    : providerBaseURL;
-  const effectiveAPIKey = currentModel === '__glm_smart__' && settings.ai.glm?.enabled
-    ? (settings.ai.glm.apiKey || '')
-    : providerAPIKey;
+  /**
+   * v2.5.1 关键解离：
+   * 会话里存的是模型选择器的复合值 `providerId::model`，
+   * 选中哪个模型就用**那个提供商**的 baseURL / apiKey，无需回设置页切 provider。
+   * 旧会话存的是裸模型名 → parseModelValue 返回 providerId=null，回落当前激活提供商。
+   */
+  const parsed = parseModelValue(currentModel);
+  const isGlmSession = currentModel === '__glm_smart__';
+  const useGlm = isGlmSession && !!settings.ai.glm?.enabled;
 
-  // v2.5.0: 模型选项按当前提供商动态生成
+  // 实际使用的提供商（GLM 场景除外）
+  const effectiveProviderId: AIProviderId = parsed.providerId || activeProviderId;
+  const effectiveProvider = settings.ai.providers?.[effectiveProviderId];
+  const effProviderBaseURL = effectiveProvider?.baseURL || providerBaseURL;
+  const effProviderAPIKey = effectiveProvider?.apiKey || providerAPIKey;
+
+  // e.4: 智能GLM处理
+  const effectiveModel = useGlm
+    ? (settings.ai.glm?.model || 'glm-4-flash')
+    : (parsed.model || providerModel);
+  const effectiveBaseURL = useGlm
+    ? (settings.ai.glm?.baseURL || 'https://open.bigmodel.cn/api/paas/v4')
+    : effProviderBaseURL;
+  const effectiveAPIKey = useGlm
+    ? (settings.ai.glm?.apiKey || '')
+    : effProviderAPIKey;
+
+  // v2.5.1: 模型选项按 provider 分组（跨提供商可选）
   const modelOptions = useMemo(() => buildModelOptions(settings.ai), [settings.ai]);
 
   // 首次挂载：从数据库异步加载对话历史（覆盖 localStorage 同步初始值）
@@ -598,24 +613,10 @@ export function ChatPage() {
     updateSessionMessages(sessionId, currentMsgs);
 
     try {
-      // e.3: 构建系统提示 — 使用 chatSoul 和 dialogueContext 配置
+      // e.3: 构建系统提示 — 仅使用 chatSoul。
+      // 隐私说明：不再无条件注入最近条目。笔记内容只在用户显式勾选
+      // 「发送最近条目」时，通过下方 context 注入流程加入，避免误发隐私数据。
       let systemPrompt = settings.ai.chatSoul || '你是一个友好的AI助手。';
-
-      // e.2: 如果有对话上下文提示词配置，使用它
-      if (settings.ai.prompts.dialogueContext) {
-        // 简化后的 dialogueContext 仅提供 {currentEntry} {recentEntries} 字段
-        const recentEntries = await (async () => {
-          try {
-            const db = await getDatabase();
-            const all = await db.getAllEntries();
-            return all.sort((a, b) => b.createdAt - a.createdAt).slice(0, 10)
-              .map(e => `- ${e.content.slice(0, 80)}`).join('\n');
-          } catch { return ''; }
-        })();
-        systemPrompt += '\n\n' + settings.ai.prompts.dialogueContext
-          .replace(/\{currentEntry\}/g, '')
-          .replace(/\{recentEntries\}/g, recentEntries);
-      }
 
       // 注意：MCP 工具已改为通过 OpenAI 原生 tools 字段下发，不再注入提示词。
       // 用户启用的工具在下方 buildToolsPayload() 中转为结构化 schema 传给 API。

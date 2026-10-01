@@ -3,6 +3,7 @@
  *
  * settings 数据在 zustand store 中，面板直接订阅，行为与原先一致。
  */
+import { useState } from 'react';
 import { useSettingsStore } from '@/stores/settingsStore';
 import type { AIProviderId, ProviderEntry } from '@/types';
 import { AI_PROVIDER_ORDER, PROVIDER_PRESETS, getProviderPreset } from '@/types';
@@ -16,14 +17,16 @@ export function AiPanel({ markDirty }: AiPanelProps) {
   const updateAIConfig = useSettingsStore(state => state.updateAIConfig);
   const updateContextConfig = useSettingsStore(state => state.updateContextConfig);
   const updatePushConfig = useSettingsStore(state => state.updatePushConfig);
+  const [newModel, setNewModel] = useState('');
 
-  const providerId: AIProviderId = settings.ai.provider || (settings.ai.isDeepSeek ? 'deepseek' : 'openai');
+  // v2.5.1: openai 已移除，兜底为 deepseek
+  const providerId: AIProviderId = settings.ai.provider || 'deepseek';
   const preset = getProviderPreset(providerId);
   const entry: ProviderEntry = settings.ai.providers?.[providerId] ?? {
     apiKey: settings.ai.apiKey,
     baseURL: settings.ai.baseURL,
     model: settings.ai.model,
-    models: preset.models,
+    models: [...preset.models],
   };
 
   /** 更新当前提供商的某个字段（保持 providers 结构与扁平字段同步） */
@@ -37,6 +40,26 @@ export function AiPanel({ markDirty }: AiPanelProps) {
       model: next.model,
       isDeepSeek: providerId === 'deepseek',
     });
+  };
+
+  /* === v2.5.1: 模型列表增删（仅硅基流动开放编辑） === */
+  const addModel = () => {
+    const name = newModel.trim();
+    if (!name) return;
+    if (entry.models.includes(name)) { setNewModel(''); return; }
+    patchProvider({ models: [...entry.models, name] });
+    setNewModel('');
+    markDirty('ai.providers');
+  };
+
+  const removeModel = (name: string) => {
+    // 至少保留 1 个模型
+    if (entry.models.length <= 1) return;
+    const next = entry.models.filter(m => m !== name);
+    // 若删掉的正是当前选用模型，自动切到列表首个
+    const nextSelected = entry.model === name ? next[0] : entry.model;
+    patchProvider({ models: next, model: nextSelected });
+    markDirty('ai.providers');
   };
 
   /** 切换到另一个提供商：自动填入该提供商的已存配置（无则用预设默认值） */
@@ -117,6 +140,50 @@ export function AiPanel({ markDirty }: AiPanelProps) {
         </select>
         <span className="form-hint">选择该提供商下要使用的模型</span>
       </div>
+
+      {/* v2.5.1: 模型列表编辑（仅硅基流动开放，其余提供商模型固定） */}
+      {providerId === 'siliconflow' && (
+        <>
+          <div className="settings-subsection-title">管理模型列表</div>
+          <div className="form-group">
+            {entry.models.length === 0 && (
+              <span className="form-hint">（暂无模型，请添加）</span>
+            )}
+            {entry.models.map(m => (
+              <div key={m} className="model-manage-row">
+                <span className="model-manage-name">{m}</span>
+                <button
+                  type="button"
+                  className="model-manage-del"
+                  onClick={() => removeModel(m)}
+                  disabled={entry.models.length <= 1}
+                  title={entry.models.length <= 1 ? '至少保留一个模型' : '删除'}
+                >
+                  删除
+                </button>
+              </div>
+            ))}
+            <span className="form-hint">至少保留一个模型；删除当前选用的模型会自动切到列表首个</span>
+          </div>
+          <div className="form-group">
+            <label className="form-label">添加模型</label>
+            <div className="model-manage-add">
+              <input
+                type="text"
+                className="form-input glass"
+                value={newModel}
+                onChange={e => setNewModel(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addModel(); } }}
+                placeholder="如 deepseek-ai/DeepSeek-V4-Flash"
+              />
+              <button type="button" className="model-manage-add-btn" onClick={addModel}>
+                添加
+              </button>
+            </div>
+            <span className="form-hint">填入硅基流动支持的模型名，回车或点「添加」即可</span>
+          </div>
+        </>
+      )}
 
       {providerId === 'deepseek' && (
         <>

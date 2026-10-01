@@ -226,7 +226,7 @@ export interface AIConfig {
 }
 
 /** 付费 AI 提供商 ID */
-export type AIProviderId = 'deepseek' | 'openai' | 'siliconflow';
+export type AIProviderId = 'deepseek' | 'siliconflow';
 
 /** 单个提供商的独立配置 */
 export interface ProviderEntry {
@@ -271,32 +271,18 @@ export const PROVIDER_PRESETS: Record<AIProviderId, ProviderPreset> = {
     models: ['deepseek-v4-flash', 'deepseek-v4-pro'],
     keyPlaceholder: 'sk-...',
   },
-  openai: {
-    id: 'openai',
-    label: 'OpenAI',
-    baseURL: 'https://api.openai.com/v1',
-    defaultModel: 'gpt-4o-mini',
-    models: ['gpt-4o-mini', 'gpt-4o', 'gpt-4-turbo', 'o3-mini'],
-    keyPlaceholder: 'sk-...',
-  },
   siliconflow: {
     id: 'siliconflow',
     label: '硅基流动 SiliconFlow',
     baseURL: 'https://api.siliconflow.cn/v1',
     defaultModel: 'deepseek-ai/DeepSeek-V4-Flash',
-    models: [
-      'deepseek-ai/DeepSeek-V4-Flash',
-      'deepseek-ai/DeepSeek-V3',
-      'deepseek-ai/DeepSeek-R1',
-      'Qwen/Qwen2.5-7B-Instruct',
-      'Qwen/Qwen2.5-72B-Instruct',
-    ],
+    models: ['deepseek-ai/DeepSeek-V4-Flash'],
     keyPlaceholder: 'sk-...',
   },
 };
 
 /** 提供商的稳定遍历顺序 */
-export const AI_PROVIDER_ORDER: AIProviderId[] = ['deepseek', 'openai', 'siliconflow'];
+export const AI_PROVIDER_ORDER: AIProviderId[] = ['deepseek', 'siliconflow'];
 
 /** 根据 ID 取预设（找不到回落到 deepseek） */
 export function getProviderPreset(id: AIProviderId): ProviderPreset {
@@ -311,10 +297,16 @@ export function getProviderPreset(id: AIProviderId): ProviderPreset {
  * - 否则用旧版扁平字段（apiKey / baseURL / model）灌入「当前 provider」对应的槽位
  */
 export function migrateAIConfig(config: AIConfig): AIConfig {
-  const providerId: AIProviderId = config.provider
-    || (config.isDeepSeek ? 'deepseek' : 'openai');
+  // v2.5.1: openai 提供商已移除。老配置若指向 openai（或 isDeepSeek=false），一律回落到 deepseek，
+  // 避免 providers 里出现已不存在的 key 导致读写 undefined。
+  const rawProvider = config.provider as string | undefined;
+  const providerId: AIProviderId =
+    rawProvider === 'siliconflow' ? 'siliconflow'
+      : rawProvider === 'deepseek' ? 'deepseek'
+        : (rawProvider === 'openai' || config.isDeepSeek === false) ? 'deepseek'
+          : (config.isDeepSeek ? 'deepseek' : 'deepseek');
 
-  const existing = config.providers;
+  const existing = config.providers as Record<string, ProviderEntry> | undefined;
   const providers = {} as AIProvidersConfig;
 
   for (const id of AI_PROVIDER_ORDER) {
@@ -326,13 +318,14 @@ export function migrateAIConfig(config: AIConfig): AIConfig {
       apiKey: prev?.apiKey ?? (isLegacySlot ? (config.apiKey || '') : ''),
       baseURL: prev?.baseURL ?? (isLegacySlot && config.baseURL ? config.baseURL : preset.baseURL),
       model: prev?.model ?? (isLegacySlot && config.model ? config.model : preset.defaultModel),
-      models: prev?.models ?? [...preset.models],
+      models: prev?.models?.length ? prev.models : [...preset.models],
     };
   }
 
   return {
     ...config,
     provider: providerId,
+    isDeepSeek: providerId === 'deepseek',
     providers,
     // 扁平字段保持同步，供未迁移的旧代码路径读取
     apiKey: providers[providerId].apiKey,
@@ -564,12 +557,6 @@ export const DEFAULT_SETTINGS: Settings = {
         baseURL: PROVIDER_PRESETS.deepseek.baseURL,
         model: PROVIDER_PRESETS.deepseek.defaultModel,
         models: [...PROVIDER_PRESETS.deepseek.models],
-      },
-      openai: {
-        apiKey: '',
-        baseURL: PROVIDER_PRESETS.openai.baseURL,
-        model: PROVIDER_PRESETS.openai.defaultModel,
-        models: [...PROVIDER_PRESETS.openai.models],
       },
       siliconflow: {
         apiKey: '',

@@ -17,8 +17,8 @@ interface ChatHeaderProps {
   title: string;
   currentSessionModel: string;
   currentModel: string;
-  /** 可选模型列表（v2.5.0：由父组件按当前提供商动态生成） */
-  modelOptions: Array<{ value: string; label: string }>;
+  /** 可选模型列表（v2.5.1：跨提供商分组，含 group 标题） */
+  modelOptions: import('../chatUtils').ModelOption[];
   modelPickerOpen: boolean;
   onToggleModelPicker: () => void;
   onSelectModel: (model: string) => void;
@@ -59,6 +59,7 @@ export function ChatHeader({
   onClearMessages,
   onExportSelected,
 }: ChatHeaderProps) {
+  // v2.5.1: currentSessionModel 可能是复合值 `provider::model`，直接用 value 精确匹配
   const currentModelLabel = modelOptions.find(m => m.value === currentSessionModel)?.label || currentModel;
 
   return (
@@ -79,16 +80,22 @@ export function ChatHeader({
         </button>
         {modelPickerOpen && (
           <div className="model-picker-dropdown">
-            {modelOptions.map(opt => (
-              <div
-                key={opt.value || 'default'}
-                className={`model-option ${currentSessionModel === opt.value ? 'active' : ''}`}
-                onClick={() => onSelectModel(opt.value)}
-              >
-                {opt.label}
-                {currentSessionModel === opt.value && <span className="check">✓</span>}
-              </div>
-            ))}
+            {modelOptions.map((opt, i) => {
+              // v2.5.1: provider 分组标题（仅在新分组的第一项前渲染）
+              const showGroup = !!opt.group && opt.group !== modelOptions[i - 1]?.group;
+              return (
+                <div key={opt.value || 'default'}>
+                  {showGroup && <div className="model-picker-group">{opt.group}</div>}
+                  <div
+                    className={`model-option ${currentSessionModel === opt.value ? 'active' : ''}`}
+                    onClick={() => onSelectModel(opt.value)}
+                  >
+                    {opt.label}
+                    {currentSessionModel === opt.value && <span className="check">✓</span>}
+                  </div>
+                </div>
+              );
+            })}
 
             <div className="model-picker-divider" />
 
