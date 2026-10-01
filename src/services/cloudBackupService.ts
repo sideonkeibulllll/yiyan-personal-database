@@ -22,6 +22,7 @@ import {
   d1BatchExec,
   d1BatchInsert,
   d1InitSchema,
+  d1InitSchemaOnce,
   d1GetSyncState,
   d1SetSyncState,
   d1TestConnection,
@@ -43,8 +44,22 @@ import type {
   CloudRestoreResult,
 } from './cloudBackupTypes';
 
-const APP_VERSION = '2.2.0';
+const APP_VERSION = '2.4.0';
 const SYNC_STATE_KEY = 'last_backup_ts';
+
+/** 并发批处理（限制并发数，避免一次性发起过多 I/O） */
+async function runBatch<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const workers = new Array(Math.min(limit, items.length || 1)).fill(0).map(async () => {
+    while (next < items.length) {
+      const idx = next++;
+      results[idx] = await fn(items[idx]);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
 
 /** ============ 测试连接 ============ */
 
@@ -65,6 +80,11 @@ export async function testCloudConnection(): Promise<{ d1: string; r2: string; o
 
 /**
  * 执行增量备份到云端
+ *
+ * v2.3.0 性能重构：
+ * - 所有逐条 `await d1Query` 改为 `d1BatchInsert`（并发 10），网络往返次数不变但**并行**发出
+ * - 消除 N+1：links / templateItems 一次性取回后内存分组
+ * - `d1InitSchema` → `d1InitSchemaOnce`，建表只在首次执行
  */
 export async function backupToCloud(): Promise<CloudBackupResult> {
   const startTime = Date.now();
@@ -90,15 +110,18 @@ export async function backupToCloud(): Promise<CloudBackupResult> {
   await (db as any).ensureConnection?.();
   await (todoDb as any).ensureConnection?.();
 
-  // 确保 D1 表结构存在
-  await d1InitSchema();
+  // 确保 D1 表结构存在（进程内只执行一次，不再每次备份重复建表）
+  await d1InitSchemaOnce();
 
   // 读取上次备份时间戳（首次备份时为 0 → 全量）
   const lastBackupTsStr = await d1GetSyncState(SYNC_STATE_KEY);
   const lastBackupTs = lastBackupTsStr ? parseInt(lastBackupTsStr, 10) : 0;
 
-  // 收集本地数据
-  const [entries, tags, groups, allTodos, allTodoTags, allTemplates, allAttachments] = await Promise.all([
+  // 收集本地数据（含 links / templateItems，避免逐条查询的 N+1）
+  const [
+    entries, tags, groups, allTodos, allTodoTags, allTemplates, allAttachments,
+    links, allTemplateItems,
+  ] = await Promise.all([
     db.getAllEntries(),
     db.getAllTags(),
     db.getAllGroups(),
@@ -106,283 +129,270 @@ export async function backupToCloud(): Promise<CloudBackupResult> {
     todoDb.getAllTodoTags(),
     todoDb.getAllTemplates(),
     db.getAllAttachments(),
+    db.getAllLinks(),
+    todoDb.getAllTemplateItems(),
   ]);
 
-  // 收集链接
-  const links = [];
-  for (const entry of entries) {
-    const entryLinks = await db.getLinksByEntryId(entry.id);
-    links.push(...entryLinks);
-  }
-
-  // 收集模板 items
-  const templatesWithItems = [];
-  for (const tpl of allTemplates) {
-    const items = await todoDb.getTemplateItems(tpl.id);
-    templatesWithItems.push({ template: tpl, items });
+  // 模板条目内存分组（替代逐模板查询）
+  const itemsByTemplate = new Map<string, typeof allTemplateItems>();
+  for (const item of allTemplateItems) {
+    const list = itemsByTemplate.get(item.templateId) || [];
+    list.push(item);
+    itemsByTemplate.set(item.templateId, list);
   }
 
   // ===== 同步 entries（增量：updated_at > lastBackupTs）=====
   const changedEntries = entries.filter(e => e.updatedAt > lastBackupTs);
+  const entryParams: any[][] = [];
+  const entryTagSql = 'INSERT OR IGNORE INTO entry_tags (entry_id, tag_id) VALUES (?, ?)';
+  const entryTagParams: any[][] = [];
+  const entryTagClearParams: any[][] = [];
+
   for (const entry of changedEntries) {
-    try {
-      await d1Query(
-        `INSERT OR REPLACE INTO entries
-         (id, content, source, supplement, is_starred, is_deleted, created_at, updated_at, copy_count, content_hash, backup_batch_id)
-         VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
-        [
-          entry.id,
-          entry.content,
-          entry.source || null,
-          entry.supplement || null,
-          entry.isStarred ? 1 : 0,
-          entry.createdAt,
-          entry.updatedAt,
-          entry.copyCount || 0,
-          contentHash(entry.content || ''),
-          result.batchId,
-        ]
-      );
-      result.entriesSynced++;
-
-      // 同步该条目的标签关联
-      if (entry.tags && entry.tags.length > 0) {
-        // 先删除旧关联
-        await d1Query('DELETE FROM entry_tags WHERE entry_id = ?', [entry.id]);
-        // 插入新关联
-        for (const tag of entry.tags) {
-          await d1Query(
-            'INSERT OR IGNORE INTO entry_tags (entry_id, tag_id) VALUES (?, ?)',
-            [entry.id, tag.id]
-          );
-        }
+    entryParams.push([
+      entry.id,
+      entry.content,
+      entry.source || null,
+      entry.supplement || null,
+      entry.isStarred ? 1 : 0,
+      entry.createdAt,
+      entry.updatedAt,
+      entry.copyCount || 0,
+      contentHash(entry.content || ''),
+      result.batchId,
+    ]);
+    if (entry.tags && entry.tags.length > 0) {
+      entryTagClearParams.push([entry.id]);
+      for (const tag of entry.tags) {
+        entryTagParams.push([entry.id, tag.id]);
       }
-    } catch (err) {
-      result.errors.push(`entry ${entry.id}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
-  // ===== 同步 tags（增量：只同步新增 tag，按 createdAt > lastBackupTs 筛选）=====
+  try {
+    await d1BatchInsert(
+      `INSERT OR REPLACE INTO entries
+       (id, content, source, supplement, is_starred, is_deleted, created_at, updated_at, copy_count, content_hash, backup_batch_id)
+       VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
+      entryParams,
+    );
+    result.entriesSynced = entryParams.length;
+  } catch (err) {
+    result.errors.push(`entries 批量同步失败: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  if (entryTagClearParams.length > 0) {
+    await d1BatchInsert('DELETE FROM entry_tags WHERE entry_id = ?', entryTagClearParams);
+    await d1BatchInsert(entryTagSql, entryTagParams);
+  }
+
+  // ===== 同步 tags（增量：createdAt > lastBackupTs）=====
   const newTags = tags.filter(t => t.createdAt > lastBackupTs);
-  for (const tag of newTags) {
-    try {
-      await d1Query(
-        `INSERT OR REPLACE INTO tags
-         (id, name, color, is_smart, search_criteria, is_deleted, created_at, updated_at, backup_batch_id)
-         VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)`,
-        [
-          tag.id,
-          tag.name,
-          tag.color || null,
-          tag.isSmart ? 1 : 0,
-          tag.searchCriteria ? JSON.stringify(tag.searchCriteria) : null,
-          tag.createdAt,
-          Date.now(),
-          result.batchId,
-        ]
-      );
-      result.tagsSynced++;
-    } catch (err) {
-      result.errors.push(`tag ${tag.id}: ${err instanceof Error ? err.message : String(err)}`);
-    }
+  try {
+    await d1BatchInsert(
+      `INSERT OR REPLACE INTO tags
+       (id, name, color, is_smart, search_criteria, is_deleted, created_at, updated_at, backup_batch_id)
+       VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+      newTags.map(tag => [
+        tag.id,
+        tag.name,
+        tag.color || null,
+        tag.isSmart ? 1 : 0,
+        tag.searchCriteria ? JSON.stringify(tag.searchCriteria) : null,
+        tag.createdAt,
+        Date.now(),
+        result.batchId,
+      ]),
+    );
+    result.tagsSynced = newTags.length;
+  } catch (err) {
+    result.errors.push(`tags 批量同步失败: ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  // ===== 同步 groups（增量：只同步 D1 中不存在的新 group）=====
+  // ===== 同步 groups（增量：D1 中不存在的新 group）=====
   const existingGroupIds = new Set<string>(
     (await d1Query('SELECT id FROM groups_table WHERE is_deleted = 0', [])).map((r: any) => r.id)
   );
   const newGroups = groups.filter(g => !existingGroupIds.has(g.id));
-  for (const group of newGroups) {
-    try {
-      await d1Query(
-        `INSERT OR REPLACE INTO groups_table
-         (id, name, sort_order, is_deleted, backup_batch_id)
-         VALUES (?, ?, ?, 0, ?)`,
-        [group.id, group.name, group.sortOrder || 0, result.batchId]
-      );
-      result.groupsSynced++;
-    } catch (err) {
-      result.errors.push(`group ${group.id}: ${err instanceof Error ? err.message : String(err)}`);
-    }
+  try {
+    await d1BatchInsert(
+      `INSERT OR REPLACE INTO groups_table
+       (id, name, sort_order, is_deleted, backup_batch_id)
+       VALUES (?, ?, ?, 0, ?)`,
+      newGroups.map(group => [group.id, group.name, group.sortOrder || 0, result.batchId]),
+    );
+    result.groupsSynced = newGroups.length;
+  } catch (err) {
+    result.errors.push(`groups 批量同步失败: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   // ===== 同步 links（增量：createdAt > lastBackupTs）=====
   const newLinks = links.filter(l => l.createdAt > lastBackupTs);
-  for (const link of newLinks) {
-    try {
-      await d1Query(
-        `INSERT OR REPLACE INTO links
-         (id, source_id, target_id, description, is_deleted, created_at, backup_batch_id)
-         VALUES (?, ?, ?, ?, 0, ?, ?)`,
-        [link.id, link.sourceId, link.targetId, link.description || null, link.createdAt, result.batchId]
-      );
-      result.linksSynced++;
-    } catch (err) {
-      result.errors.push(`link ${link.id}: ${err instanceof Error ? err.message : String(err)}`);
-    }
+  try {
+    await d1BatchInsert(
+      `INSERT OR REPLACE INTO links
+       (id, source_id, target_id, description, is_deleted, created_at, backup_batch_id)
+       VALUES (?, ?, ?, ?, 0, ?, ?)`,
+      newLinks.map(link => [
+        link.id, link.sourceId, link.targetId, link.description || null,
+        link.createdAt, result.batchId,
+      ]),
+    );
+    result.linksSynced = newLinks.length;
+  } catch (err) {
+    result.errors.push(`links 批量同步失败: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   // ===== 同步 todos =====
   const changedTodos = allTodos.filter(t => (t.updatedAt || t.createdAt) > lastBackupTs);
-  for (const todo of changedTodos) {
-    try {
-      await d1Query(
-        `INSERT OR REPLACE INTO todos
-         (id, title, note, folder_date, time, is_done, is_today, is_deleted, created_at, updated_at, completed_at, backup_batch_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
-        [
-          todo.id,
-          todo.title,
-          todo.note || null,
-          todo.folderDate || null,
-          todo.startTime != null ? String(todo.startTime) : null,
-          todo.status === 'done' ? 1 : 0,
-          todo.isToday ? 1 : 0,
-          todo.createdAt,
-          todo.updatedAt || todo.createdAt,
-          todo.completedAt || null,
-          result.batchId,
-        ]
-      );
-      result.todosSynced++;
-    } catch (err) {
-      result.errors.push(`todo ${todo.id}: ${err instanceof Error ? err.message : String(err)}`);
-    }
+  try {
+    await d1BatchInsert(
+      `INSERT OR REPLACE INTO todos
+       (id, title, note, folder_date, time, is_done, is_today, is_deleted, created_at, updated_at, completed_at, backup_batch_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
+      changedTodos.map(todo => [
+        todo.id,
+        todo.title,
+        todo.note || null,
+        todo.folderDate || null,
+        todo.startTime != null ? String(todo.startTime) : null,
+        todo.status === 'done' ? 1 : 0,
+        todo.isToday ? 1 : 0,
+        todo.createdAt,
+        todo.updatedAt || todo.createdAt,
+        todo.completedAt || null,
+        result.batchId,
+      ]),
+    );
+    result.todosSynced = changedTodos.length;
+  } catch (err) {
+    result.errors.push(`todos 批量同步失败: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   // ===== 同步 todo tags（增量：createdAt > lastBackupTs）=====
   const newTodoTags = allTodoTags.filter(tt => tt.createdAt > lastBackupTs);
-  for (const tt of newTodoTags) {
-    try {
-      await d1Query(
-        `INSERT OR REPLACE INTO todo_tags
-         (id, name, color, is_deleted, backup_batch_id)
-         VALUES (?, ?, ?, 0, ?)`,
-        [tt.id, tt.name, tt.color || null, result.batchId]
-      );
-    } catch (err) {
-      result.errors.push(`todo_tag ${tt.id}: ${err instanceof Error ? err.message : String(err)}`);
-    }
+  try {
+    await d1BatchInsert(
+      `INSERT OR REPLACE INTO todo_tags
+       (id, name, color, is_deleted, backup_batch_id)
+       VALUES (?, ?, ?, 0, ?)`,
+      newTodoTags.map(tt => [tt.id, tt.name, tt.color || null, result.batchId]),
+    );
+  } catch (err) {
+    result.errors.push(`todo_tags 批量同步失败: ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  // ===== 同步 templates（增量：updatedAt > lastBackupTs）=====
+  // ===== 同步 templates + items（items 一次性取回，无 N+1）=====
   const changedTemplateIds = new Set(
     allTemplates.filter(t => t.updatedAt > lastBackupTs).map(t => t.id)
   );
-  for (const { template, items } of templatesWithItems) {
-    if (!changedTemplateIds.has(template.id)) continue;
-    try {
-      await d1Query(
-        `INSERT OR REPLACE INTO templates
-         (id, name, is_deleted, backup_batch_id)
-         VALUES (?, ?, 0, ?)`,
-        [template.id, template.name, result.batchId]
-      );
-      result.templatesSynced++;
-
-      // 同步 template items：只 INSERT D1 中不存在的
-      const existingItemIds = new Set<string>(
-        (await d1Query('SELECT id FROM template_items WHERE template_id = ?', [template.id]))
-          .map((r: any) => r.id)
-      );
-      const newItems = items.filter(it => !existingItemIds.has(it.id));
-      for (const item of newItems) {
-        await d1Query(
-          `INSERT OR REPLACE INTO template_items
-           (id, template_id, title, note, time, sort_order, backup_batch_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          [
-            item.id,
-            template.id,
-            item.title || null,
-            item.note || null,
-            item.startTime != null ? String(item.startTime) : null,
-            item.sortOrder || 0,
-            result.batchId,
-          ]
-        );
-      }
-    } catch (err) {
-      result.errors.push(`template ${template.id}: ${err instanceof Error ? err.message : String(err)}`);
+  const changedTemplates = allTemplates.filter(t => changedTemplateIds.has(t.id));
+  const templateItemParams: any[][] = [];
+  const existingItemIds = new Set<string>(
+    (await d1Query('SELECT id FROM template_items', [])).map((r: any) => r.id)
+  );
+  for (const tpl of changedTemplates) {
+    const items = itemsByTemplate.get(tpl.id) || [];
+    for (const item of items) {
+      if (existingItemIds.has(item.id)) continue;
+      templateItemParams.push([
+        item.id, tpl.id, item.title || null, item.note || null,
+        item.startTime != null ? String(item.startTime) : null,
+        item.sortOrder || 0, result.batchId,
+      ]);
     }
+  }
+  try {
+    await d1BatchInsert(
+      `INSERT OR REPLACE INTO templates
+       (id, name, is_deleted, backup_batch_id)
+       VALUES (?, ?, 0, ?)`,
+      changedTemplates.map(t => [t.id, t.name, result.batchId]),
+    );
+    result.templatesSynced = changedTemplates.length;
+    await d1BatchInsert(
+      `INSERT OR REPLACE INTO template_items
+       (id, template_id, title, note, time, sort_order, backup_batch_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      templateItemParams,
+    );
+  } catch (err) {
+    result.errors.push(`templates 批量同步失败: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   // ===== 同步附件到 R2 + D1 元数据 =====
   const existingAttRows = await d1Query('SELECT id FROM attachments_meta WHERE is_deleted = 0', []);
   const existingAttIds = new Set(existingAttRows.map((r: any) => r.id));
 
-  for (const att of allAttachments) {
+  const attMetaParams: any[][] = [];
+  const newAtts = allAttachments.filter(att => !existingAttIds.has(att.id));
+
+  // 并发读本地附件文件（I/O 大头，先并行读出来）
+  await runBatch(newAtts, 4, async (att) => {
+    const r2KeyOrig = `${R2_ATTACHMENT_PREFIX}${att.id}_orig.jpg`;
+    const r2KeyThumb = `${R2_ATTACHMENT_PREFIX}${att.id}_thumb.jpg`;
     try {
-      const r2KeyOrig = `${R2_ATTACHMENT_PREFIX}${att.id}_orig.jpg`;
-      const r2KeyThumb = `${R2_ATTACHMENT_PREFIX}${att.id}_thumb.jpg`;
-
-      // 如果 D1 中没有该附件记录，需要上传到 R2
-      if (!existingAttIds.has(att.id)) {
-        // 上传原图
-        try {
-          const origRes = await Filesystem.readFile({
-            path: att.filePath,
-            directory: Directory.Data,
-          });
-          await r2PutBase64Image(r2KeyOrig, origRes.data as string, att.mimeType || 'image/jpeg');
-        } catch (err) {
-          result.errors.push(`附件原图缺失 att=${att.id}, 跳过上传`);
-        }
-
-        // 上传缩略图
-        try {
-          const thumbRes = await Filesystem.readFile({
-            path: att.thumbPath,
-            directory: Directory.Data,
-          });
-          await r2PutBase64Image(r2KeyThumb, thumbRes.data as string, att.mimeType || 'image/jpeg');
-        } catch (err) {
-          result.errors.push(`附件缩略图缺失 att=${att.id}, 跳过上传`);
-        }
-
-        result.attachmentsUploaded++;
-      }
-
-      // 写入/更新 D1 附件元数据
-      await d1Query(
-        `INSERT OR REPLACE INTO attachments_meta
-         (id, entry_id, r2_key_orig, r2_key_thumb, mime_type, sort_order, is_deleted, created_at, backup_batch_id)
-         VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)`,
-        [
-          att.id,
-          att.entryId,
-          r2KeyOrig,
-          r2KeyThumb,
-          att.mimeType || 'image/jpeg',
-          att.sortOrder || 0,
-          att.createdAt,
-          result.batchId,
-        ]
-      );
-      existingAttIds.add(att.id);
+      const [origRes, thumbRes] = await Promise.all([
+        Filesystem.readFile({ path: att.filePath, directory: Directory.Data }).catch(() => null),
+        Filesystem.readFile({ path: att.thumbPath, directory: Directory.Data }).catch(() => null),
+      ]);
+      // 原图 + 缩略图并发上传
+      await Promise.all([
+        origRes
+          ? r2PutBase64Image(r2KeyOrig, origRes.data as string, att.mimeType || 'image/jpeg')
+              .catch(() => result.errors.push(`附件原图上传失败 att=${att.id}`))
+          : Promise.resolve().then(() => result.errors.push(`附件原图缺失 att=${att.id}, 跳过上传`)),
+        thumbRes
+          ? r2PutBase64Image(r2KeyThumb, thumbRes.data as string, att.mimeType || 'image/jpeg')
+              .catch(() => result.errors.push(`附件缩略图上传失败 att=${att.id}`))
+          : Promise.resolve().then(() => result.errors.push(`附件缩略图缺失 att=${att.id}, 跳过上传`)),
+      ]);
+      result.attachmentsUploaded++;
     } catch (err) {
       result.errors.push(`attachment ${att.id}: ${err instanceof Error ? err.message : String(err)}`);
     }
+  });
+
+  // 全量附件元数据批量写 D1
+  for (const att of allAttachments) {
+    attMetaParams.push([
+      att.id,
+      att.entryId,
+      `${R2_ATTACHMENT_PREFIX}${att.id}_orig.jpg`,
+      `${R2_ATTACHMENT_PREFIX}${att.id}_thumb.jpg`,
+      att.mimeType || 'image/jpeg',
+      att.sortOrder || 0,
+      att.createdAt,
+      result.batchId,
+    ]);
+  }
+  try {
+    await d1BatchInsert(
+      `INSERT OR REPLACE INTO attachments_meta
+       (id, entry_id, r2_key_orig, r2_key_thumb, mime_type, sort_order, is_deleted, created_at, backup_batch_id)
+       VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+      attMetaParams,
+    );
+  } catch (err) {
+    result.errors.push(`attachments_meta 批量同步失败: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   // ===== 同步删除（软删）=====
-  const d1EntryIds = await d1Query('SELECT id FROM entries WHERE is_deleted = 0', []);
+  const [d1EntryIds, d1TodoIds] = await Promise.all([
+    d1Query('SELECT id FROM entries WHERE is_deleted = 0', []),
+    d1Query('SELECT id FROM todos WHERE is_deleted = 0', []),
+  ]);
   const localEntryIds = new Set(entries.map(e => e.id));
-  for (const row of d1EntryIds) {
-    if (!localEntryIds.has(row.id)) {
-      await d1Query('UPDATE entries SET is_deleted = 1 WHERE id = ?', [row.id]);
-      result.deletionsSynced++;
-    }
-  }
-
-  const d1TodoIds = await d1Query('SELECT id FROM todos WHERE is_deleted = 0', []);
   const localTodoIds = new Set(allTodos.map(t => t.id));
-  for (const row of d1TodoIds) {
-    if (!localTodoIds.has(row.id)) {
-      await d1Query('UPDATE todos SET is_deleted = 1 WHERE id = ?', [row.id]);
-      result.deletionsSynced++;
-    }
+  const delEntryParams = d1EntryIds.filter((r: any) => !localEntryIds.has(r.id)).map((r: any) => [r.id]);
+  const delTodoParams = d1TodoIds.filter((r: any) => !localTodoIds.has(r.id)).map((r: any) => [r.id]);
+  if (delEntryParams.length > 0) {
+    await d1BatchInsert('UPDATE entries SET is_deleted = 1 WHERE id = ?', delEntryParams);
   }
+  if (delTodoParams.length > 0) {
+    await d1BatchInsert('UPDATE todos SET is_deleted = 1 WHERE id = ?', delTodoParams);
+  }
+  result.deletionsSynced = delEntryParams.length + delTodoParams.length;
 
   // ===== 写入备份 manifest =====
   await d1Query(
@@ -402,30 +412,27 @@ export async function backupToCloud(): Promise<CloudBackupResult> {
     ]
   );
 
-  // ===== 同步对话历史 =====
+  // ===== 同步对话历史（批量）=====
   const localChatSessions = await db.getAllChatSessions();
-  for (const session of localChatSessions) {
-    if (session.updatedAt > lastBackupTs) {
-      try {
-        await d1Query(
-          `INSERT OR REPLACE INTO chat_sessions (id, title, messages, model, mcp_enabled_tools, mcp_search_results, created_at, updated_at, backup_batch_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            session.id,
-            session.title,
-            JSON.stringify(session.messages),
-            session.model || null,
-            session.mcpEnabledTools ? JSON.stringify(session.mcpEnabledTools) : null,
-            session.mcpSearchResults ? JSON.stringify(session.mcpSearchResults) : null,
-            session.createdAt,
-            session.updatedAt,
-            result.batchId,
-          ],
-        );
-      } catch (err) {
-        result.errors.push(`sync chat_session ${session.id}: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    }
+  const changedSessions = localChatSessions.filter(s => s.updatedAt > lastBackupTs);
+  try {
+    await d1BatchInsert(
+      `INSERT OR REPLACE INTO chat_sessions (id, title, messages, model, mcp_enabled_tools, mcp_search_results, created_at, updated_at, backup_batch_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      changedSessions.map(session => [
+        session.id,
+        session.title,
+        JSON.stringify(session.messages),
+        session.model || null,
+        session.mcpEnabledTools ? JSON.stringify(session.mcpEnabledTools) : null,
+        session.mcpSearchResults ? JSON.stringify(session.mcpSearchResults) : null,
+        session.createdAt,
+        session.updatedAt,
+        result.batchId,
+      ]),
+    );
+  } catch (err) {
+    result.errors.push(`chat_sessions 批量同步失败: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   // ===== 更新同步状态 =====
@@ -463,7 +470,7 @@ export async function restoreFromCloud(): Promise<CloudRestoreResult> {
   await (todoDb as any).ensureConnection?.();
 
   // 确保表结构
-  await d1InitSchema();
+  await d1InitSchemaOnce();
 
   // ===== 拉取所有未删除的 entries =====
   const d1Entries = await d1Query('SELECT * FROM entries WHERE is_deleted = 0', []);
@@ -603,46 +610,43 @@ export async function restoreFromCloud(): Promise<CloudRestoreResult> {
     }
   }
 
-  // ===== 拉取附件（从 R2 下载到本地）=====
+  // ===== 拉取附件（从 R2 下载到本地，并发 4 显著提速）=====
   const d1Attachments = await d1Query('SELECT * FROM attachments_meta WHERE is_deleted = 0', []);
   const existingAttIds = new Set((await db.getAllAttachments()).map(a => a.id));
 
-  for (const row of d1Attachments) {
-    if (existingAttIds.has(row.id)) continue;
-
+  const newAttRows = d1Attachments.filter((row: any) => !existingAttIds.has(row.id));
+  await runBatch(newAttRows, 4, async (row: any) => {
     try {
       const localEntry = await db.getEntryById(row.entry_id);
-      if (!localEntry) continue;
+      if (!localEntry) return;
 
       const dir = `attachments/${localEntry.id}`;
       const thumbPath = `${dir}/${row.id}_thumb.jpg`;
       const filePath = `${dir}/${row.id}_orig.jpg`;
 
-      // 下载缩略图
-      if (row.r2_key_thumb) {
-        const thumbBase64 = await r2GetBase64(row.r2_key_thumb);
-        await Filesystem.writeFile({
-          path: thumbPath,
-          data: thumbBase64,
-          directory: Directory.Data,
-          recursive: true,
-        });
-      }
-
-      // 下载原图
-      if (row.r2_key_orig) {
-        try {
-          const origBase64 = await r2GetBase64(row.r2_key_orig);
-          await Filesystem.writeFile({
-            path: filePath,
-            data: origBase64,
-            directory: Directory.Data,
-            recursive: true,
-          });
-        } catch {
-          // 原图下载失败不阻塞，缩略图已够用
-        }
-      }
+      // 缩略图 + 原图 并发下载
+      await Promise.all([
+        row.r2_key_thumb
+          ? r2GetBase64(row.r2_key_thumb)
+              .then(async thumbBase64 => {
+                await Filesystem.writeFile({
+                  path: thumbPath, data: thumbBase64,
+                  directory: Directory.Data, recursive: true,
+                });
+              })
+              .catch(() => { /* 缩略图下载失败忽略 */ })
+          : Promise.resolve(),
+        row.r2_key_orig
+          ? r2GetBase64(row.r2_key_orig)
+              .then(async origBase64 => {
+                await Filesystem.writeFile({
+                  path: filePath, data: origBase64,
+                  directory: Directory.Data, recursive: true,
+                });
+              })
+              .catch(() => { /* 原图下载失败不阻塞，缩略图已够用 */ })
+          : Promise.resolve(),
+      ]);
 
       await db.addAttachment({
         id: row.id,
@@ -659,7 +663,7 @@ export async function restoreFromCloud(): Promise<CloudRestoreResult> {
     } catch (err) {
       result.errors.push(`restore attachment ${row.id}: ${err instanceof Error ? err.message : String(err)}`);
     }
-  }
+  });
 
   // ===== 拉取对话历史 =====
   try {
@@ -696,7 +700,7 @@ export async function restoreFromCloud(): Promise<CloudRestoreResult> {
  * 获取云端备份历史列表
  */
 export async function listCloudBackups(): Promise<any[]> {
-  await d1InitSchema();
+  await d1InitSchemaOnce();
   return await d1Query(
     'SELECT * FROM _backup_manifests ORDER BY timestamp DESC LIMIT 50'
   );
@@ -707,7 +711,7 @@ export async function listCloudBackups(): Promise<any[]> {
  */
 export async function getLastCloudBackupTime(): Promise<number | null> {
   try {
-    await d1InitSchema();
+    await d1InitSchemaOnce();
     const ts = await d1GetSyncState(SYNC_STATE_KEY);
     return ts ? parseInt(ts, 10) : null;
   } catch {

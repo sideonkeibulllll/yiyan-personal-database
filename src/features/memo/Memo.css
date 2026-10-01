@@ -1,0 +1,565 @@
+/* ===== 备忘录页样式（v2.3.0）===== */
+/* 参考博客排版风格，但字体全部跟随系统（不使用像素字/自定义字体） */
+
+.memo-page {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  background: var(--color-bg-primary);
+  overflow: hidden;
+}
+
+/* === 顶部栏 === */
+.memo-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: calc(var(--space-3) + var(--safe-top)) var(--space-3) var(--space-2);
+  border-bottom: 1px solid var(--color-border-secondary);
+  flex-shrink: 0;
+}
+
+.memo-icon-btn {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  background: transparent;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.memo-icon-btn:active {
+  transform: scale(0.92);
+  background: var(--color-bg-elevated);
+}
+
+.memo-header-title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+}
+
+.memo-title-text {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memo-save-state {
+  font-size: 10px;
+  color: var(--color-text-tertiary);
+}
+
+/* === 菜单 === */
+.memo-menu-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 200;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  padding: calc(56px + var(--safe-top)) var(--space-4) 0;
+  animation: fadeIn var(--duration-fast) var(--ease-out);
+}
+
+.memo-menu {
+  min-width: 190px;
+  max-width: 72vw;
+  max-height: 62vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: var(--space-2);
+  animation: scaleIn var(--duration-fast) var(--ease-out);
+}
+
+.memo-menu-label {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  padding: var(--space-2) var(--space-3);
+  letter-spacing: 0.05em;
+}
+
+.memo-menu-scroll {
+  overflow-y: auto;
+  max-height: 40vh;
+}
+
+.memo-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+  background: transparent;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memo-menu-item:active {
+  background: var(--color-bg-float);
+}
+
+.memo-menu-item.active {
+  color: var(--color-accent-primary);
+  background: var(--color-accent-subtle);
+}
+
+.memo-menu-item.danger {
+  color: var(--color-error);
+}
+
+.memo-menu-sep {
+  height: 1px;
+  background: var(--color-border-primary);
+  margin: var(--space-2) 0;
+}
+
+/* === 快捷字符栏 === */
+.memo-format-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-bottom: 1px solid var(--color-border-secondary);
+  background: var(--color-bg-secondary);
+  flex-shrink: 0;
+  -webkit-overflow-scrolling: touch;
+}
+
+.memo-format-bar::-webkit-scrollbar {
+  height: 0;
+}
+
+.memo-format-btn {
+  flex-shrink: 0;
+  min-width: 34px;
+  height: 30px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-xs);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-primary);
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+  white-space: nowrap;
+}
+
+.memo-format-btn:active {
+  transform: scale(0.94);
+  color: var(--color-accent-primary);
+  border-color: var(--color-border-accent);
+}
+
+/* === 编辑 / 预览区 === */
+.memo-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+/* ================================================================
+   CodeMirror 6 · Obsidian 式实时预览
+   —— 光标行显示源码、其余行已渲染
+   ================================================================ */
+
+.memo-editor-cm {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+}
+
+.memo-editor-cm .cm-editor {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-family: inherit;
+  font-size: 15px;
+}
+
+.memo-editor-cm .cm-editor.cm-focused {
+  outline: none;
+}
+
+.memo-editor-cm .cm-scroller {
+  font-family: inherit;
+  line-height: 1.75;
+  padding: var(--space-4) var(--space-5) 30vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.memo-editor-cm .cm-content {
+  caret-color: var(--color-accent-primary);
+  padding: 0;
+}
+
+/* 选区配色 */
+.memo-editor-cm .cm-selectionBackground,
+.memo-editor-cm .cm-editor ::selection {
+  background: var(--color-accent-subtle) !important;
+}
+
+/* 光标 */
+.memo-editor-cm .cm-cursor,
+.memo-editor-cm .cm-dropCursor {
+  border-left-color: var(--color-accent-primary);
+  border-left-width: 2px;
+}
+
+.memo-editor-cm .cm-placeholder {
+  color: var(--color-text-disabled);
+  font-style: normal;
+}
+
+/* === 标题分级（视觉近似渲染后的排版）=== */
+.memo-editor-cm .cm-md-h {
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.memo-editor-cm .cm-md-h1 {
+  font-size: 1.55em;
+  line-height: 1.35;
+}
+
+.memo-editor-cm .cm-md-h2 {
+  font-size: 1.3em;
+  line-height: 1.4;
+  border-bottom: 1px solid var(--color-border-primary);
+}
+
+.memo-editor-cm .cm-md-h3 { font-size: 1.12em; }
+.memo-editor-cm .cm-md-h4 { font-size: 1em; color: var(--color-text-secondary); }
+.memo-editor-cm .cm-md-h5,
+.memo-editor-cm .cm-md-h6 { font-size: 0.94em; color: var(--color-text-secondary); }
+
+/* === 行内样式 === */
+.memo-editor-cm .cm-md-strong { font-weight: 700; }
+.memo-editor-cm .cm-md-em { font-style: italic; }
+.memo-editor-cm .cm-md-strike {
+  text-decoration: line-through;
+  color: var(--color-text-tertiary);
+}
+
+.memo-editor-cm .cm-md-inline-code {
+  padding: 0.15em 0.4em;
+  border-radius: var(--radius-xs);
+  background: var(--color-bg-float);
+  color: var(--color-accent-tertiary);
+  font-family: ui-monospace, monospace;
+  font-size: 0.9em;
+}
+
+.memo-editor-cm .cm-md-link {
+  color: var(--color-accent-secondary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* === 块级 === */
+.memo-editor-cm .cm-md-blockquote {
+  color: var(--color-text-secondary);
+  font-style: normal;
+}
+
+/* 列表行：用伪元素补回被隐藏的「-」项目符号 */
+.memo-editor-cm .cm-line:has(.cm-md-li) {
+  padding-left: 1.15em;
+  position: relative;
+}
+
+.memo-editor-cm .cm-line:has(.cm-md-li)::before {
+  content: "•";
+  position: absolute;
+  left: 0.35em;
+  color: var(--color-text-tertiary);
+}
+
+/* 引用行左侧竖条（对齐 Obsidian / 博客正文观感） */
+.memo-editor-cm .cm-line:has(.cm-md-blockquote) {
+  border-left: 3px solid var(--color-accent-primary);
+  padding-left: var(--space-3);
+  background: var(--color-accent-subtle);
+  border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
+}
+
+.memo-editor-cm .cm-md-fenced-code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.9em;
+}
+
+.memo-editor-cm .cm-line:has(.cm-md-fenced-code) {
+  background: var(--color-bg-secondary);
+}
+
+.memo-editor-cm .cm-md-li {
+  /* 列表项本身无特殊样式；项目符号由行伪元素提供 */
+}
+
+/* === 分割线（整行替换成一条横线）=== */
+.memo-editor-cm .cm-md-hr-widget {
+  display: inline-block;
+  width: 100%;
+  height: 1px;
+  background: var(--color-border-primary);
+  vertical-align: middle;
+}
+
+/* === 图片内联预览 === */
+.memo-editor-cm .cm-md-image {
+  display: inline-block;
+  vertical-align: top;
+  max-width: 100%;
+  margin: 0.5em 0;
+}
+
+.memo-editor-cm .cm-md-image img {
+  max-width: 100%;
+  max-height: 40vh;
+  border-radius: var(--radius-sm);
+  display: block;
+}
+
+/* === 活动行（只给文字加很轻的底色，帮助确认光标位置）=== */
+.memo-editor-cm .cm-activeLine {
+  background: transparent;
+}
+
+
+/* === 预览排版（参考博客正文观感）=== */
+.memo-preview {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-5) var(--space-5) 30vh;
+  color: var(--color-text-primary);
+  font-size: 15px;
+  line-height: 1.8;
+  word-break: break-word;
+}
+
+.memo-preview h1,
+.memo-preview h2,
+.memo-preview h3,
+.memo-preview h4,
+.memo-preview h5,
+.memo-preview h6 {
+  margin: 1.4em 0 0.6em;
+  line-height: 1.35;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.memo-preview h1 { font-size: 1.55em; }
+.memo-preview h2 {
+  font-size: 1.3em;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--color-border-primary);
+}
+.memo-preview h3 { font-size: 1.12em; }
+.memo-preview h4 { font-size: 1em; color: var(--color-text-secondary); }
+
+.memo-preview h1:first-child,
+.memo-preview h2:first-child { margin-top: 0; }
+
+.memo-preview p {
+  margin: 0.7em 0;
+}
+
+.memo-preview .memo-p-empty {
+  height: 0.5em;
+  margin: 0;
+}
+
+.memo-preview blockquote {
+  margin: 0.9em 0;
+  padding: 0.5em 1em;
+  border-left: 3px solid var(--color-accent-primary);
+  background: var(--color-accent-subtle);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  color: var(--color-text-secondary);
+}
+
+.memo-preview ul,
+.memo-preview ol {
+  margin: 0.7em 0;
+  padding-left: 1.5em;
+}
+
+.memo-preview li {
+  margin: 0.3em 0;
+}
+
+.memo-preview code {
+  padding: 0.15em 0.4em;
+  border-radius: var(--radius-xs);
+  background: var(--color-bg-float);
+  color: var(--color-accent-tertiary);
+  font-family: ui-monospace, monospace;
+  font-size: 0.9em;
+}
+
+.memo-preview pre {
+  margin: 1em 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-primary);
+  overflow-x: auto;
+}
+
+.memo-preview pre code {
+  padding: 0;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: 0.85em;
+  line-height: 1.6;
+}
+
+.memo-preview a {
+  color: var(--color-accent-secondary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.memo-preview img {
+  max-width: 100%;
+  border-radius: var(--radius-sm);
+  margin: 0.6em 0;
+}
+
+.memo-preview hr {
+  margin: 1.6em 0;
+  border: none;
+  border-top: 1px solid var(--color-border-primary);
+}
+
+.memo-preview strong {
+  color: var(--color-text-primary);
+  font-weight: 700;
+}
+
+.memo-preview del {
+  color: var(--color-text-tertiary);
+}
+
+/* === 大纲抽屉 === */
+.memo-outline-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 190;
+  display: flex;
+  justify-content: flex-end;
+  animation: fadeIn var(--duration-fast) var(--ease-out);
+}
+
+.memo-outline-panel {
+  width: min(72vw, 300px);
+  height: 100%;
+  background: var(--color-bg-elevated);
+  border-left: 1px solid var(--color-border-primary);
+  padding: calc(var(--space-5) + var(--safe-top)) var(--space-4) var(--space-5);
+  overflow-y: auto;
+  animation: slideDown var(--duration-normal) var(--ease-out);
+}
+
+.memo-outline-title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin-bottom: var(--space-3);
+}
+
+.memo-outline-empty {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+}
+
+.memo-outline-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.memo-outline-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: var(--space-2) var(--space-2);
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-left: 2px solid transparent;
+}
+
+.memo-outline-item.level-1 { padding-left: var(--space-2); font-weight: 600; color: var(--color-text-primary); }
+.memo-outline-item.level-2 { padding-left: var(--space-4); }
+.memo-outline-item.level-3 { padding-left: var(--space-6); font-size: var(--text-xs); }
+.memo-outline-item.level-4,
+.memo-outline-item.level-5,
+.memo-outline-item.level-6 { padding-left: var(--space-8); font-size: var(--text-xs); color: var(--color-text-tertiary); }
+
+.memo-outline-item.active {
+  color: var(--color-accent-primary);
+  border-left-color: var(--color-accent-primary);
+  background: var(--color-accent-subtle);
+}
+
+.memo-outline-item:active {
+  background: var(--color-bg-float);
+}
+
+/* === 底部状态栏 === */
+.memo-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  padding-bottom: calc(var(--space-2) + var(--safe-bottom));
+  border-top: 1px solid var(--color-border-secondary);
+  background: var(--color-bg-secondary);
+  font-size: 10px;
+  color: var(--color-text-tertiary);
+  flex-shrink: 0;
+}
+
+.memo-footer-anchor {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 70%;
+}

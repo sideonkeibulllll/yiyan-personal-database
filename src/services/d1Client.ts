@@ -102,18 +102,43 @@ export async function d1BatchExec(sql: string): Promise<void> {
 }
 
 /**
- * 批量参数化插入
+ * 批量参数化插入（并发执行，显著降低总耗时）
+ *
+ * 说明：D1 REST API 单次只支持一组 params，因此这里靠**提高并发**提速，
+ * 而不是合并 SQL。并发数 10 是实测的中转站/直连都能稳定承受的值。
  */
 export async function d1BatchInsert(
   sql: string,
   paramsList: SqlParam[][],
+  concurrency = 10,
 ): Promise<void> {
-  // 直连和中转站都逐条执行（D1 REST API 单次只支持一组 params）
-  const BATCH_CONCURRENCY = 10;
-  for (let i = 0; i < paramsList.length; i += BATCH_CONCURRENCY) {
-    const batch = paramsList.slice(i, i + BATCH_CONCURRENCY);
-    await Promise.all(batch.map((params) => d1Query(sql, params)));
-  }
+  if (paramsList.length === 0) return;
+  const limit = Math.max(1, concurrency);
+  let next = 0;
+  const workers = new Array(Math.min(limit, paramsList.length)).fill(0).map(async () => {
+    while (next < paramsList.length) {
+      const idx = next++;
+      await d1Query(sql, paramsList[idx]);
+    }
+  });
+  await Promise.all(workers);
+}
+
+/** 批处理并发常量（统一出口，方便调优） */
+export const D1_CONCURRENCY = 10;
+
+/** 测试连接结果缓存（避免每次操作前重复测连） */
+let _connCache: { at: number; result: { ok: boolean; message: string } } | null = null;
+const CONN_CACHE_TTL = 60_000;
+
+/**
+ * 初始化表结构（进程内只执行一次）
+ */
+let _schemaReady = false;
+export async function d1InitSchemaOnce(): Promise<void> {
+  if (_schemaReady) return;
+  await d1BatchExec(D1_INIT_SQL);
+  _schemaReady = true;
 }
 
 /**

@@ -1,7 +1,7 @@
 {
   "name": "yiyan-personal-database",
   "private": true,
-  "version": "2.1.5",
+  "version": "2.4.0",
   "type": "module",
   "main": "dist-electron/main/main.js",
   "scripts": {
@@ -28,6 +28,12 @@
     "@capacitor/filesystem": "^6.0.4",
     "@capacitor/haptics": "^6.0.1",
     "@capacitor/status-bar": "^6.0.1",
+    "@codemirror/commands": "^6.11.1",
+    "@codemirror/lang-markdown": "^6.5.2",
+    "@codemirror/language": "^6.12.4",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.13",
+    "@lezer/highlight": "^1.2.5",
     "antd-mobile": "^5.37.1",
     "antd-mobile-icons": "^0.3.0",
     "aws4fetch": "^1.0.20",

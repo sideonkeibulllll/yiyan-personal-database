@@ -21,6 +21,8 @@ const TodoEditPage = lazy(() => import('@/features/todo/TodoEditPage').then(m =>
 const TodoManagerPage = lazy(() => import('@/features/todo/TodoManagerPage').then(m => ({ default: m.TodoManagerPage })));
 const TodoTemplatePage = lazy(() => import('@/features/todo/TodoTemplatePage').then(m => ({ default: m.TodoTemplatePage })));
 const TodoRecycleBinPage = lazy(() => import('@/features/todo/TodoRecycleBinPage').then(m => ({ default: m.TodoRecycleBinPage })));
+const WheelPage = lazy(() => import('@/features/wheel/WheelPage').then(m => ({ default: m.WheelPage })));
+const MemoPage = lazy(() => import('@/features/memo/MemoPage').then(m => ({ default: m.MemoPage })));
 
 const router = createHashRouter([
   {
@@ -164,6 +166,30 @@ const router = createHashRouter([
     element: (
       <Suspense fallback={<Loading />}>
         <TodoRecycleBinPage />
+      </Suspense>
+    ),
+  },
+  {
+    path: '/wheel',
+    element: (
+      <Suspense fallback={<Loading />}>
+        <WheelPage />
+      </Suspense>
+    ),
+  },
+  {
+    path: '/wheel/:id',
+    element: (
+      <Suspense fallback={<Loading />}>
+        <WheelPage />
+      </Suspense>
+    ),
+  },
+  {
+    path: '/memo',
+    element: (
+      <Suspense fallback={<Loading />}>
+        <MemoPage />
       </Suspense>
     ),
   },

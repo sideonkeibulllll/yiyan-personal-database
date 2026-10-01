@@ -38,7 +38,7 @@
   font-size: var(--text-lg);
   font-weight: 600;
   color: var(--color-text-primary);
-  font-family: var(--font-serif);
+  font-family: inherit;
 }
 
 .dm-side-menu-close {

@@ -20,6 +20,11 @@ import './HomePage.css';
 
 type InputMode = 'input' | 'tag' | 'info';
 
+/** 主输入框草稿快照的 localStorage 键（v2.3.0：每 5s 存一次，防应用被杀丢内容） */
+const DRAFT_KEY = 'yiyan_input_draft';
+/** 草稿快照间隔 */
+const DRAFT_INTERVAL_MS = 5000;
+
 /** 暖色调色板（8 种交替分配，与待办管理器/待办页一致） */
 const COLOR_PALETTE = [
   '#f76707', // 鲜橙
@@ -172,8 +177,28 @@ const CloseSmIcon = (
   </svg>
 );
 
+/** Wheel SVG icon（决定转盘） */
+const WheelIcon = (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 3v9l6.5 6.5" />
+    <path d="M12 12 5.5 18.5" />
+    <circle cx="12" cy="12" r="2" />
+  </svg>
+);
+
+/** Memo SVG icon（备忘录） */
+const MemoIcon = (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4 4a2 2 0 0 1 2-2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" />
+    <path d="M14 2v6h6" />
+    <line x1="8" y1="13" x2="16" y2="13" />
+    <line x1="8" y1="17" x2="13" y2="17" />
+  </svg>
+);
+
 export function HomePage() {
-  const [content, setContent] = useState('');
+  const [content, setContent] = useState(() => localStorage.getItem(DRAFT_KEY) || '');
   const [mode, setMode] = useState<InputMode>('input');
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
@@ -228,6 +253,40 @@ export function HomePage() {
     }
   }, [mode]);
 
+  // === 草稿快照（v2.3.0）===
+  // 每 5 秒把主输入框内容写入 localStorage，应用被杀/崩溃后重进自动恢复。
+  // 内容为空时清除草稿（避免脏数据残留）。
+  useEffect(() => {
+    const timer = setInterval(() => {
+      try {
+        if (content.trim()) {
+          localStorage.setItem(DRAFT_KEY, content);
+        } else {
+          localStorage.removeItem(DRAFT_KEY);
+        }
+      } catch { /* 存储不可用时静默 */ }
+    }, DRAFT_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [content]);
+
+  // 页面卸载/切到后台时也立刻存一次（间隔可能刚好错过）
+  useEffect(() => {
+    const flush = () => {
+      try {
+        if (content.trim()) localStorage.setItem(DRAFT_KEY, content);
+        else localStorage.removeItem(DRAFT_KEY);
+      } catch { /* 忽略 */ }
+    };
+    window.addEventListener('pagehide', flush);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') flush();
+    });
+    return () => {
+      flush();
+      window.removeEventListener('pagehide', flush);
+    };
+  }, [content]);
+
   // 监听待办页"添加到录入"事件 → pin 到对应 slot（不填输入框）
   // pin 优先 + 自动补满：用户手动 pin 的占对应 slot（timed/untimed），其余 slot 自动选取补满
   useEffect(() => {
@@ -250,30 +309,45 @@ export function HomePage() {
     };
   }, [showToastMessage]);
 
-  // 加载所有待办 + 每秒 tick（倒计时 + 周期性 reload 同步完成/删除状态）
-  // 同时加载待办标签（用于卡片颜色）
+  // 加载所有待办 + 每秒 tick（倒计时）
+  // v2.3.0 优化：
+  // - 不再每 10 秒全量 reload（原来每 10s 拉一次全库，页面重进也有明显刷新感）
+  // - 改为：首次加载 + 订阅 todoStore.todos（应用内任何改动自动同步）
+  // - 页面重新可见时补一次刷新（覆盖后台被外部改动的极端情况）
   const loadTodoTags = useTodoTagStore(state => state.loadTags);
-  useEffect(() => {
-    let tick = 0;
-    const loadAll = async () => {
-      try {
-        const { getTodoDatabase } = await import('@/services/todoDatabase');
-        const db = await getTodoDatabase();
-        const todos = await db.getAllTodos();
-        setAllTodos(todos);
-      } catch (err) {
-        console.error('[HomePage] 加载待办失败:', err);
-      }
-    };
-    loadAll();
-    loadTodoTags();
-    const timer = setInterval(() => {
-      setNow(Date.now());
-      tick++;
-      if (tick % 10 === 0) loadAll(); // 每 10 秒 reload 一次
-    }, 1000);
-    return () => clearInterval(timer);
+  const storeTodos = useTodoStore(state => state.todos);
+  const loadTodos = useTodoStore(state => state.loadAllTodos);
+  const loadAllTodos = useCallback(async () => {
+    try {
+      const { getTodoDatabase } = await import('@/services/todoDatabase');
+      const db = await getTodoDatabase();
+      setAllTodos(await db.getAllTodos());
+    } catch (err) {
+      console.error('[HomePage] 加载待办失败:', err);
+    }
   }, []);
+
+  useEffect(() => {
+    loadAllTodos();
+    loadTodoTags();
+    loadTodos();
+    // 仅保留每秒 tick 用于倒计时，不再周期性全量 reload
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    // 页面重新可见时刷新一次（后台可能被别的页面改过）
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') loadAllTodos();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [loadAllTodos, loadTodoTags, loadTodos]);
+
+  // 应用内待办变动 → 顶部卡片即时同步（替代原 10s 轮询）
+  useEffect(() => {
+    loadAllTodos();
+  }, [storeTodos, loadAllTodos]);
 
   // pin 失效自动清理（timed：过期/完成/删除；untimed：完成/删除）
   useEffect(() => {
@@ -414,6 +488,7 @@ export function HomePage() {
         }
 
         setContent('');
+        try { localStorage.removeItem(DRAFT_KEY); } catch { /* 忽略 */ }
         setPendingImages([]);
         showToastMessage('待办已创建');
 
@@ -443,6 +518,7 @@ export function HomePage() {
       setLastEntryId(entry.id);
       setLastEntryContent(content.trim());
       setContent('');
+      try { localStorage.removeItem(DRAFT_KEY); } catch { /* 忽略 */ }
 
       // 处理图片附件（普通录入模式）
       let attachError = false;
@@ -899,6 +975,14 @@ export function HomePage() {
 
         {/* 快捷入口 */}
         <div className="quick-actions">
+          <button className="quick-btn glass" onClick={() => navigate('/wheel')}>
+            <span className="btn-icon">{WheelIcon}</span>
+            <span>决定转盘</span>
+          </button>
+          <button className="quick-btn glass" onClick={() => navigate('/memo')}>
+            <span className="btn-icon">{MemoIcon}</span>
+            <span>备忘录</span>
+          </button>
           <button className="quick-btn glass" onClick={() => navigate('/random')}>
             <span className="btn-icon">{CardsIcon}</span>
             <span>随机浏览</span>

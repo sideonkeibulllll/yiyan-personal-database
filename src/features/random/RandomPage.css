@@ -76,7 +76,7 @@
   white-space: pre-wrap;
   word-break: break-word;
   margin-bottom: var(--space-3);
-  font-family: var(--font-serif);
+  font-family: inherit;
 }
 
 /* === 卡片图片附件（inline 模式） === */
@@ -348,7 +348,7 @@
   font-size: var(--text-lg);
   font-weight: 600;
   color: var(--color-text-primary);
-  font-family: var(--font-serif);
+  font-family: inherit;
 }
 
 .panel-header button {

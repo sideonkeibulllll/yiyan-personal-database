@@ -13,7 +13,7 @@
   font-size: var(--text-xl);
   font-weight: 600;
   color: var(--color-text-primary);
-  font-family: var(--font-serif);
+  font-family: inherit;
 }
 
 .page-content {
@@ -53,7 +53,7 @@
   background: none;
   border: none;
   outline: none;
-  font-family: var(--font-serif);
+  font-family: inherit;
 }
 
 .search-input::placeholder {
@@ -249,7 +249,7 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
   margin-bottom: var(--space-2);
-  font-family: var(--font-serif);
+  font-family: inherit;
 }
 
 .result-meta {

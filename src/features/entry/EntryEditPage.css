@@ -48,7 +48,7 @@
   font-weight: 600;
   color: var(--color-text-primary);
   text-align: center;
-  font-family: var(--font-serif);
+  font-family: inherit;
 }
 
 .entry-edit-header-spacer {
@@ -142,7 +142,7 @@
   min-height: 80px;
   line-height: 1.6;
   transition: border-color var(--duration-fast);
-  font-family: var(--font-sans);
+  font-family: inherit;
 }
 
 .entry-edit-textarea:focus {

@@ -37,7 +37,6 @@ export async function exportMessagesToImage(container: HTMLElement, selectedIds:
     padding-bottom: 14px; margin-bottom: 20px;
     border-bottom: 1px solid rgba(255,255,255,0.08);
     font-size: 12px; color: #868e96;
-    font-family: 'Inter', 'Noto Sans SC', sans-serif;
   `;
   const now = new Date();
   const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
@@ -66,7 +65,6 @@ export async function exportMessagesToImage(container: HTMLElement, selectedIds:
     margin-top: 24px; padding-top: 14px;
     border-top: 1px solid rgba(255,255,255,0.08);
     text-align: right; font-size: 11px; color: #495057;
-    font-family: 'Inter', 'Noto Sans SC', sans-serif;
   `;
   footer.textContent = '由 记忆库 导出';
   wrapper.appendChild(footer);

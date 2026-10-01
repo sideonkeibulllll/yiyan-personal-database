@@ -442,3 +442,61 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   todo: DEFAULT_TODO_CONFIG,
 };
+
+/** ============ 决定转盘（v2.3.0） ============ */
+
+/** 转盘选项 */
+export interface WheelOption {
+  /** 选项名（最长 12 字） */
+  name: string;
+  /** 权重 1–99，决定扇区角度占比 */
+  weight: number;
+}
+
+/** 转盘历史记录（保留最近若干条） */
+export interface WheelHistoryItem {
+  /** 抽中的选项名 */
+  text: string;
+  /** 抽中时间戳 */
+  time: number;
+  /** 扇区索引（用于显示对应色点） */
+  index: number;
+}
+
+/** 一个转盘（一条数据库记录） */
+export interface Wheel {
+  id: string;
+  /** 转盘名 */
+  name: string;
+  /** 选项列表（内嵌 JSON 存储） */
+  options: WheelOption[];
+  /** 最近记录（内嵌 JSON 存储） */
+  history: WheelHistoryItem[];
+  /** 是否开启音效 */
+  soundEnabled: boolean;
+  /**
+   * 抽中后是否把该选项从列表移除（"抽一个少一个"模式）。
+   * 每个转盘独立记忆。移除到只剩 1 个时停止，GO 自动禁用。
+   */
+  removeAfterSpin?: boolean;
+  createdAt: number;
+  updatedAt: number;
+  /** 软删除标记 */
+  isDeleted?: number;
+}
+
+/** ============ 备忘录（v2.3.0） ============ */
+
+/** 一篇备忘录 */
+export interface MemoDoc {
+  id: string;
+  /** 标题（取正文首个 # 标题，或"未命名"） */
+  title: string;
+  /** Markdown 正文 */
+  content: string;
+  /** 上次聚焦的标题纯文本（进入时自动跳转到该 # 标题） */
+  lastAnchor: string | null;
+  createdAt: number;
+  updatedAt: number;
+  isDeleted?: number;
+}

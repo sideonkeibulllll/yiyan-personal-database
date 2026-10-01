@@ -105,7 +105,7 @@ export function App() {
         background: '#131416',
       }}>
         <div style={{ marginBottom: 16, color: 'var(--color-error, #fa5252)' }}><TriangleAlertSvg /></div>
-        <div style={{ fontSize: 16, color: '#fa5252', marginBottom: 8, fontFamily: "'Sora', 'Inter', 'Noto Sans SC', sans-serif" }}>数据库初始化失败</div>
+        <div style={{ fontSize: 16, color: '#fa5252', marginBottom: 8 }}>数据库初始化失败</div>
         <div style={{ fontSize: 13, color: '#868e96' }}>{error}</div>
         <button
           onClick={() => window.location.reload()}

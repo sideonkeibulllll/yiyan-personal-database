@@ -14,7 +14,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  font-family: var(--font-display);
+  font-family: inherit;
   font-size: var(--text-2xl);
   font-weight: 600;
   color: var(--color-text-primary);
@@ -409,19 +409,20 @@
 
 /* === 快捷入口 === */
 .quick-actions {
-  display: flex;
+  /* v2.3.0：4 个快捷入口排成 2×2 宫格（决定转盘 / 备忘录 / 随机浏览 / 搜索） */
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: var(--space-3);
   padding-top: var(--space-6);
   padding-bottom: var(--space-4);
 }
 
 .quick-btn {
-  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: var(--space-2);
-  padding: var(--space-4);
+  padding: var(--space-4) var(--space-3);
   border-radius: var(--radius-md);
   font-size: var(--text-sm);
   color: var(--color-text-secondary);
