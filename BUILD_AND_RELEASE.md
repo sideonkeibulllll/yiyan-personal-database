@@ -29,13 +29,16 @@
 
 ### 版本号同步要点 ⚠️
 
-**三个地方必须同步更新版本号：**
+**四个地方必须同步更新版本号：**
 
 1. **`package.json`** 的 `"version"` 字段
 2. **`android/app/build.gradle`** 的 `versionName` 字段
 3. **`android/app/build.gradle`** 的 `versionCode` 字段（每次发版 **+1**）
+4. **`src/services/cloudBackupService.ts`** 的 `APP_VERSION` 常量（云端备份里记录的客户端版本）
 
 > ⚠️ **血泪教训**: 之前出现过 APK 文件名写着 v1.7.4 但安装后系统显示 v1.7.1 的问题，就是因为只改了 `package.json` 没改 `build.gradle`！
+>
+> ⚠️ `APP_VERSION` 最容易被漏掉——它不发现在 APK 元数据里，但会影响云端备份的版本标记。
 
 ### 版本号检查清单（每次发版必查）
 
@@ -43,6 +46,7 @@
 □ package.json → "version": "x.y.z"
 □ android/app/build.gradle → versionName "x.y.z"  （必须与 package.json 一致）
 □ android/app/build.gradle → versionCode N        （比上次 +1）
+□ src/services/cloudBackupService.ts → APP_VERSION 'x.y.z'
 □ git tag vx.y.z                                  （与版本号一致）
 ```
 
@@ -113,8 +117,10 @@ Set-Location "android"
 
 # 5. 复制到 release 目录（文件名必须包含版本号）
 Copy-Item "app\build\outputs\apk\debug\app-debug.apk" "..\release\yiyan-personal-database-vx.y.z-debug.apk" -Force
-Copy-Item "app\build\outputs\apk\release\app-release-unsigned.apk" "..\release\yiyan-personal-database-vx.y.z-release.apk" -Force
+Copy-Item "app\build\outputs\apk\release\app-release.apk" "..\release\yiyan-personal-database-vx.y.z-release.apk" -Force
 ```
+
+> ⚠️ release 包用 `debug.keystore` 签名，产物是 `app-release.apk`（**不是** `app-release-unsigned.apk`）。
 
 ### APK 构建要点 ⚠️
 
