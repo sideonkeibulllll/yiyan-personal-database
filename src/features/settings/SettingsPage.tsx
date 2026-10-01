@@ -1,16 +1,12 @@
 /**
  * 设置页面
  * 左侧栏 + 右侧配置项 + 底部保存按钮 布局
- * AI 配置 + 数据管理器 + 数据导入 + 随机浏览配置 + GLM 配置 + 提示词
+ * 各面板内容已拆分为 panels/ 下的子组件，本文件负责状态、业务逻辑与布局
  */
 import { useState, useRef, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useSettingsStore } from '@/stores/settingsStore';
-import { useEntryStore } from '@/stores/entryStore';
 import { BottomNav } from '@/components/BottomNav';
 import { incrementalImport } from '@/utils/import';
-import { DEFAULT_PROMPTS } from '@/types';
-import type { PromptConfig, GLMConfig } from '@/types';
+import { IconSave } from '@/components/icons';
 import type { ImportResult } from '@/features/datamanager/types';
 import {
   createBackup,
@@ -62,27 +58,19 @@ import type {
   SendRequest,
   DeviceHandshake,
 } from '@/services/backupTypes';
+import { AiPanel } from './panels/AiPanel';
+import { TodoPanel } from './panels/TodoPanel';
+import { RandomPanel } from './panels/RandomPanel';
+import { DataManagerPanel } from './panels/DataManagerPanel';
+import { ImportPanel } from './panels/ImportPanel';
+import { ExportPanel } from './panels/ExportPanel';
+import { BackupPanel } from './panels/BackupPanel';
+import { RestorePanel } from './panels/RestorePanel';
+import { CloudPanel } from './panels/CloudPanel';
+import { SyncPanel } from './panels/SyncPanel';
+import { PromptsPanel } from './panels/PromptsPanel';
+import { GlmPanel } from './panels/GlmPanel';
 import './SettingsPage.css';
-
-/** 提示词标签 */
-const PROMPT_LABELS: Record<keyof PromptConfig, string> = {
-  tagSuggestion: '标签建议提示词',
-  relationSuggestion: '关联建议提示词',
-  dialogueContext: '对话上下文提示词',
-  autoLink: '自动连线提示词',
-  groupSuggestion: '组建议提示词',
-  connectionSuggestion: '连线建议提示词',
-};
-
-/** 提示词提示 */
-const PROMPT_HINTS: Record<keyof PromptConfig, string> = {
-  tagSuggestion: '可用变量: {content} {context}',
-  relationSuggestion: '可用变量: {contentA} {contentB}',
-  dialogueContext: '可用变量: {currentEntry} {recentEntries}',
-  autoLink: '可用变量: {newEntry} {candidates}',
-  groupSuggestion: '可用变量: {existingGroups} {recentEntries}',
-  connectionSuggestion: '可用变量: {entries}',
-};
 
 /** 设置面板类型 */
 type SettingsTab =
@@ -115,119 +103,7 @@ const TAB_LIST: { key: SettingsTab; label: string }[] = [
   { key: 'glm', label: 'GLM 配置' },
 ];
 
-/* SVG Icon Components */
-const IconBot = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M12 8V4H8" /><rect width="16" height="12" x="4" y="8" rx="2" /><path d="M2 14h2" /><path d="M20 14h2" /><path d="M15 13v2" /><path d="M9 13v2" />
-  </svg>
-);
-
-const IconDatabase = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-    <ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M3 5V19A9 3 0 0 0 21 19V5" /><path d="M3 12A9 3 0 0 0 21 12" />
-  </svg>
-);
-
-const IconUpload = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17,8 12,3 7,8" /><line x1="12" y1="3" x2="12" y2="15" />
-  </svg>
-);
-
-const IconShuffle = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M2 18h1.4c1.3 0 2.5-.6 3.3-1.7l6.1-8.6c.7-1.1 2-1.7 3.3-1.7H22" /><path d="m18 2 4 4-4 4" /><path d="M2 6h1.9c1.5 0 2.9.9 3.6 2.2" /><path d="M22 18h-5.9c1.3 0 2.6-.7 3.3-1.8l.5-.8" /><path d="m18 14 4 4-4 4" />
-  </svg>
-);
-
-const IconClipboard = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-    <rect width="8" height="4" x="8" y="2" rx="1" ry="1" /><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" /><path d="M9 14l2 2 4-4" />
-  </svg>
-);
-
-const IconChevronUp = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="m18 15-6-6-6 6" />
-  </svg>
-);
-
-const IconChevronDown = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="m6 9 6 6 6-6" />
-  </svg>
-);
-
-const IconChevronRight = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="m9 18 6-6-6-6" />
-  </svg>
-);
-
-const IconBackup = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" />
-  </svg>
-);
-
-const IconRestore = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M3 12a9 9 0 1 0 9-9c-2.52 0-4.93 1-6.74 2.74L3 8" /><path d="M3 3v5h5" />
-  </svg>
-);
-
-const IconSync = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3z" />
-  </svg>
-);
-
-const IconTrash = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M3 6h18" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-  </svg>
-);
-
-const IconDownload = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7,10 12,15 17,10" /><line x1="12" y1="15" x2="12" y2="3" />
-  </svg>
-);
-
-const IconCloud = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" />
-  </svg>
-);
-
-const IconWifi = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M5 13a10 10 0 0 1 14 0" /><path d="M8.5 16.5a5 5 0 0 1 7 0" /><path d="M2 8.82a15 15 0 0 1 20 0" /><line x1="12" y1="20" x2="12" y2="20" />
-  </svg>
-);
-
-const IconSend = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" />
-  </svg>
-);
-
-const IconSave = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" /><polyline points="17,21 17,13 7,13 7,21" /><polyline points="7,3 7,8 15,8" />
-  </svg>
-);
-
 export function SettingsPage() {
-  const navigate = useNavigate();
-  const settings = useSettingsStore(state => state.settings);
-  const updateAIConfig = useSettingsStore(state => state.updateAIConfig);
-  const updateRandomConfig = useSettingsStore(state => state.updateRandomConfig);
-  const updateTodoConfig = useSettingsStore(state => state.updateTodoConfig);
-  const updateContextConfig = useSettingsStore(state => state.updateContextConfig);
-  const updatePushConfig = useSettingsStore(state => state.updatePushConfig);
-  const entries = useEntryStore(state => state.entries);
-
   // 当前选中的面板
   const [activeTab, setActiveTab] = useState<SettingsTab>('ai');
 
@@ -789,1087 +665,114 @@ export function SettingsPage() {
   const renderPanel = () => {
     switch (activeTab) {
       case 'ai':
-        return (
-          <div className="settings-panel-content">
-            <h2 className="panel-title">AI 配置</h2>
-
-            <div className="form-group">
-              <label className="form-label">API Key</label>
-              <input
-                type="password"
-                className="form-input glass"
-                value={settings.ai.apiKey}
-                onChange={e => { updateAIConfig({ apiKey: e.target.value }); markDirty('ai.apiKey'); }}
-                placeholder="sk-..."
-              />
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">API 地址</label>
-              <input
-                type="text"
-                className="form-input glass"
-                value={settings.ai.baseURL}
-                onChange={e => { updateAIConfig({ baseURL: e.target.value }); markDirty('ai.baseURL'); }}
-                placeholder="https://api.openai.com/v1"
-              />
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">模型</label>
-              {settings.ai.isDeepSeek ? (
-                <select
-                  className="form-input glass"
-                  value={settings.ai.model}
-                  onChange={e => { updateAIConfig({ model: e.target.value }); markDirty('ai.model'); }}
-                >
-                  <option value="deepseek-v4-flash">deepseek-v4-flash</option>
-                  <option value="deepseek-v4-pro">deepseek-v4-pro</option>
-                </select>
-              ) : (
-                <input
-                  type="text"
-                  className="form-input glass"
-                  value={settings.ai.model}
-                  onChange={e => { updateAIConfig({ model: e.target.value }); markDirty('ai.model'); }}
-                  placeholder="gpt-4o-mini"
-                />
-              )}
-            </div>
-
-            <div className="form-group">
-              <label className="form-checkbox">
-                <input
-                  type="checkbox"
-                  checked={settings.ai.isDeepSeek}
-                  onChange={e => {
-                    if (e.target.checked) {
-                      updateAIConfig({
-                        isDeepSeek: true,
-                        baseURL: 'https://api.deepseek.com',
-                        model: 'deepseek-v4-flash',
-                      });
-                    } else {
-                      updateAIConfig({
-                        isDeepSeek: false,
-                        baseURL: 'https://api.openai.com/v1',
-                        model: 'gpt-4o-mini',
-                      });
-                    }
-                    markDirty('ai.isDeepSeek');
-                  }}
-                />
-                <span>使用 DeepSeek 模型</span>
-              </label>
-            </div>
-
-            {settings.ai.isDeepSeek && (
-              <>
-                <div className="form-group">
-                  <label className="form-label">Temperature</label>
-                  <input
-                    type="number"
-                    className="form-input glass"
-                    value={settings.ai.deepSeekOptions.temperature}
-                    onChange={e => { updateAIConfig({
-                      deepSeekOptions: {
-                        ...settings.ai.deepSeekOptions,
-                        temperature: parseFloat(e.target.value) || 0.7,
-                      },
-                    }); markDirty('ai.deepSeekOptions.temperature'); }}
-                    min="0" max="2" step="0.1"
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Max Tokens</label>
-                  <input
-                    type="number"
-                    className="form-input glass"
-                    value={settings.ai.deepSeekOptions.maxTokens}
-                    onChange={e => { updateAIConfig({
-                      deepSeekOptions: {
-                        ...settings.ai.deepSeekOptions,
-                        maxTokens: parseInt(e.target.value) || 2000,
-                      },
-                    }); markDirty('ai.deepSeekOptions.maxTokens'); }}
-                    min="100" max="32000" step="100"
-                  />
-                </div>
-              </>
-            )}
-
-            {/* 智能标签配置 */}
-            <div className="settings-subsection-title">智能标签</div>
-            <div className="form-group">
-              <label className="form-label">最近使用标签数量</label>
-              <input
-                type="number"
-                className="form-input glass"
-                value={settings.ai.smartTag?.recentTagCount ?? 50}
-                onChange={e => { updateAIConfig({
-                  smartTag: {
-                    ...settings.ai.smartTag!,
-                    recentTagCount: parseInt(e.target.value) || 50,
-                    maxTags: settings.ai.smartTag?.maxTags ?? 6,
-                    minTags: settings.ai.smartTag?.minTags ?? 1,
-                    tagSuggestPrompt: settings.ai.smartTag?.tagSuggestPrompt || '',
-                  },
-                }); markDirty('ai.smartTag.recentTagCount'); }}
-                min="5" max="200" step="5"
-              />
-              <span className="form-hint">标签建议时发送给 AI 的最近标签数（越多越准，但耗 token）</span>
-            </div>
-            <div className="form-group">
-              <label className="form-label">最大返回标签数</label>
-              <input
-                type="number"
-                className="form-input glass"
-                value={settings.ai.smartTag?.maxTags ?? 6}
-                onChange={e => { updateAIConfig({
-                  smartTag: {
-                    ...settings.ai.smartTag!,
-                    maxTags: parseInt(e.target.value) || 6,
-                    minTags: settings.ai.smartTag?.minTags ?? 1,
-                    recentTagCount: settings.ai.smartTag?.recentTagCount ?? 50,
-                    tagSuggestPrompt: settings.ai.smartTag?.tagSuggestPrompt || '',
-                  },
-                }); markDirty('ai.smartTag.maxTags'); }}
-                min="1" max="20" step="1"
-              />
-              <span className="form-hint">AI 返回标签数量上限（默认 6）</span>
-            </div>
-            <div className="form-group">
-              <label className="form-label">最小返回标签数</label>
-              <input
-                type="number"
-                className="form-input glass"
-                value={settings.ai.smartTag?.minTags ?? 1}
-                onChange={e => { updateAIConfig({
-                  smartTag: {
-                    ...settings.ai.smartTag!,
-                    minTags: parseInt(e.target.value) || 1,
-                    maxTags: settings.ai.smartTag?.maxTags ?? 6,
-                    recentTagCount: settings.ai.smartTag?.recentTagCount ?? 50,
-                    tagSuggestPrompt: settings.ai.smartTag?.tagSuggestPrompt || '',
-                  },
-                }); markDirty('ai.smartTag.minTags'); }}
-                min="0" max="20" step="1"
-              />
-              <span className="form-hint">AI 返回标签数量下限（默认 1）</span>
-            </div>
-            {/* 标签建议提示词已移至「提示词」面板，避免重复 */}
-
-            {/* e.1: 组建议配置（提示词已移至「提示词」面板） */}
-            <div className="settings-subsection-title">智能组建议</div>
-            <div className="form-group">
-              <label className="form-label">最近条目数量</label>
-              <input
-                type="number"
-                className="form-input glass"
-                value={settings.ai.smartGroup?.recentEntryCount ?? 50}
-                onChange={e => { updateAIConfig({
-                  smartGroup: {
-                    ...settings.ai.smartGroup!,
-                    recentEntryCount: parseInt(e.target.value) || 50,
-                    groupSuggestPrompt: settings.ai.smartGroup?.groupSuggestPrompt || '',
-                  },
-                }); markDirty('ai.smartGroup.recentEntryCount'); }}
-                min="5" max="500" step="5"
-              />
-              <span className="form-hint">用于组建议的最近条目数量（默认 50）</span>
-            </div>
-            {/* 组建议提示词已移至「提示词」面板，避免重复 */}
-
-            {/* 连线建议配置 */}
-            <div className="settings-subsection-title">连线建议</div>
-            <div className="form-group">
-              <label className="form-label">最近条目数量</label>
-              <input
-                type="number"
-                className="form-input glass"
-                value={settings.ai.connectionSuggestion?.recentEntryCount ?? 100}
-                onChange={e => { updateAIConfig({
-                  connectionSuggestion: {
-                    ...settings.ai.connectionSuggestion!,
-                    recentEntryCount: parseInt(e.target.value) || 100,
-                    connectionSuggestPrompt: settings.ai.connectionSuggestion?.connectionSuggestPrompt || '',
-                  },
-                }); markDirty('ai.connectionSuggestion.recentEntryCount'); }}
-                min="10" max="1000" step="10"
-              />
-              <span className="form-hint">用于连线建议的最近条目数量（默认 100）</span>
-            </div>
-
-            {/* e.2: Chat Soul 提示词 */}
-            <div className="settings-subsection-title">Chat Soul</div>
-            <div className="form-group">
-              <label className="form-label">Chat Soul 提示词</label>
-              <textarea
-                className="form-input glass"
-                style={{ minHeight: '100px', fontFamily: 'monospace', fontSize: '12px', resize: 'vertical' }}
-                value={settings.ai.chatSoul ?? ''}
-                onChange={e => { updateAIConfig({ chatSoul: e.target.value }); markDirty('ai.chatSoul'); }}
-                placeholder="对话系统提示词，定义 AI 的角色和风格"
-                rows={5}
-              />
-              <span className="form-hint">用于定制 AI 对话时的角色性格和回复风格</span>
-            </div>
-
-            {/* f: 数据选择器配置 */}
-            <div className="settings-subsection-title">数据选择器</div>
-            <div className="form-group">
-              <label className="form-label">「最近」勾选项数量</label>
-              <input
-                type="number"
-                className="form-input glass"
-                value={settings.ai.recentPickerCount ?? 30}
-                onChange={e => { updateAIConfig({ recentPickerCount: parseInt(e.target.value) || 30 }); markDirty('ai.recentPickerCount'); }}
-                min="5" max="200" step="5"
-              />
-              <span className="form-hint">数据选择器中「最近」区域显示的条目数（默认 30）</span>
-            </div>
-
-            {/* 上下文范围配置 */}
-            <div className="settings-subsection-title">上下文范围</div>
-            <div className="form-group">
-              <label className="form-label">近期条目数量</label>
-              <input
-                type="number"
-                className="form-input glass"
-                value={settings.context.recentWindow}
-                onChange={e => { updateContextConfig({ recentWindow: Math.max(1, Math.min(200, parseInt(e.target.value) || 20)) }); markDirty('context.recentWindow'); }}
-                min="1" max="200" step="1"
-              />
-              <span className="form-hint">AI 对话时参考的最近条目数（越大上下文越丰富，但耗 token）</span>
-            </div>
-            <div className="form-group">
-              <label className="form-checkbox">
-                <input
-                  type="checkbox"
-                  checked={settings.context.enableLongTermMemory ?? false}
-                  onChange={e => { updateContextConfig({ enableLongTermMemory: e.target.checked }); markDirty('context.enableLongTermMemory'); }}
-                />
-                <span>启用长期记忆</span>
-              </label>
-              <span className="form-hint">启用后 AI 会参考更多历史条目，耗 token 更多</span>
-            </div>
-
-            {/* 主动推送配置 */}
-            <div className="settings-subsection-title">主动推送</div>
-            <div className="form-group">
-              <label className="form-checkbox">
-                <input
-                  type="checkbox"
-                  checked={settings.push?.enabled ?? false}
-                  onChange={e => { updatePushConfig({ enabled: e.target.checked }); markDirty('push.enabled'); }}
-                />
-                <span>启用主动推送</span>
-              </label>
-              <span className="form-hint">录入新条目时，AI 自动推送相关历史条目</span>
-            </div>
-            <div className="form-group">
-              <label className="form-label">相似度阈值</label>
-              <input
-                type="range"
-                className="form-input"
-                style={{ padding: 0 }}
-                value={settings.push?.similarityThreshold ?? 0.7}
-                onChange={e => { updatePushConfig({ similarityThreshold: parseFloat(e.target.value) }); markDirty('push.similarityThreshold'); }}
-                min="0.3" max="1" step="0.05"
-              />
-              <span className="form-hint">值越高要求越严格（当前: {(settings.push?.similarityThreshold ?? 0.7).toFixed(2)}）</span>
-            </div>
-          </div>
-        );
+        return <AiPanel markDirty={markDirty} />;
 
       case 'todo':
-        return (
-          <div className="settings-panel-content">
-            <h2 className="panel-title">待办配置</h2>
-
-            <div className="settings-subsection-title">倒计时</div>
-            <div className="form-group">
-              <label className="form-checkbox">
-                <input
-                  type="checkbox"
-                  checked={settings.todo?.showCountdown ?? true}
-                  onChange={e => { updateTodoConfig({ showCountdown: e.target.checked }); markDirty('todo.showCountdown'); }}
-                />
-                <span>显示倒计时条</span>
-              </label>
-            </div>
-            <div className="form-group">
-              <label className="form-label">倒计时格式</label>
-              <select
-                className="form-input glass"
-                value={settings.todo?.countdownFormat ?? 'full'}
-                onChange={e => { updateTodoConfig({ countdownFormat: e.target.value as 'full' | 'compact' | 'daysOnly' }); markDirty('todo.countdownFormat'); }}
-              >
-                <option value="full">完整格式 (天时分秒)</option>
-                <option value="compact">简洁格式 (天时分)</option>
-                <option value="daysOnly">仅天数</option>
-              </select>
-            </div>
-            <div className="form-group">
-              <label className="form-label">倒计时位置</label>
-              <select
-                className="form-input glass"
-                value={settings.todo?.countdownPosition ?? 'aboveBottomNav'}
-                onChange={e => { updateTodoConfig({ countdownPosition: e.target.value as 'aboveBottomNav' | 'pageTop' | 'floating' }); markDirty('todo.countdownPosition'); }}
-              >
-                <option value="aboveBottomNav">底栏上方</option>
-                <option value="pageTop">页面顶部</option>
-                <option value="floating">悬浮窗</option>
-              </select>
-            </div>
-
-            <div className="settings-subsection-title">其他</div>
-            <div className="form-group">
-              <label className="form-checkbox">
-                <input
-                  type="checkbox"
-                  checked={settings.todo?.confirmDelete ?? true}
-                  onChange={e => { updateTodoConfig({ confirmDelete: e.target.checked }); markDirty('todo.confirmDelete'); }}
-                />
-                <span>删除前确认</span>
-              </label>
-            </div>
-            <div className="form-group">
-              <label className="form-label">回收站保留天数</label>
-              <input
-                type="number"
-                className="form-input glass"
-                value={settings.todo?.recycleBinRetentionDays ?? 30}
-                onChange={e => { updateTodoConfig({ recycleBinRetentionDays: Math.max(1, parseInt(e.target.value) || 30) }); markDirty('todo.recycleBinRetentionDays'); }}
-                min="1" max="365" step="1"
-              />
-              <span className="form-hint">超过此天数的已删除待办将自动清除</span>
-            </div>
-
-            <div className="settings-subsection-title">高级</div>
-            <button className="settings-item glass" onClick={() => navigate('/todo/manager')}>
-              <div className="item-left">
-                <span className="item-title">待办管理器</span>
-                <span className="item-desc">时间轴视图 · 批量操作</span>
-              </div>
-              <span className="item-arrow"><IconChevronRight /></span>
-            </button>
-            <button className="settings-item glass" onClick={() => navigate('/todo/templates')}>
-              <div className="item-left">
-                <span className="item-title">模板管理</span>
-                <span className="item-desc">创建和应用待办模板</span>
-              </div>
-              <span className="item-arrow"><IconChevronRight /></span>
-            </button>
-            <button className="settings-item glass" onClick={() => navigate('/todo/recycle-bin')}>
-              <div className="item-left">
-                <span className="item-title">回收站</span>
-                <span className="item-desc">恢复或彻底删除待办</span>
-              </div>
-              <span className="item-arrow"><IconChevronRight /></span>
-            </button>
-          </div>
-        );
+        return <TodoPanel markDirty={markDirty} />;
 
       case 'random':
-        return (
-          <div className="settings-panel-content">
-            <h2 className="panel-title">随机浏览</h2>
-            <div className="form-group">
-              <label className="form-label">每屏随机卡片数</label>
-              <input
-                type="number"
-                className="form-input glass"
-                value={settings.random?.cardsPerPage ?? 7}
-                onChange={e => { updateRandomConfig({
-                  cardsPerPage: Math.max(1, Math.min(50, parseInt(e.target.value) || 7)),
-                }); markDirty('random.cardsPerPage'); }}
-                min="1" max="50" step="1"
-              />
-              <span className="form-hint">推荐 5-10 张，根据屏幕大小调整</span>
-            </div>
-            <div className="form-group">
-              <label className="form-label">图片附件展示模式</label>
-              <div className="form-radio-group">
-                <label className={`form-radio-card ${(settings.random?.attachmentDisplayMode ?? 'inline') === 'inline' ? 'active' : ''}`}>
-                  <input
-                    type="radio"
-                    name="attachmentDisplayMode"
-                    value="inline"
-                    checked={(settings.random?.attachmentDisplayMode ?? 'inline') === 'inline'}
-                    onChange={() => { updateRandomConfig({ attachmentDisplayMode: 'inline' }); markDirty('random.attachmentDisplayMode'); }}
-                  />
-                  <span className="form-radio-title">原图直接展示</span>
-                  <span className="form-radio-desc">卡片文本下方纵向堆叠图片，点击可全屏放大</span>
-                </label>
-                <label className={`form-radio-card ${(settings.random?.attachmentDisplayMode ?? 'inline') === 'badge' ? 'active' : ''}`}>
-                  <input
-                    type="radio"
-                    name="attachmentDisplayMode"
-                    value="badge"
-                    checked={(settings.random?.attachmentDisplayMode ?? 'inline') === 'badge'}
-                    onChange={() => { updateRandomConfig({ attachmentDisplayMode: 'badge' }); markDirty('random.attachmentDisplayMode'); }}
-                  />
-                  <span className="form-radio-title">仅显示附件标识</span>
-                  <span className="form-radio-desc">卡片只显示附件数量徽标，点击弹出画廊查看</span>
-                </label>
-              </div>
-              <span className="form-hint">控制随机卡片中图片附件的展示方式</span>
-            </div>
-            <div className="form-group">
-              <label className="form-label">长文本折叠字数</label>
-              <input
-                type="number"
-                className="form-input glass"
-                value={settings.random?.contentCollapseLength ?? 300}
-                onChange={e => { updateRandomConfig({
-                  contentCollapseLength: Math.max(0, Math.min(5000, parseInt(e.target.value) || 0)),
-                }); markDirty('random.contentCollapseLength'); }}
-                min="0" max="5000" step="50"
-              />
-              <span className="form-hint">超过该字数的卡片内容将折叠，点击「展开」查看全文；设为 0 表示不折叠</span>
-            </div>
-          </div>
-        );
+        return <RandomPanel markDirty={markDirty} />;
 
       case 'dataManager':
-        return (
-          <div className="settings-panel-content">
-            <h2 className="panel-title">数据管理</h2>
-            <button className="settings-item glass" onClick={() => navigate('/data-manager/tags')}>
-              <div className="item-left">
-                <span className="item-icon"><IconDatabase /></span>
-                <div>
-                  <span className="item-title">数据管理器</span>
-                  <span className="item-desc">标签 · 组 · 数据存储综合管理</span>
-                </div>
-              </div>
-              <span className="item-arrow"><IconChevronRight /></span>
-            </button>
-          </div>
-        );
+        return <DataManagerPanel />;
 
       case 'import':
         return (
-          <div className="settings-panel-content">
-            <h2 className="panel-title">数据导入</h2>
-            <button
-              className="settings-item glass"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={importing}
-            >
-              <div className="item-left">
-                <span className="item-icon"><IconUpload /></span>
-                <div>
-                  <span className="item-title">选择 JSON 文件</span>
-                  <span className="item-desc">
-                    {importing ? '导入中...' : '增量导入条目数据'}
-                  </span>
-                </div>
-              </div>
-              <span className="item-arrow"><IconChevronRight /></span>
-            </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".json,application/json"
-              style={{ display: 'none' }}
-              onChange={handleFileSelect}
-            />
-            {importResult && (
-              <div className="settings-detail glass">
-                <div className="import-result">
-                  <p>导入完成</p>
-                  <p>新增: {importResult.imported} 条 · 跳过: {importResult.skipped} 条</p>
-                  {importResult.errors.length > 0 && (
-                    <p className="import-errors">
-                      错误: {importResult.errors.join(', ')}
-                    </p>
-                  )}
-                  <button className="import-close-btn" onClick={() => setImportResult(null)}>
-                    关闭
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
+          <ImportPanel
+            importResult={importResult}
+            importing={importing}
+            fileInputRef={fileInputRef}
+            onFileSelect={handleFileSelect}
+            onCloseResult={() => setImportResult(null)}
+          />
         );
 
       case 'export':
-        return (
-          <div className="settings-panel-content">
-            <h2 className="panel-title">数据导出</h2>
-            <button className="settings-item glass" onClick={() => navigate('/export')}>
-              <div className="item-left">
-                <span className="item-icon"><IconDatabase /></span>
-                <div>
-                  <span className="item-title">导出数据</span>
-                  <span className="item-desc">{entries.length} 条记录可导出</span>
-                </div>
-              </div>
-              <span className="item-arrow"><IconChevronRight /></span>
-            </button>
-          </div>
-        );
+        return <ExportPanel />;
 
       case 'backup':
         return (
-          <div className="settings-panel-content">
-            <h2 className="panel-title">本地备份</h2>
-            <div className="form-group">
-              <button
-                className="form-reset-btn"
-                onClick={handleCreateBackup}
-                disabled={backupBusy}
-              >
-                {backupBusy ? '备份中...' : '创建备份副本'}
-              </button>
-            </div>
-            <div className="form-group">
-              <button
-                className="form-reset-btn"
-                onClick={handleExportToDownload}
-                disabled={backupBusy}
-              >
-                {backupBusy ? '导出中...' : '导出到 Download 目录'}
-              </button>
-            </div>
-
-            {backupMessage && (
-              <div className="form-hint">{backupMessage}</div>
-            )}
-
-            <div className="settings-subsection-title">备份历史</div>
-            {backups.length === 0 ? (
-              <div className="form-hint">暂无备份</div>
-            ) : (
-              <div className="backup-list">
-                {backups.map(item => (
-                  <div key={item.filename} className="backup-item">
-                    <div className="backup-item-info">
-                      <div className="backup-item-name">
-                        <span className={`backup-type-badge ${item.manifest.type}`}>
-                          {item.manifest.type === 'auto' ? '自动' : '手动'}
-                        </span>
-                        {new Date(item.manifest.timestamp).toLocaleString('zh-CN')}
-                      </div>
-                      <div className="backup-item-meta">
-                        {item.format === 'indexed' ? '索引式 · ' : ''}
-                        {item.manifest.entryCount} 条 · {item.manifest.todoCount} 待办 · {(item.size / 1024).toFixed(1)}KB
-                      </div>
-                    </div>
-                    <div className="backup-item-actions">
-                      <button
-                        className="backup-action-btn restore"
-                        onClick={() => handleRestoreFromBackup(item.filename)}
-                        disabled={restoreBusy}
-                        title="从该备份恢复"
-                      >
-                        <IconRestore />
-                      </button>
-                      <button
-                        className="backup-action-btn delete"
-                        onClick={() => handleDeleteBackup(item.filename)}
-                        title="删除"
-                      >
-                        <IconTrash />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+          <BackupPanel
+            backups={backups}
+            backupBusy={backupBusy}
+            backupMessage={backupMessage}
+            restoreBusy={restoreBusy}
+            onCreateBackup={handleCreateBackup}
+            onExportToDownload={handleExportToDownload}
+            onRestoreFromBackup={handleRestoreFromBackup}
+            onDeleteBackup={handleDeleteBackup}
+          />
         );
 
       case 'restore':
         return (
-          <div className="settings-panel-content">
-            <h2 className="panel-title">数据恢复</h2>
-            <div className="settings-subsection-title">从 zip 文件增量恢复</div>
-            <div className="form-group">
-              <button
-                className="form-reset-btn"
-                onClick={() => zipFileInputRef.current?.click()}
-                disabled={restoreBusy}
-              >
-                {restoreBusy ? '恢复中...' : '选择 zip 文件'}
-              </button>
-              <input
-                ref={zipFileInputRef}
-                type="file"
-                accept=".zip,application/zip"
-                style={{ display: 'none' }}
-                onChange={handleZipFileSelect}
-              />
-            </div>
-
-            {pendingZipFile && (
-              <div className="pending-zip-info">
-                <div className="form-hint">
-                  已选择: {pendingZipFile.file.name}
-                </div>
-                {pendingZipFile.manifest && (
-                  <div className="form-hint">
-                    备份信息: {pendingZipFile.manifest.entryCount} 条记录 · {pendingZipFile.manifest.todoCount} 条待办
-                    · {new Date(pendingZipFile.manifest.timestamp).toLocaleString('zh-CN')}
-                  </div>
-                )}
-                <div className="form-group">
-                  <button
-                    className="form-reset-btn"
-                    onClick={handleRestoreFromZip}
-                    disabled={restoreBusy}
-                  >
-                    {restoreBusy ? '恢复中...' : '开始增量恢复'}
-                  </button>
-                  <button
-                    className="form-reset-btn cancel"
-                    onClick={() => setPendingZipFile(null)}
-                    disabled={restoreBusy}
-                  >
-                    取消
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {restoreResult && (
-              <div className="restore-result">
-                <p>恢复完成</p>
-                <p>条目: 新增 {restoreResult.entriesImported} 条 · 跳过 {restoreResult.entriesSkipped} 条</p>
-                <p>待办: 新增 {restoreResult.todosImported} 条 · 跳过 {restoreResult.todosSkipped} 条</p>
-                <p>标签: 新增 {restoreResult.tagsImported} · 跳过 {restoreResult.tagsSkipped}</p>
-                <p>组: 新增 {restoreResult.groupsImported} · 跳过 {restoreResult.groupsSkipped}</p>
-                {restoreResult.errors.length > 0 && (
-                  <p className="import-errors">错误: {restoreResult.errors.join(', ')}</p>
-                )}
-                <button className="import-close-btn" onClick={() => setRestoreResult(null)}>关闭</button>
-              </div>
-            )}
-
-            <div className="form-hint">
-              💡 从副本恢复请点击「本地备份」中的对应备份项的恢复按钮
-            </div>
-          </div>
+          <RestorePanel
+            restoreBusy={restoreBusy}
+            restoreResult={restoreResult}
+            pendingZipFile={pendingZipFile}
+            zipFileInputRef={zipFileInputRef}
+            onZipFileSelect={handleZipFileSelect}
+            onRestoreFromZip={handleRestoreFromZip}
+            onCancelPending={() => setPendingZipFile(null)}
+            onCloseResult={() => setRestoreResult(null)}
+          />
         );
 
       case 'cloud':
         return (
-          <div className="settings-panel-content">
-            <h2 className="panel-title">云端备份</h2>
-            {!cloudModule ? (
-              <>
-                <div className="form-hint" style={{ marginBottom: '12px' }}>
-                  Cloudflare D1 + R2 远程备份（中转站模式）
-                </div>
-                <div className="form-group">
-                  <button
-                    className="form-reset-btn"
-                    onClick={handleLoadCloudModule}
-                    disabled={cloudModuleLoading}
-                  >
-                    {cloudModuleLoading ? '加载中...' : '初始化云端备份模块'}
-                  </button>
-                </div>
-                <div className="form-hint" style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
-                  ℹ️ 点击按钮后才会加载云端备份模块，避免影响启动速度
-                </div>
-                {cloudMessage && (
-                  <div className="form-hint" style={{ marginTop: '8px' }}>{cloudMessage}</div>
-                )}
-              </>
-            ) : (
-              <>
-                <div className="form-hint" style={{ marginBottom: '12px' }}>
-                  {lastCloudBackupTs
-                    ? `上次备份: ${new Date(lastCloudBackupTs).toLocaleString('zh-CN')}`
-                    : 'Cloudflare D1 + R2 · 中转站模式'}
-                </div>
-
-                <div className="settings-subsection-title">操作</div>
-                <div className="form-group" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                  <button
-                    className="form-reset-btn"
-                    onClick={handleTestCloud}
-                    disabled={cloudBusy}
-                  >
-                    {cloudBusy ? '测试中...' : '测试连接'}
-                  </button>
-                  <button
-                    className="form-reset-btn"
-                    onClick={handleCloudBackup}
-                    disabled={cloudBusy}
-                  >
-                    {cloudBusy ? '备份中...' : '增量备份'}
-                  </button>
-                  <button
-                    className="form-reset-btn"
-                    onClick={handleCloudRestore}
-                    disabled={cloudBusy}
-                  >
-                    {cloudBusy ? '恢复中...' : '从云端恢复'}
-                  </button>
-                </div>
-
-                {lastCloudBackupTs && (
-                  <div className="form-hint">
-                    上次备份: {new Date(lastCloudBackupTs).toLocaleString('zh-CN')}
-                  </div>
-                )}
-
-                {cloudMessage && (
-                  <div className="form-hint" style={{ whiteSpace: 'pre-wrap', marginTop: '8px' }}>
-                    {cloudMessage}
-                  </div>
-                )}
-
-                {cloudBackupHistory.length > 0 && (
-                  <>
-                    <div className="settings-subsection-title" style={{ marginTop: '16px' }}>备份历史</div>
-                    <div className="backup-list">
-                      {cloudBackupHistory.slice(0, 10).map((item: any) => (
-                        <div key={item.id} className="backup-item">
-                          <div className="backup-item-info">
-                            <div className="backup-item-name">
-                              {new Date(item.timestamp).toLocaleString('zh-CN')}
-                            </div>
-                            <div className="backup-item-meta">
-                              {item.entry_count} 条 · {item.todo_count} 待办 · v{item.app_version}
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </>
-            )}
-          </div>
+          <CloudPanel
+            moduleLoaded={!!cloudModule}
+            moduleLoading={cloudModuleLoading}
+            message={cloudMessage}
+            busy={cloudBusy}
+            lastBackupTs={lastCloudBackupTs}
+            backupHistory={cloudBackupHistory}
+            onLoadModule={handleLoadCloudModule}
+            onTestCloud={handleTestCloud}
+            onCloudBackup={handleCloudBackup}
+            onCloudRestore={handleCloudRestore}
+          />
         );
 
       case 'sync':
         return (
-          <div className="settings-panel-content">
-            <h2 className="panel-title">设备互通</h2>
-
-            {(isElectron() || nativeServerSupported) && (
-              <>
-                <div className="settings-subsection-title">接收服务</div>
-                <div className="form-group">
-                  {serverRunning ? (
-                    <button
-                      className="form-reset-btn danger"
-                      onClick={handleStopServer}
-                      disabled={serverBusy}
-                    >
-                      {serverBusy ? '停止中...' : '停止接收服务'}
-                    </button>
-                  ) : (
-                    <button
-                      className="form-reset-btn"
-                      onClick={handleStartServer}
-                      disabled={serverBusy}
-                    >
-                      {serverBusy ? '启动中...' : '启动接收服务'}
-                    </button>
-                  )}
-                </div>
-                {serverRunning && (
-                  <div className="form-hint">
-                    ✅ 接收服务运行中 · 监听 {localIp || '本机IP'}:{serverPort}
-                    <br />
-                    请告知发送方此 IP:端口
-                  </div>
-                )}
-                {!serverRunning && (
-                  <div className="form-hint">
-                    💡 按需开启，其他设备可向你发送数据。不开启时不耗电。
-                  </div>
-                )}
-              </>
-            )}
-
-            <div className="settings-subsection-title">发现设备</div>
-            <div className="form-group sync-discover-row">
-              <button
-                className="form-reset-btn"
-                onClick={handleDiscover}
-                disabled={discovering}
-              >
-                {discovering ? '搜索中...' : '搜索设备'}
-              </button>
-            </div>
-
-            <div className="sync-local-ip-row">
-              <span className="sync-local-ip-label">本机 IP:</span>
-              {localIpLoading ? (
-                <span className="sync-local-ip-value loading">获取中...</span>
-              ) : localIp ? (
-                <>
-                  <span className="sync-local-ip-value">{localIp}</span>
-                  <button
-                    type="button"
-                    className="sync-local-ip-copy"
-                    onClick={handleCopyLocalIp}
-                    title="复制本机 IP"
-                  >
-                    {localIpCopied ? '已复制' : '复制'}
-                  </button>
-                </>
-              ) : (
-                <span
-                  className="sync-local-ip-value empty"
-                  role="button"
-                  onClick={refreshLocalIp}
-                  title="点击重试"
-                >
-                  未获取到 · 点击重试
-                </span>
-              )}
-            </div>
-
-            <div className="form-group sync-manual-row">
-              <input
-                type="text"
-                className="form-input glass"
-                placeholder="IP 地址"
-                value={manualIp}
-                onChange={e => setManualIp(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') handleManualAdd(); }}
-              />
-              <input
-                type="number"
-                className="form-input glass sync-port-input"
-                placeholder="端口"
-                value={manualPort}
-                onChange={e => setManualPort(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') handleManualAdd(); }}
-              />
-              <button
-                className="form-reset-btn"
-                onClick={handleManualAdd}
-                disabled={!manualIp || manualAdding}
-                title="握手验证后添加设备"
-              >
-                {manualAdding ? '握手中...' : '连接'}
-              </button>
-            </div>
-
-            {discoveredDevices.length > 0 && (
-              <div className="sync-device-list">
-                {discoveredDevices.map(device => (
-                  <div key={device.id} className="sync-device-item">
-                    <div className="sync-device-info">
-                      <span className="sync-device-name">{device.name}</span>
-                      <span className="sync-device-meta">{device.ip}:{device.port} · {device.type === 'phone' ? '手机' : '电脑'}</span>
-                    </div>
-                    <div className="sync-device-actions">
-                      <button
-                        className="sync-action-btn"
-                        onClick={() => handleSendToDevice(device, true)}
-                        disabled={syncBusy}
-                        title="发送并导入"
-                      >
-                        发送+导入
-                      </button>
-                      <button
-                        className="sync-action-btn secondary"
-                        onClick={() => handleSendToDevice(device, false)}
-                        disabled={syncBusy}
-                        title="发送仅保存"
-                      >
-                        发送+保存
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {transferProgress && (
-              <div className="sync-progress">
-                <div className="sync-progress-bar">
-                  <div
-                    className="sync-progress-fill"
-                    style={{ width: `${transferProgress.percent}%` }}
-                  />
-                </div>
-                <div className="form-hint">
-                  {transferProgress.status === 'transferring' && `传输中 ${transferProgress.percent.toFixed(0)}%`}
-                  {transferProgress.status === 'completed' && '传输完成'}
-                  {transferProgress.status === 'failed' && `传输失败: ${transferProgress.error}`}
-                </div>
-              </div>
-            )}
-
-            {syncMessage && <div className="form-hint">{syncMessage}</div>}
-
-            <div className="settings-subsection-title">已信任设备</div>
-            {trustedDevices.length === 0 ? (
-              <div className="form-hint">暂无信任设备</div>
-            ) : (
-              <div className="sync-device-list">
-                {trustedDevices.map(device => (
-                  <div key={device.id} className="sync-device-item">
-                    <div className="sync-device-info">
-                      <span className="sync-device-name">{device.name}</span>
-                      <span className="sync-device-meta">{device.ip}:{device.port}</span>
-                    </div>
-                    <button
-                      className="sync-action-btn remove"
-                      onClick={() => handleRemoveTrusted(device.id)}
-                    >
-                      移除
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {receiveDialog && (
-              <div className="sync-receive-dialog-overlay">
-                <div className="sync-receive-dialog glass">
-                  <div className="sync-receive-title">收到数据</div>
-                  <div className="sync-receive-info">
-                    <div>来自: <strong>{receiveDialog.fromName}</strong></div>
-                    <div>文件: {receiveDialog.filename}</div>
-                    <div>大小: 约 {receiveDialog.dataSize} KB</div>
-                  </div>
-                  <div className="sync-receive-actions">
-                    <button
-                      className="form-reset-btn"
-                      onClick={() => handleReceiveAction('import')}
-                    >
-                      导入到数据库
-                    </button>
-                    <button
-                      className="form-reset-btn secondary"
-                      onClick={() => handleReceiveAction('save_only')}
-                    >
-                      仅保存副本
-                    </button>
-                    <button
-                      className="form-reset-btn cancel"
-                      onClick={() => handleReceiveAction('reject')}
-                    >
-                      拒绝
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
+          <SyncPanel
+            nativeServerSupported={nativeServerSupported}
+            serverRunning={serverRunning}
+            serverPort={serverPort}
+            serverBusy={serverBusy}
+            localIp={localIp}
+            localIpLoading={localIpLoading}
+            localIpCopied={localIpCopied}
+            manualIp={manualIp}
+            manualPort={manualPort}
+            manualAdding={manualAdding}
+            discovering={discovering}
+            syncBusy={syncBusy}
+            discoveredDevices={discoveredDevices}
+            trustedDevices={trustedDevices}
+            transferProgress={transferProgress}
+            syncMessage={syncMessage}
+            receiveDialog={receiveDialog}
+            onStartServer={handleStartServer}
+            onStopServer={handleStopServer}
+            onDiscover={handleDiscover}
+            onCopyLocalIp={handleCopyLocalIp}
+            onRefreshLocalIp={refreshLocalIp}
+            onManualIpChange={setManualIp}
+            onManualPortChange={setManualPort}
+            onManualAdd={handleManualAdd}
+            onSendToDevice={handleSendToDevice}
+            onRemoveTrusted={handleRemoveTrusted}
+            onReceiveAction={handleReceiveAction}
+          />
         );
 
       case 'prompts':
-        return (
-          <div className="settings-panel-content">
-            <h2 className="panel-title">提示词配置</h2>
-            {(['tagSuggestion', 'relationSuggestion', 'dialogueContext', 'autoLink', 'groupSuggestion', 'connectionSuggestion'] as const).map(key => (
-              <div key={key} className="form-group">
-                <label className="form-label">{PROMPT_LABELS[key]}</label>
-                <textarea
-                  className="form-input glass"
-                  style={{ minHeight: '80px', fontFamily: 'monospace', fontSize: '12px', resize: 'vertical' }}
-                  value={settings.ai.prompts[key] ?? ''}
-                  onChange={e => { updateAIConfig({
-                    prompts: {
-                      ...settings.ai.prompts,
-                      [key]: e.target.value,
-                    },
-                  }); markDirty(`ai.prompts.${key}`); }}
-                  rows={4}
-                />
-                <span className="form-hint">{PROMPT_HINTS[key]}</span>
-              </div>
-            ))}
-            <div className="form-group">
-              <button
-                className="form-reset-btn"
-                onClick={() => {
-                  if (confirm('确定重置所有提示词为默认值？')) {
-                    updateAIConfig({ prompts: DEFAULT_PROMPTS });
-                    markDirty('ai.prompts');
-                  }
-                }}
-              >
-                重置提示词为默认
-              </button>
-            </div>
-          </div>
-        );
+        return <PromptsPanel markDirty={markDirty} />;
 
       case 'glm':
-        return (
-          <div className="settings-panel-content">
-            <h2 className="panel-title">GLM 模型配置</h2>
-            <div className="form-hint" style={{ marginBottom: '12px' }}>
-              配置智谱 GLM 大模型，启用后可在 AI 功能中智能切换使用。
-            </div>
-
-            <div className="form-group">
-              <label className="form-checkbox">
-                <input
-                  type="checkbox"
-                  checked={settings.ai.glm?.enabled ?? false}
-                  onChange={e => {
-                    updateAIConfig({
-                      glm: {
-                        ...settings.ai.glm!,
-                        enabled: e.target.checked,
-                      },
-                    });
-                    markDirty('ai.glm.enabled');
-                  }}
-                />
-                <span>启用 GLM 智能切换</span>
-              </label>
-              <span className="form-hint">启用后，AI 功能会根据任务类型自动选择 GLM 或主模型</span>
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">GLM API Key</label>
-              <input
-                type="password"
-                className="form-input glass"
-                value={settings.ai.glm?.apiKey ?? ''}
-                onChange={e => {
-                  updateAIConfig({
-                    glm: {
-                      ...settings.ai.glm!,
-                      apiKey: e.target.value,
-                    },
-                  });
-                  markDirty('ai.glm.apiKey');
-                }}
-                placeholder="智谱 API Key"
-              />
-            </div>
-
-            {/* d: GLM 模型名称已移除，使用默认 glm-4-flash */}
-
-            <div className="form-group">
-              <label className="form-label">GLM API Base URL</label>
-              <input
-                type="text"
-                className="form-input glass"
-                value={settings.ai.glm?.baseURL ?? 'https://open.bigmodel.cn/api/paas/v4'}
-                onChange={e => {
-                  updateAIConfig({
-                    glm: {
-                      ...settings.ai.glm!,
-                      baseURL: e.target.value,
-                    },
-                  });
-                  markDirty('ai.glm.baseURL');
-                }}
-                placeholder="https://open.bigmodel.cn/api/paas/v4"
-              />
-              <span className="form-hint">智谱开放平台 API 地址，一般无需修改</span>
-            </div>
-          </div>
-        );
+        return <GlmPanel markDirty={markDirty} />;
 
       default:
         return null;

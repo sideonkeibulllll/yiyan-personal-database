@@ -46,6 +46,11 @@ tmp/
 temp/
 _tmp_md_backup/
 
+# One-off patch scripts & file backups (local only)
+patch_*.mjs
+*.bak
+package.json.git
+
 # Design library (local only)
 .design_library/
 
