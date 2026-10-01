@@ -72,6 +72,20 @@ class WebTodoDatabaseService implements ITodoDatabaseService {
     return options?.includeDeleted ? todos : todos.filter(t => !t.deletedAt);
   }
 
+  async getPendingTodos(): Promise<Todo[]> {
+    const todos = this.getTodosFromStorage();
+    return todos.filter(t => !t.deletedAt && t.status === 'pending');
+  }
+
+  async getPendingFolderDates(): Promise<string[]> {
+    const todos = this.getTodosFromStorage();
+    const dates = new Set<string>();
+    for (const t of todos) {
+      if (!t.deletedAt && t.status === 'pending' && t.folderDate) dates.add(t.folderDate);
+    }
+    return Array.from(dates);
+  }
+
   async getDeletedTodos(): Promise<Todo[]> {
     const todos = this.getTodosFromStorage();
     return todos.filter(t => t.deletedAt).sort((a, b) => (b.deletedAt || 0) - (a.deletedAt || 0));

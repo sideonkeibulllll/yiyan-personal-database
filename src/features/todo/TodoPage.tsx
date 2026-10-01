@@ -10,6 +10,7 @@ import { useTodoTagStore } from '@/stores/todoTagStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { getTodoDatabase } from '@/services/todoDatabase';
 import { BottomNav } from '@/components/BottomNav';
+import { applySortOrder, setSortOrder, extractIds, clearSortOrder } from '@/utils/todoSortOrder';
 import type { Todo } from '@/types';
 import './TodoPage.css';
 
@@ -90,6 +91,9 @@ function formatTime(ts?: number): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
+/** 待办日期栏目缓存键（v2.6.0：避免每次进页面全量查询） */
+const PENDING_DATES_CACHE_KEY = 'yiyan_todo_pending_dates_v1';
+
 export function TodoPage() {
   const navigate = useNavigate();
   const [selectedDate, setSelectedDate] = useState(() => {
@@ -101,9 +105,18 @@ export function TodoPage() {
   const [lastCreatedId, setLastCreatedId] = useState<string | null>(null);
   const [showAddInfo, setShowAddInfo] = useState(false);
   // 所有「未完成待办」对应的 folderDate 列表：用于动态生成日期选项
-  const [pendingFolderDates, setPendingFolderDates] = useState<string[]>([]);
+  // v2.6.0：初始值优先读 localStorage 缓存，进页面秒出；随后由 effect 校验刷新
+  const [pendingFolderDates, setPendingFolderDates] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem(PENDING_DATES_CACHE_KEY);
+      const parsed = raw ? JSON.parse(raw) : null;
+      return Array.isArray(parsed) ? parsed as string[] : [];
+    } catch {
+      return [];
+    }
+  });
 
-  const todos = useTodoStore(state => state.todos);
+  const todos = useTodoStore(state => state.dateTodos);
   const loadTodosByDate = useTodoStore(state => state.loadTodosByDate);
   const addTodo = useTodoStore(state => state.addTodo);
   const toggleDone = useTodoStore(state => state.toggleDone);
@@ -111,6 +124,13 @@ export function TodoPage() {
   const isLoading = useTodoStore(state => state.isLoading);
   const settings = useSettingsStore(state => state.settings);
   const loadTodoTags = useTodoTagStore(state => state.loadTags);
+
+  // 排序模式（长按拖拽调整顺序）
+  const [sortMode, setSortMode] = useState(false);
+  // 排序后的本地顺序（排序模式拖拽时实时更新）
+  const [sortOrder, setSortOrderState] = useState<string[]>([]);
+  const dragStateRef = useRef<{ id: string; startY: number; fromIndex: number; toIndex: number } | null>(null);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
 
   const dateOptions = useMemo(() => buildDateOptions(pendingFolderDates), [pendingFolderDates]);
   const timerRef = useRef<ReturnType<typeof setInterval>>();
@@ -122,27 +142,26 @@ export function TodoPage() {
   }, [selectedDate, loadTodosByDate, loadTodoTags]);
 
   // 加载所有未完成待办的 folderDate，用于动态生成日期选项
-  // 依赖 selectedDate：切换日期或增删待办后回到本页时会刷新
+  // v2.6.0 优化：
+  // - 走 SELECT DISTINCT 的选择性查询，只返回日期字符串（不拉整行数据）
+  // - 先读 localStorage 缓存秒出 UI，再后台校验刷新
+  // - 缓存由 App 启动 / 每日备份时校验，待办增删改时主动失效
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const db = await getTodoDatabase();
-        const all = await db.getAllTodos();
+        const dates = await db.getPendingFolderDates();
         if (cancelled) return;
-        const dates = new Set<string>();
-        for (const t of all) {
-          if (t.status === 'pending' && t.folderDate) {
-            dates.add(t.folderDate);
-          }
-        }
-        setPendingFolderDates(Array.from(dates));
+        setPendingFolderDates(dates);
+        // 写入缓存（供下次进页面秒出）
+        try { localStorage.setItem(PENDING_DATES_CACHE_KEY, JSON.stringify(dates)); } catch { /* 忽略 */ }
       } catch (err) {
         console.error('[TodoPage] load pending dates failed:', err);
       }
     })();
     return () => { cancelled = true; };
-  }, [selectedDate]);
+  }, [selectedDate, todos]);
 
   // 每秒更新倒计时
   useEffect(() => {
@@ -152,12 +171,97 @@ export function TodoPage() {
     };
   }, []);
 
-  // 排序：未完成在上，已完成沉底
-  const sortedTodos = [...todos].sort((a, b) => {
-    if (a.status === 'done' && b.status !== 'done') return 1;
-    if (a.status !== 'done' && b.status === 'done') return -1;
-    return (a.startTime || 0) - (b.startTime || 0);
-  });
+  // 排序：未完成在上，已完成沉底；同组优先按手动排序，其次按时间
+  const sortedTodos = useMemo(() => {
+    const base = [...todos].sort((a, b) => {
+      if (a.status === 'done' && b.status !== 'done') return 1;
+      if (a.status !== 'done' && b.status === 'done') return -1;
+      return (a.startTime || 0) - (b.startTime || 0);
+    });
+    // 排序模式下用本地实时顺序（拖拽时实时反映）
+    if (sortMode && sortOrder.length > 0) {
+      const idx = new Map<string, number>();
+      sortOrder.forEach((id, i) => idx.set(id, i));
+      return [...base].sort((a, b) => {
+        const ia = idx.has(a.id) ? idx.get(a.id)! : Number.MAX_SAFE_INTEGER;
+        const ib = idx.has(b.id) ? idx.get(b.id)! : Number.MAX_SAFE_INTEGER;
+        return ia - ib;
+      });
+    }
+    // 非排序模式：应用 localStorage 中已保存的手动顺序
+    return applySortOrder(selectedDate, base);
+  }, [todos, selectedDate, sortMode, sortOrder]);
+
+  // 进入排序模式时初始化本地顺序（仅依赖 sortMode，避免与 sortedTodos 形成循环覆盖）
+  const initSortOrderOnEnter = useCallback(() => {
+    const base = [...todos].sort((a, b) => {
+      if (a.status === 'done' && b.status !== 'done') return 1;
+      if (a.status !== 'done' && b.status === 'done') return -1;
+      return (a.startTime || 0) - (b.startTime || 0);
+    });
+    setSortOrderState(extractIds(applySortOrder(selectedDate, base)));
+  }, [todos, selectedDate]);
+
+  // 拖拽：pointer 事件（移动端/桌面统一）
+  // 关键：move/up 挂到 window，避免指针移出把手元素后丢失事件
+  const dragListenersRef = useRef<{ move?: (e: PointerEvent) => void; up?: (e: PointerEvent) => void }>({});
+
+  const detachDragListeners = useCallback(() => {
+    const l = dragListenersRef.current;
+    if (l.move) window.removeEventListener('pointermove', l.move);
+    if (l.up) { window.removeEventListener('pointerup', l.up); window.removeEventListener('pointercancel', l.up); }
+    dragListenersRef.current = {};
+  }, []);
+
+  const handleDragStart = useCallback((e: React.PointerEvent, id: string, index: number, itemEl: HTMLElement | null) => {
+    if (!sortMode) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    // 用真实卡片高度换算目标索引（比硬编码稳）
+    const rect = itemEl?.getBoundingClientRect();
+    const step = rect ? rect.height + 8 : 76;
+    const startY = e.clientY;
+    const total = sortedTodos.length;
+
+    dragStateRef.current = { id, startY, fromIndex: index, toIndex: index };
+    setDraggingId(id);
+
+    const onMove = (ev: PointerEvent) => {
+      const st = dragStateRef.current;
+      if (!st) return;
+      ev.preventDefault();
+      const delta = Math.round((ev.clientY - st.startY) / step);
+      const target = Math.max(0, Math.min(total - 1, st.fromIndex + delta));
+      if (target !== st.toIndex) {
+        st.toIndex = target;
+        setSortOrderState(prev => {
+          const list = [...prev];
+          const from = list.indexOf(st.id);
+          if (from === -1) return prev;
+          list.splice(from, 1);
+          list.splice(target, 0, st.id);
+          return list;
+        });
+      }
+    };
+
+    const onUp = () => {
+      dragStateRef.current = null;
+      setDraggingId(null);
+      detachDragListeners();
+      // 落位后持久化
+      setSortOrderState(prev => { setSortOrder(selectedDate, prev); return prev; });
+    };
+
+    dragListenersRef.current = { move: onMove, up: onUp };
+    window.addEventListener('pointermove', onMove, { passive: false });
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+  }, [sortMode, sortedTodos.length, selectedDate, detachDragListeners]);
+
+  // 卸载时清理监听
+  useEffect(() => () => detachDragListeners(), [detachDragListeners]);
 
   // 下拉添加新待办
   const [isPulling, setIsPulling] = useState(false);
@@ -212,7 +316,8 @@ export function TodoPage() {
             <button
               key={d.folderDate}
               className={`date-chip ${selectedDate === d.folderDate ? 'active' : ''}`}
-              onClick={() => setSelectedDate(d.folderDate)}
+              onClick={() => { if (!sortMode) setSelectedDate(d.folderDate); }}
+              disabled={sortMode}
             >
               <span className="date-label">{d.label}</span>
               <span className="date-day">{d.date.getDate()}</span>
@@ -220,8 +325,27 @@ export function TodoPage() {
           ))}
         </div>
 
+        {/* 排序模式提示条 */}
+        {sortMode && (
+          <div className="sort-mode-bar glass">
+            <span>按住左侧把手上下拖动调整顺序</span>
+            <button
+              className="sort-mode-done"
+              onClick={() => {
+                setSortMode(false);
+                setSortOrder(selectedDate, sortOrder);
+              }}
+            >
+              完成
+            </button>
+          </div>
+        )}
+
         {/* 待办列表 */}
-        <div className="todo-list" style={{ transform: `translateY(${pullDistance}px)` }}>
+        <div
+          className={`todo-list ${sortMode ? 'sort-mode' : ''}`}
+          style={{ transform: `translateY(${pullDistance}px)` }}
+        >
           {isLoading ? (
             <div className="todo-loading">加载中...</div>
           ) : sortedTodos.length > 0 ? (
@@ -231,9 +355,12 @@ export function TodoPage() {
                 todo={todo}
                 index={index}
                 now={now}
+                sortMode={sortMode}
+                isDragging={draggingId === todo.id}
                 onToggleDone={() => toggleDone(todo.id)}
                 onDelete={() => deleteTodo(todo.id)}
                 onEdit={() => navigate(`/todo/${todo.id}/edit`)}
+                onDragStart={(e) => handleDragStart(e, todo.id, index, e.currentTarget.closest('.todo-item') as HTMLElement | null)}
               />
             ))
           ) : (
@@ -247,10 +374,36 @@ export function TodoPage() {
 
       {/* 底部固定操作栏 */}
       <div className="todo-bottom-actions glass">
-        <button className="todo-import-btn glass" onClick={handleImportTemplate}>
+        <button
+          className={`todo-import-btn glass ${sortMode ? 'sort-mode-active' : ''}`}
+          onClick={() => {
+            if (sortMode) {
+              // 退出排序模式：保持当前顺序已保存
+              setSortMode(false);
+              setSortOrder(selectedDate, sortOrder);
+            } else if (sortedTodos.length > 1) {
+              initSortOrderOnEnter();
+              setSortMode(true);
+            } else {
+              clearSortOrder(selectedDate);
+            }
+          }}
+          disabled={sortMode ? false : sortedTodos.length <= 1}
+        >
+          <span>{sortMode ? '完成排序' : '调整顺序'}</span>
+        </button>
+        <button
+          className="todo-import-btn glass"
+          onClick={handleImportTemplate}
+          disabled={sortMode}
+        >
           <span>从模板导入</span>
         </button>
-        <button className="todo-import-btn glass todo-new-btn" onClick={() => navigate('/todo/new')}>
+        <button
+          className="todo-import-btn glass todo-new-btn"
+          onClick={() => navigate('/todo/new')}
+          disabled={sortMode}
+        >
           <span>新建待办</span>
         </button>
       </div>
@@ -277,12 +430,18 @@ interface TodoItemProps {
   todo: Todo;
   index: number;
   now: number;
+  sortMode?: boolean;
+  isDragging?: boolean;
   onToggleDone: () => void;
   onDelete: () => void;
   onEdit: () => void;
+  onDragStart?: (e: React.PointerEvent) => void;
 }
 
-function TodoItem({ todo, index, now, onToggleDone, onDelete, onEdit }: TodoItemProps) {
+function TodoItem({
+  todo, index, now, sortMode, isDragging,
+  onToggleDone, onDelete, onEdit, onDragStart,
+}: TodoItemProps) {
   const allTags = useTodoTagStore(state => state.tags);
   const [showMenu, setShowMenu] = useState(false);
   // 菜单 fixed 定位（相对视口）：右对齐到卡片右侧
@@ -296,21 +455,23 @@ function TodoItem({ todo, index, now, onToggleDone, onDelete, onEdit }: TodoItem
   const isSwiping = useRef(false);
   const isMouseDown = useRef(false);
 
-  // 触摸事件
+  // 触摸事件（排序模式下禁用左右滑动，避免与拖拽冲突）
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    if (sortMode) return;
     touchStartX.current = e.touches[0].clientX;
     touchStartY.current = e.touches[0].clientY;
     isSwiping.current = false;
-  }, []);
+  }, [sortMode]);
 
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    if (sortMode) return;
     const dx = e.touches[0].clientX - touchStartX.current;
     const dy = e.touches[0].clientY - touchStartY.current;
     if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 10) {
       isSwiping.current = true;
       setSwipeOffset(Math.max(-80, Math.min(80, dx)));
     }
-  }, []);
+  }, [sortMode]);
 
   const handleTouchEnd = useCallback(() => {
     if (swipeOffset <= -80) {
@@ -429,6 +590,7 @@ function TodoItem({ todo, index, now, onToggleDone, onDelete, onEdit }: TodoItem
 
   // 卡片点击：切换菜单，并计算菜单的 fixed 定位（右对齐到卡片右侧）
   const handleCardClick = useCallback(() => {
+    if (sortMode) return; // 排序模式下点击不弹菜单
     if (isSwiping.current) return;
     if (!showMenu) {
       if (itemRef.current) {
@@ -438,12 +600,12 @@ function TodoItem({ todo, index, now, onToggleDone, onDelete, onEdit }: TodoItem
       }
     }
     setShowMenu(prev => !prev);
-  }, [showMenu]);
+  }, [showMenu, sortMode]);
 
   return (
     <div
       ref={itemRef}
-      className={`todo-item ${isDone ? 'done' : ''} ${todo.isToday ? 'is-today' : ''}`}
+      className={`todo-item ${isDone ? 'done' : ''} ${todo.isToday ? 'is-today' : ''} ${sortMode ? 'sort-mode' : ''} ${isDragging ? 'dragging' : ''}`}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
@@ -456,16 +618,17 @@ function TodoItem({ todo, index, now, onToggleDone, onDelete, onEdit }: TodoItem
       style={(() => {
         // 进行中：颜色背景从右往左缩短，右侧露出暗色底
         const isOngoing = todo.startTime && todo.endTime && todo.status === 'pending' && now >= todo.startTime && now < todo.endTime;
+        const baseTransform = sortMode ? undefined : `translateX(${swipeOffset}px)`;
         if (isOngoing) {
           const pct = ((todo.endTime! - now) / (todo.endTime! - todo.startTime!)) * 100;
           return {
-            transform: `translateX(${swipeOffset}px)`,
+            transform: baseTransform,
             background: `linear-gradient(to right, ${cardColor}88 ${pct}%, var(--color-bg-elevated) ${pct}%)`,
             borderLeft: `3px solid ${cardColor}`,
           };
         }
         return {
-          transform: `translateX(${swipeOffset}px)`,
+          transform: baseTransform,
           background: `${cardColor}44`,
           borderLeft: `3px solid ${cardColor}`,
         };
@@ -473,6 +636,21 @@ function TodoItem({ todo, index, now, onToggleDone, onDelete, onEdit }: TodoItem
     >
       {/* 半透明隔膜层，确保文字可读 */}
       <div className="todo-item-overlay" />
+
+      {/* 排序模式：左侧拖拽把手 */}
+      {sortMode && (
+        <div
+          className="todo-drag-handle"
+          onPointerDown={onDragStart}
+          onClick={e => e.stopPropagation()}
+        >
+          <svg width="14" height="18" viewBox="0 0 14 18" fill="currentColor" opacity="0.55">
+            <circle cx="4" cy="4" r="1.4" /><circle cx="10" cy="4" r="1.4" />
+            <circle cx="4" cy="9" r="1.4" /><circle cx="10" cy="9" r="1.4" />
+            <circle cx="4" cy="14" r="1.4" /><circle cx="10" cy="14" r="1.4" />
+          </svg>
+        </div>
+      )}
 
       <div className="todo-item-main">
         <div className="todo-item-header">

@@ -270,6 +270,30 @@ class NativeTodoDatabaseService implements ITodoDatabaseService {
     return todos;
   }
 
+  async getPendingTodos(): Promise<Todo[]> {
+    if (!this.db) throw new Error('Database not initialized');
+    const result = await this.db.query(
+      "SELECT * FROM todos WHERE status = 'pending' AND deleted_at IS NULL ORDER BY created_at DESC"
+    );
+    const tagMap = await this.getTagRelationsMap();
+    const todos: Todo[] = [];
+    if (result.values) {
+      for (const row of result.values) {
+        todos.push(await this.rowToTodo(row, tagMap.get(row.id as string)));
+      }
+    }
+    return todos;
+  }
+
+  async getPendingFolderDates(): Promise<string[]> {
+    if (!this.db) throw new Error('Database not initialized');
+    const result = await this.db.query(
+      "SELECT DISTINCT folder_date FROM todos WHERE status = 'pending' AND deleted_at IS NULL"
+    );
+    if (!result.values) return [];
+    return result.values.map(row => row.folder_date as string).filter(Boolean);
+  }
+
   async getDeletedTodos(): Promise<Todo[]> {
     if (!this.db) throw new Error('Database not initialized');
     const result = await this.db.query('SELECT * FROM todos WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC');

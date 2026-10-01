@@ -520,7 +520,7 @@ async function pruneIndexedBackups(type: BackupType): Promise<void> {
 }
 
 /** 垃圾回收：删除没有任何清单引用的块 */
-async function gcOrphanChunks(): Promise<number> {
+export async function gcOrphanChunks(): Promise<number> {
   // 收集全部清单的引用
   const files = await readDir(BACKUP_DIR, Directory.Documents);
   const referenced = new Set<string>();

@@ -96,6 +96,16 @@ export interface ITodoDatabaseService {
   getTodosByDate(folderDate: string): Promise<Todo[]>;
   /** 获取所有未删除的待办 */
   getAllTodos(options?: { includeDeleted?: boolean }): Promise<Todo[]>;
+  /**
+   * 获取所有「未完成」待办（status='pending' 且未删除）
+   * 首页顶部卡片 / 待办页日期选项只需要这个子集，避免全量拉取
+   */
+  getPendingTodos(): Promise<Todo[]>;
+  /**
+   * 获取所有「未完成」待办涉及的 folder_date 去重列表
+   * 待办页日期栏目只需要日期字符串，无需拉回整行数据
+   */
+  getPendingFolderDates(): Promise<string[]>;
   /** 获取回收站中的待办 */
   getDeletedTodos(): Promise<Todo[]>;
   /** 搜索待办 */

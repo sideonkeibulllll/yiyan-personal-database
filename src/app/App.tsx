@@ -22,7 +22,44 @@ const TriangleAlertSvg = () => (
 let backgroundTasksStarted = false;
 
 /**
- * 后台维护任务：过期归档 + 每日自动备份
+ * 启动后延迟执行：自动备份 + 待办日期缓存校验
+ * v2.6.0：
+ * - 延后到应用进入后 60 秒才尝试，避开启动高峰（启动时用户正在操作，I/O 抢资源）
+ * - 备份本身是「数据块先写、清单最后写」的原子流程：中途失败不会留下半成品清单，
+ *   下次启动 shouldAutoBackup() 仍为 true 会重试；失败时补一次孤儿块 GC 防堆积
+ */
+function scheduleAutoBackup(): void {
+  const DELAY_MS = 60_000;
+  setTimeout(() => {
+    void (async () => {
+      try {
+        const { shouldAutoBackup, createBackup } = await import('@/services/backupService');
+        if (await shouldAutoBackup()) {
+          await createBackup('auto');
+        }
+      } catch (e) {
+        console.warn('自动备份失败:', e);
+        // 失败时回收可能残留的孤儿块（数据块已写但清单未提交）
+        try {
+          const { gcOrphanChunks } = await import('@/services/backupService');
+          await gcOrphanChunks();
+        } catch { /* 忽略 */ }
+      }
+      // 每日首次进入时校验待办日期缓存
+      try {
+        const { getTodoDatabase } = await import('@/services/todoDatabase');
+        const db = await getTodoDatabase();
+        const dates = await db.getPendingFolderDates();
+        localStorage.setItem('yiyan_todo_pending_dates_v1', JSON.stringify(dates));
+      } catch (e) {
+        console.warn('待办日期缓存校验失败:', e);
+      }
+    })();
+  }, DELAY_MS);
+}
+
+/**
+ * 后台维护任务：过期归档
  * 不阻塞界面显示，启动关键路径之外执行
  */
 async function runBackgroundTasks(): Promise<void> {
@@ -43,17 +80,8 @@ async function runBackgroundTasks(): Promise<void> {
     console.warn('过期归档检查失败:', e);
   }
 
-  // 每天首次打开时自动备份（索引式，内容去重，增量很快）
-  // 性能优化（v2.4.2）：backupService 静态引入了 jszip（约 100KB），
-  // 改为此处按需动态 import，避免把 jszip 打进首屏主包。
-  try {
-    const { shouldAutoBackup, createBackup } = await import('@/services/backupService');
-    if (await shouldAutoBackup()) {
-      await createBackup('auto');
-    }
-  } catch (e) {
-    console.warn('自动备份失败:', e);
-  }
+  // 自动备份：延后 60 秒，避开启动高峰
+  scheduleAutoBackup();
 }
 
 export function App() {

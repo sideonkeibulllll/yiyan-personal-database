@@ -222,7 +222,6 @@ export function HomePage() {
   const [pinnedUntimedId, setPinnedUntimedId] = useState<string | null>(
     () => localStorage.getItem('yiyan_input_pinned_untimed'),
   );
-  const [allTodos, setAllTodos] = useState<Todo[]>([]);
   const [now, setNow] = useState(Date.now());
 
   // 录入时待保存的图片
@@ -309,45 +308,32 @@ export function HomePage() {
     };
   }, [showToastMessage]);
 
-  // 加载所有待办 + 每秒 tick（倒计时）
-  // v2.3.0 优化：
-  // - 不再每 10 秒全量 reload（原来每 10s 拉一次全库，页面重进也有明显刷新感）
-  // - 改为：首次加载 + 订阅 todoStore.todos（应用内任何改动自动同步）
-  // - 页面重新可见时补一次刷新（覆盖后台被外部改动的极端情况）
+  // 加载待办 + 每秒 tick（倒计时）
+  // v2.6.0 优化：
+  // - 不再自己 getTodoDatabase().getAllTodos()（原来进页面查 2~3 次全量）
+  // - allTodos 直接派生自 todoStore.todos（全量待办已是权威数据，App 启动已加载）
+  // - 页面重新可见时刷新一次（覆盖后台被外部改动的极端情况）
   const loadTodoTags = useTodoTagStore(state => state.loadTags);
   const storeTodos = useTodoStore(state => state.todos);
   const loadTodos = useTodoStore(state => state.loadAllTodos);
-  const loadAllTodos = useCallback(async () => {
-    try {
-      const { getTodoDatabase } = await import('@/services/todoDatabase');
-      const db = await getTodoDatabase();
-      setAllTodos(await db.getAllTodos());
-    } catch (err) {
-      console.error('[HomePage] 加载待办失败:', err);
-    }
-  }, []);
+  const allTodos = storeTodos;
 
   useEffect(() => {
-    loadAllTodos();
+    // store 为空时才主动拉一次（冷启动/异常兜底），否则直接复用
+    if (useTodoStore.getState().todos.length === 0) loadTodos();
     loadTodoTags();
-    loadTodos();
     // 仅保留每秒 tick 用于倒计时，不再周期性全量 reload
     const timer = setInterval(() => setNow(Date.now()), 1000);
     // 页面重新可见时刷新一次（后台可能被别的页面改过）
     const onVisible = () => {
-      if (document.visibilityState === 'visible') loadAllTodos();
+      if (document.visibilityState === 'visible') useTodoStore.getState().refreshAllTodos();
     };
     document.addEventListener('visibilitychange', onVisible);
     return () => {
       clearInterval(timer);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [loadAllTodos, loadTodoTags, loadTodos]);
-
-  // 应用内待办变动 → 顶部卡片即时同步（替代原 10s 轮询）
-  useEffect(() => {
-    loadAllTodos();
-  }, [storeTodos, loadAllTodos]);
+  }, [loadTodoTags, loadTodos]);
 
   // pin 失效自动清理（timed：过期/完成/删除；untimed：完成/删除）
   useEffect(() => {

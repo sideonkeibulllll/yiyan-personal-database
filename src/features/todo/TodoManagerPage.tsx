@@ -43,7 +43,7 @@ export function TodoManagerPage() {
   const [folders, setFolders] = useState<string[]>([]);
   const [showBatchActions, setShowBatchActions] = useState(false);
 
-  const todos = useTodoStore(state => state.todos);
+  const todos = useTodoStore(state => state.dateTodos);
   const loadTodosByDate = useTodoStore(state => state.loadTodosByDate);
   const batchUpdateTime = useTodoStore(state => state.batchUpdateTime);
   const batchAddTags = useTodoStore(state => state.batchAddTags);

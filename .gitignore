@@ -30,6 +30,12 @@ Thumbs.db
 .env.local
 .env.*.local
 
+# Secret-bearing config (keys injected at build time via .env; file itself must NOT be tracked)
+src/config/cloudflare.ts
+
+# Local-only helper scripts
+_apkserve.py
+
 # Logs
 *.log
 npm-debug.log*
