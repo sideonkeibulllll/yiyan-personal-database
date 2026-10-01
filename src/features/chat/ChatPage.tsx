@@ -43,7 +43,6 @@ import {
 import { loadSessionsSync, createId, generateTitle } from './chatUtils';
 import type { ChatMessage, ChatSession, SearchSelectedResult, ThinkingEffort } from './chatTypes';
 import { streamChatCompletion } from './chatStream';
-import { exportMessagesToImage } from './chatExport';
 import { ChatSidebar } from './components/ChatSidebar';
 import { ChatHeader } from './components/ChatHeader';
 import { ChatMessageList } from './components/ChatMessageList';
@@ -235,6 +234,9 @@ export function ChatPage() {
 
     setIsExporting(true);
     try {
+      // 性能优化（v2.4.3）：chatExport 静态引入了 html2canvas（体积较大），
+      // 而它只在「导出为图片」时用到，改为点击时按需加载。
+      const { exportMessagesToImage } = await import('./chatExport');
       await exportMessagesToImage(container, selectedMsgIds);
     } catch (err) {
       console.error('导出图片失败:', err);

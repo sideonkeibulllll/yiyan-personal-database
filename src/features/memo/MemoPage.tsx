@@ -13,18 +13,32 @@
  * - **记住上次聚焦的 # 标题**：光标停在某标题下，退出时记录该标题纯文本；
  *   下次进入自动跳转回该标题位置。定位锚点可随时通过移动光标改写。
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { MemoDoc } from '@/types';
 import {
   getLastOrCreateMemo, getMemo, saveMemo, saveMemoAnchor,
   createMemo, getAllMemos, deleteMemo, setLastMemoId,
 } from '@/services/memoDatabase';
-import { MemoEditor, type MemoEditorHandle } from './components/MemoEditor';
+import type { MemoEditorHandle } from './components/MemoEditor';
 import { MemoFormatBar } from './components/MemoFormatBar';
 import { MemoOutline } from './components/MemoOutline';
 import { extractHeadings, offsetOfHeading, deriveTitle, type FormatAction } from './memoMarkdown';
 import './Memo.css';
+
+/**
+ * 懒加载编辑器（v2.4.3 性能优化）
+ *
+ * MemoEditor 静态引入了整个 CodeMirror 6 生态
+ * （@codemirror/view + state + commands + lang-markdown + language + lezer），
+ * 单独一个 chunk 就有 ~525 KB —— 但只有「备忘录页」才用得到。
+ * 改为 lazy 后，这段体积从「所有页面的公共依赖」变成「备忘录页按需加载」。
+ *
+ * 注：MemoEditorHandle 走 `import type`，类型在编译期被擦除，不会把它拉回主包。
+ */
+const MemoEditor = lazy(() =>
+  import('./components/MemoEditor').then(m => ({ default: m.MemoEditor }))
+);
 
 const SAVE_DEBOUNCE = 800;
 
@@ -291,13 +305,16 @@ export function MemoPage() {
       />
 
       {/* 3. 实时预览编辑区（单文档、无模式切换） */}
+      {/* CodeMirror 为懒加载 chunk，首次进入此页时才下载，用 Suspense 兜住加载瞬间 */}
       <div className="memo-body">
-        <MemoEditor
-          ref={editorRef}
-          value={content}
-          onChange={handleChange}
-          onAnchorChange={handleAnchorChange}
-        />
+        <Suspense fallback={<div className="memo-editor-loading">编辑器加载中…</div>}>
+          <MemoEditor
+            ref={editorRef}
+            value={content}
+            onChange={handleChange}
+            onAnchorChange={handleAnchorChange}
+          />
+        </Suspense>
       </div>
 
       {/* 标题大纲抽屉 */}

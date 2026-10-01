@@ -59,7 +59,7 @@ async function runBackgroundTasks(): Promise<void> {
 export function App() {
   const [isReady, setIsReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const loadEntries = useEntryStore(state => state.loadEntries);
+  const loadEntriesProgressive = useEntryStore(state => state.loadEntriesProgressive);
   const loadTags = useTagStore(state => state.loadTags);
   const loadSettings = useSettingsStore(state => state.loadSettings);
   const loadAllTodos = useTodoStore(state => state.loadAllTodos);
@@ -67,22 +67,23 @@ export function App() {
   useEffect(() => {
     const init = async () => {
       try {
-        // 两个数据库并行初始化
+        // ===== 启动性能优化（v2.4.3）=====
+        // 关键认知：用户看到的「转圈」时长 = 到这里 setIsReady(true) 的等待。
+        // 因此关键路径只保留「真正渲染界面所必需」的最小集合：
+        //   ① 两个数据库连接（并行）
+        //   ② settings —— 决定主题/配置，缺了界面会闪
+        //   ③ tags     —— 首页 TagSelector 直接渲染
+        // entries / todos 这类大数据量内容一律推迟到 setIsReady 之后。
         await Promise.all([getDatabase(), getTodoDatabase()]);
-
-        // ===== 启动性能优化（v2.4.2）=====
-        // 原实现：await Promise.all([4 个 store 全量加载]) 之后才撤 Loading，
-        // 数据量一大就要空等「条目全表 + 待办全表 + 标签关联」。
-        // 现在拆成两段：
-        //   ① 轻量关键数据（settings / tags）→ 决定「能否渲染界面」
-        //   ② 重量业务数据（entries / todos）→ 后台填充，首屏骨架立即显示
         await Promise.all([loadSettings(), loadTags()]);
 
-        // 界面就绪 —— 立即放行到首页骨架
+        // 界面就绪 —— 立即放行
         setIsReady(true);
 
         // 重量数据与维护任务全部移出关键路径
-        Promise.all([loadEntries(), loadAllTodos()]).catch(e =>
+        // v2.4.3：entries 走「渐进式加载」——先拿最近 50 条让页面立刻有内容，
+        //         剩余全量在后台静默补齐；todos 全量并行。
+        Promise.all([loadEntriesProgressive(50), loadAllTodos()]).catch(e =>
           console.warn('后台数据加载失败:', e)
         );
 
@@ -98,7 +99,7 @@ export function App() {
     };
 
     init();
-  }, [loadEntries, loadTags, loadSettings, loadAllTodos]);
+  }, [loadEntriesProgressive, loadTags, loadSettings, loadAllTodos]);
 
   if (!isReady) {
     return <Loading />;
