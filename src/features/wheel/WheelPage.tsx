@@ -85,7 +85,11 @@ export function WheelPage() {
     if (!wheel || spinning || options.length < 2) return;
     if (wheel.soundEnabled) void playSpinStart();
 
-    const picked = pickWeightedIndex(options);
+    // 上一次抽中的索引（用最近一条历史反查，避免连击）
+    const lastText = wheel.history[0]?.text;
+    const lastIndex = lastText ? options.findIndex(o => o.name === lastText) : -1;
+
+    const picked = pickWeightedIndex(options, lastIndex >= 0 ? lastIndex : null);
     const target = computeTargetRotation(rotation, options, picked, 5);
     const pickedName = options[picked].name;
 

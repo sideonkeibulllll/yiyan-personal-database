@@ -179,9 +179,36 @@ export function WheelCanvas({
 }
 
 /**
- * 按权重随机抽出索引
+ * 按权重随机抽出索引。
+ *
+ * 为避免"连续抽到同一个"这种观感很差的巧合（概率上虽然正常，
+ * 但用户会觉得转盘坏了），这里对**上一次抽中的项**临时降权：
+ * 若选项数 ≥ 3，则上一次的结果权重乘以 REPEAT_PENALTY（0.25），
+ * 大幅降低连击概率，同时不破坏整体加权分布。
+ *
+ * - 选项数 < 3 时不干预（否则容易变成硬性轮换，反而假）
+ * - 传入 lastIndex 才会生效；不传则退化为标准加权随机
  */
-export function pickWeightedIndex(options: WheelOption[]): number {
+const REPEAT_PENALTY = 0.25;
+
+export function pickWeightedIndex(options: WheelOption[], lastIndex?: number | null): number {
+  if (options.length === 0) return -1;
+  if (options.length === 1) return 0;
+
+  // 选项太少时不做连击干预
+  if (options.length >= 3 && lastIndex != null && lastIndex >= 0 && lastIndex < options.length) {
+    const weights = options.map((o, i) =>
+      i === lastIndex ? Math.max(1, o.weight) * REPEAT_PENALTY : Math.max(1, o.weight),
+    );
+    const total = weights.reduce((s, w) => s + w, 0);
+    let r = Math.random() * total;
+    for (let i = 0; i < weights.length; i++) {
+      r -= weights[i];
+      if (r <= 0) return i;
+    }
+    return weights.length - 1;
+  }
+
   const total = options.reduce((s, o) => s + Math.max(1, o.weight), 0);
   let r = Math.random() * total;
   for (let i = 0; i < options.length; i++) {
@@ -193,8 +220,17 @@ export function pickWeightedIndex(options: WheelOption[]): number {
 
 /**
  * 计算目标旋转角度：
- * 先按权重选出索引，再反推该扇区中心应转到"顶部指针"位置的角度。
- * offset = ((-90 - midDeg) % 360 + 360) % 360
+ * 先按权重选出索引，再反推该扇区中心应转到「顶部指针」位置的角度。
+ *
+ * ⚠️ 坐标系约定（务必与 polar() 保持一致）：
+ *   本项目 polar(cx,cy,r,deg) 的 deg=0 指向**正上方**、顺时针为正。
+ *   因此扇区 i 的中心方位是 midDeg = 累计角 + 半个扇区宽（0=正上方）。
+ *   转盘顺时针旋转 rot 度后，该中心方位变为 (midDeg + rot)。
+ *   要让它落在正上方（0°），需 midDeg + rot ≡ 0 (mod 360)
+ *   → rot ≡ -midDeg (mod 360)
+ *
+ *   （历史 bug：曾写成 offset = (-90 - midDeg)，多减了 90°，
+ *     导致指针在正上方、结果却永远显示正左边的扇区。）
  */
 export function computeTargetRotation(
   current: number,
@@ -207,7 +243,8 @@ export function computeTargetRotation(
   for (let i = 0; i < pickedIndex; i++) acc += (Math.max(1, options[i].weight) / total) * 360;
   const span = (Math.max(1, options[pickedIndex].weight) / total) * 360;
   const midDeg = acc + span / 2;
-  const offset = ((-90 - midDeg) % 360 + 360) % 360;
+  // 让扇区中心转到正上方
+  const offset = ((-midDeg) % 360 + 360) % 360;
   // 基准角取当前角度的下一个整圈起点，保证始终顺时针追加
   const base = Math.ceil(current / 360) * 360;
   return base + extraTurns * 360 + offset;
