@@ -367,7 +367,11 @@ export function RandomPage() {
   const handleRefresh = useCallback(() => {
     setIsLoading(true);
     getRandomEntries();
+    // 内部滚动容器 + 页面级滚动双重复位，确保任何一层滚动了都能回到顶部
     cardsStackRef.current?.scrollTo({ top: 0 });
+    window.scrollTo({ top: 0 });
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
   }, [getRandomEntries]);
 
   // 筛选变更
