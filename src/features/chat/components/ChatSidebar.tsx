@@ -5,7 +5,7 @@
  */
 import { useNavigate } from 'react-router-dom';
 import { IconPlus, IconEdit, IconCopy, IconTrash, IconClose, IconExit } from '@/components/icons';
-import { MODEL_OPTIONS, formatDate } from '../chatUtils';
+import { formatDate } from '../chatUtils';
 import type { ChatSession } from '../chatTypes';
 
 interface ChatSidebarProps {
@@ -13,6 +13,8 @@ interface ChatSidebarProps {
   currentSessionId: string | null;
   sidebarOpen: boolean;
   isMobile: boolean;
+  /** 可选模型列表（v2.5.0：由父组件按当前提供商动态生成） */
+  modelOptions: Array<{ value: string; label: string }>;
   renamingId: string | null;
   renameValue: string;
   onRenameValueChange: (value: string) => void;
@@ -31,6 +33,7 @@ export function ChatSidebar({
   currentSessionId,
   sidebarOpen,
   isMobile,
+  modelOptions,
   renamingId,
   renameValue,
   onRenameValueChange,
@@ -84,7 +87,7 @@ export function ChatSidebar({
                     <span className="history-item-title">{session.title}</span>
                     <span className="history-item-meta">
                       {session.messages.length} 条 · {formatDate(session.updatedAt)}
-                      {session.model && <span className="history-item-model"> · {MODEL_OPTIONS.find(m => m.value === session.model)?.label || session.model}</span>}
+                      {session.model && <span className="history-item-model"> · {modelOptions.find(m => m.value === session.model)?.label || session.model}</span>}
                     </span>
                   </div>
                   <div className="history-item-actions">

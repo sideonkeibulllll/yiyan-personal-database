@@ -15,9 +15,10 @@ export function GlmPanel({ markDirty }: GlmPanelProps) {
 
   return (
     <div className="settings-panel-content">
-      <h2 className="panel-title">GLM 模型配置</h2>
+      <h2 className="panel-title">GLM 免费模型池</h2>
       <div className="form-hint" style={{ marginBottom: '12px' }}>
-        配置智谱 GLM 大模型，启用后可在 AI 功能中智能切换使用。
+        启用后，标签建议、分组建议、连线分析等<strong>简单任务</strong>会自动使用智谱的免费模型，
+        按顺序轮询请求以分摊配额，<strong>不消耗你的付费额度</strong>。对话（Chat）仍使用上方设置的主模型。
       </div>
 
       <div className="form-group">
@@ -35,9 +36,9 @@ export function GlmPanel({ markDirty }: GlmPanelProps) {
               markDirty('ai.glm.enabled');
             }}
           />
-          <span>启用 GLM 智能切换</span>
+          <span>启用 GLM 免费模型池</span>
         </label>
-        <span className="form-hint">启用后，AI 功能会根据任务类型自动选择 GLM 或主模型</span>
+        <span className="form-hint">开启后无需手动选模型，系统会自动在免费模型间轮询</span>
       </div>
 
       <div className="form-group">
@@ -59,7 +60,7 @@ export function GlmPanel({ markDirty }: GlmPanelProps) {
         />
       </div>
 
-      {/* d: GLM 模型名称已移除，使用默认 glm-4-flash */}
+      {/* 模型名不暴露给用户：由 GLM_FREE_MODEL_POOL 自动轮询 */}
 
       <div className="form-group">
         <label className="form-label">GLM API Base URL</label>

@@ -4,7 +4,6 @@
  * 状态与业务逻辑由父组件 ChatPage 持有，本组件只负责展示。
  */
 import { IconMenu, IconChevronDown, IconTool, IconShare, IconTrash, IconClose } from '@/components/icons';
-import { MODEL_OPTIONS } from '../chatUtils';
 
 interface BalanceInfo {
   currentBalance: number | null;
@@ -18,6 +17,8 @@ interface ChatHeaderProps {
   title: string;
   currentSessionModel: string;
   currentModel: string;
+  /** 可选模型列表（v2.5.0：由父组件按当前提供商动态生成） */
+  modelOptions: Array<{ value: string; label: string }>;
   modelPickerOpen: boolean;
   onToggleModelPicker: () => void;
   onSelectModel: (model: string) => void;
@@ -41,6 +42,7 @@ export function ChatHeader({
   title,
   currentSessionModel,
   currentModel,
+  modelOptions,
   modelPickerOpen,
   onToggleModelPicker,
   onSelectModel,
@@ -57,7 +59,7 @@ export function ChatHeader({
   onClearMessages,
   onExportSelected,
 }: ChatHeaderProps) {
-  const currentModelLabel = MODEL_OPTIONS.find(m => m.value === currentSessionModel)?.label || currentModel;
+  const currentModelLabel = modelOptions.find(m => m.value === currentSessionModel)?.label || currentModel;
 
   return (
     <header className="chat-header">
@@ -77,7 +79,7 @@ export function ChatHeader({
         </button>
         {modelPickerOpen && (
           <div className="model-picker-dropdown">
-            {MODEL_OPTIONS.map(opt => (
+            {modelOptions.map(opt => (
               <div
                 key={opt.value || 'default'}
                 className={`model-option ${currentSessionModel === opt.value ? 'active' : ''}`}

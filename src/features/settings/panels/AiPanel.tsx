@@ -4,6 +4,8 @@
  * settings 数据在 zustand store 中，面板直接订阅，行为与原先一致。
  */
 import { useSettingsStore } from '@/stores/settingsStore';
+import type { AIProviderId, ProviderEntry } from '@/types';
+import { AI_PROVIDER_ORDER, PROVIDER_PRESETS, getProviderPreset } from '@/types';
 
 interface AiPanelProps {
   markDirty: (field: string) => void;
@@ -15,18 +17,75 @@ export function AiPanel({ markDirty }: AiPanelProps) {
   const updateContextConfig = useSettingsStore(state => state.updateContextConfig);
   const updatePushConfig = useSettingsStore(state => state.updatePushConfig);
 
+  const providerId: AIProviderId = settings.ai.provider || (settings.ai.isDeepSeek ? 'deepseek' : 'openai');
+  const preset = getProviderPreset(providerId);
+  const entry: ProviderEntry = settings.ai.providers?.[providerId] ?? {
+    apiKey: settings.ai.apiKey,
+    baseURL: settings.ai.baseURL,
+    model: settings.ai.model,
+    models: preset.models,
+  };
+
+  /** 更新当前提供商的某个字段（保持 providers 结构与扁平字段同步） */
+  const patchProvider = (patch: Partial<ProviderEntry>) => {
+    const next: ProviderEntry = { ...entry, ...patch };
+    updateAIConfig({
+      providers: { ...settings.ai.providers!, [providerId]: next },
+      // 扁平字段同步，兼容未迁移的旧读取路径
+      apiKey: next.apiKey,
+      baseURL: next.baseURL,
+      model: next.model,
+      isDeepSeek: providerId === 'deepseek',
+    });
+  };
+
+  /** 切换到另一个提供商：自动填入该提供商的已存配置（无则用预设默认值） */
+  const switchProvider = (id: AIProviderId) => {
+    if (id === providerId) return;
+    const p = PROVIDER_PRESETS[id];
+    const target = settings.ai.providers?.[id] ?? {
+      apiKey: '',
+      baseURL: p.baseURL,
+      model: p.defaultModel,
+      models: [...p.models],
+    };
+    updateAIConfig({
+      provider: id,
+      providers: settings.ai.providers,
+      apiKey: target.apiKey,
+      baseURL: target.baseURL,
+      model: target.model,
+      isDeepSeek: id === 'deepseek',
+    });
+    markDirty('ai.provider');
+  };
+
   return (
     <div className="settings-panel-content">
       <h2 className="panel-title">AI 配置</h2>
+
+      <div className="form-group">
+        <label className="form-label">AI 提供商</label>
+        <select
+          className="form-input glass"
+          value={providerId}
+          onChange={e => switchProvider(e.target.value as AIProviderId)}
+        >
+          {AI_PROVIDER_ORDER.map(id => (
+            <option key={id} value={id}>{PROVIDER_PRESETS[id].label}</option>
+          ))}
+        </select>
+        <span className="form-hint">每个提供商的配置独立保存，切换不会互相影响</span>
+      </div>
 
       <div className="form-group">
         <label className="form-label">API Key</label>
         <input
           type="password"
           className="form-input glass"
-          value={settings.ai.apiKey}
-          onChange={e => { updateAIConfig({ apiKey: e.target.value }); markDirty('ai.apiKey'); }}
-          placeholder="sk-..."
+          value={entry.apiKey}
+          onChange={e => { patchProvider({ apiKey: e.target.value }); markDirty('ai.providers'); }}
+          placeholder={preset.keyPlaceholder}
         />
       </div>
 
@@ -35,61 +94,31 @@ export function AiPanel({ markDirty }: AiPanelProps) {
         <input
           type="text"
           className="form-input glass"
-          value={settings.ai.baseURL}
-          onChange={e => { updateAIConfig({ baseURL: e.target.value }); markDirty('ai.baseURL'); }}
-          placeholder="https://api.openai.com/v1"
+          value={entry.baseURL}
+          onChange={e => { patchProvider({ baseURL: e.target.value }); markDirty('ai.providers'); }}
+          placeholder={preset.baseURL}
         />
       </div>
 
       <div className="form-group">
         <label className="form-label">模型</label>
-        {settings.ai.isDeepSeek ? (
-          <select
-            className="form-input glass"
-            value={settings.ai.model}
-            onChange={e => { updateAIConfig({ model: e.target.value }); markDirty('ai.model'); }}
-          >
-            <option value="deepseek-v4-flash">deepseek-v4-flash</option>
-            <option value="deepseek-v4-pro">deepseek-v4-pro</option>
-          </select>
-        ) : (
-          <input
-            type="text"
-            className="form-input glass"
-            value={settings.ai.model}
-            onChange={e => { updateAIConfig({ model: e.target.value }); markDirty('ai.model'); }}
-            placeholder="gpt-4o-mini"
-          />
-        )}
+        <select
+          className="form-input glass"
+          value={entry.model}
+          onChange={e => { patchProvider({ model: e.target.value }); markDirty('ai.providers'); }}
+        >
+          {/* 若当前模型不在候选里（历史手填值），补一个选项避免它被吞掉 */}
+          {!entry.models.includes(entry.model) && entry.model && (
+            <option value={entry.model}>{entry.model}</option>
+          )}
+          {entry.models.map(m => (
+            <option key={m} value={m}>{m}</option>
+          ))}
+        </select>
+        <span className="form-hint">选择该提供商下要使用的模型</span>
       </div>
 
-      <div className="form-group">
-        <label className="form-checkbox">
-          <input
-            type="checkbox"
-            checked={settings.ai.isDeepSeek}
-            onChange={e => {
-              if (e.target.checked) {
-                updateAIConfig({
-                  isDeepSeek: true,
-                  baseURL: 'https://api.deepseek.com',
-                  model: 'deepseek-v4-flash',
-                });
-              } else {
-                updateAIConfig({
-                  isDeepSeek: false,
-                  baseURL: 'https://api.openai.com/v1',
-                  model: 'gpt-4o-mini',
-                });
-              }
-              markDirty('ai.isDeepSeek');
-            }}
-          />
-          <span>使用 DeepSeek 模型</span>
-        </label>
-      </div>
-
-      {settings.ai.isDeepSeek && (
+      {providerId === 'deepseek' && (
         <>
           <div className="form-group">
             <label className="form-label">Temperature</label>

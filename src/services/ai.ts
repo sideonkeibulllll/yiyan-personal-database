@@ -8,9 +8,20 @@
  * - e.2: chatSoul 系统提示注入
  */
 import type { AIConfig, PromptConfig, GLMConfig } from '@/types';
+import { GLM_FREE_MODEL_POOL } from '@/types';
+
+/** 解析后的生效请求参数 */
+interface ResolvedEndpoint {
+  model: string;
+  baseURL: string;
+  apiKey: string;
+}
 
 class AIService {
   private config: AIConfig | null = null;
+
+  /** GLM 免费池轮询游标（进程内，跨调用递增） */
+  private glmPoolCursor = 0;
 
   /**
    * 设置 AI 配置
@@ -27,33 +38,65 @@ class AIService {
   }
 
   /**
-   * e.4: 获取智能切换的模型配置
-   * 非 chat 场景下，如果 GLM 启用，智能切换到 GLM 模型
+   * 取当前激活的付费提供商配置。
+   *
+   * 优先读 providers[provider]，缺失时回落到旧扁平字段（apiKey/baseURL/model），
+   * 保证未迁移的老配置也能工作。
    */
-  getSmartModel(): { model: string; baseURL: string; apiKey: string } {
-    if (!this.config) {
+  getActiveProvider(): ResolvedEndpoint {
+    const cfg = this.config;
+    if (!cfg) {
       return { model: 'deepseek-v4-flash', baseURL: 'https://api.deepseek.com', apiKey: '' };
     }
 
-    // e.4: 如果 GLM 启用，非 chat 场景智能切换
-    if (this.config.glm?.enabled && this.config.glm.apiKey) {
+    const providerId = cfg.provider || (cfg.isDeepSeek ? 'deepseek' : 'openai');
+    const entry = cfg.providers?.[providerId];
+
+    return {
+      model: entry?.model || cfg.model || 'deepseek-v4-flash',
+      baseURL: entry?.baseURL || cfg.baseURL || 'https://api.deepseek.com',
+      apiKey: entry?.apiKey || cfg.apiKey || '',
+    };
+  }
+
+  /**
+   * 从 GLM 免费模型池按轮询取下一个模型。
+   * 池中每个模型轮转使用，分摊免费配额。
+   */
+  private nextGlmModel(): string {
+    const pool = GLM_FREE_MODEL_POOL;
+    const model = pool[this.glmPoolCursor % pool.length];
+    this.glmPoolCursor = (this.glmPoolCursor + 1) % pool.length;
+    return model;
+  }
+
+  /**
+   * e.4 / v2.5.0: 获取非 chat 场景使用的配置。
+   *
+   * GLM 启用且配了 Key 时，改用 GLM 免费模型池（自动轮询），
+   * 否则回落到当前激活的付费提供商。
+   */
+  getSmartModel(): ResolvedEndpoint {
+    const cfg = this.config;
+    if (!cfg) {
+      return { model: 'deepseek-v4-flash', baseURL: 'https://api.deepseek.com', apiKey: '' };
+    }
+
+    if (cfg.glm?.enabled && cfg.glm.apiKey) {
       return {
-        model: this.config.glm.model || 'glm-4-flash',
-        baseURL: this.config.glm.baseURL || 'https://open.bigmodel.cn/api/paas/v4',
-        apiKey: this.config.glm.apiKey,
+        model: this.nextGlmModel(),
+        baseURL: cfg.glm.baseURL || 'https://open.bigmodel.cn/api/paas/v4',
+        apiKey: cfg.glm.apiKey,
       };
     }
 
-    return {
-      model: this.config.model || 'deepseek-v4-flash',
-      baseURL: this.config.baseURL,
-      apiKey: this.config.apiKey,
-    };
+    return this.getActiveProvider();
   }
 
   /**
    * 发送聊天请求
    * e.4: 支持智能模型切换（非 chat 场景）
+   * v2.5.0: 支持多提供商（provider）解析
    */
   async chat(options: {
     systemPrompt: string;
@@ -63,7 +106,8 @@ class AIService {
     /** 是否为 chat 场景（false 时启用 GLM 智能切换） */
     isChat?: boolean;
   }): Promise<string> {
-    if (!this.config?.apiKey) {
+    const active = this.getActiveProvider();
+    if (!active.apiKey) {
       throw new Error('AI API Key 未配置');
     }
 
@@ -73,19 +117,22 @@ class AIService {
     let apiKey: string;
 
     if (options.isChat) {
-      // chat 场景用主配置
-      model = this.config.model || 'deepseek-v4-flash';
-      baseURL = this.config.baseURL;
-      apiKey = this.config.apiKey;
+      // chat 场景用当前激活的付费提供商
+      model = active.model;
+      baseURL = active.baseURL;
+      apiKey = active.apiKey;
     } else {
-      // 非 chat 场景智能切换
+      // 非 chat 场景智能切换（GLM 免费池优先）
       const smart = this.getSmartModel();
       model = smart.model;
       baseURL = smart.baseURL;
       apiKey = smart.apiKey;
     }
 
-    const isDeepSeek = this.config.isDeepSeek;
+    // DeepSeek 专属参数仅在「DeepSeek 官方提供商」下生效
+    const isDeepSeek = (this.config?.provider
+      ? this.config.provider === 'deepseek'
+      : this.config?.isDeepSeek) === true;
 
     const body: Record<string, unknown> = {
       model,
@@ -93,12 +140,12 @@ class AIService {
         { role: 'system', content: options.systemPrompt },
         { role: 'user', content: options.userMessage },
       ],
-      temperature: options.temperature ?? (isDeepSeek ? 0.7 : 0.7),
-      max_tokens: options.maxTokens ?? (isDeepSeek ? 2000 : 2000),
+      temperature: options.temperature ?? 0.7,
+      max_tokens: options.maxTokens ?? 2000,
     };
 
     // DeepSeek 专属选项
-    if (isDeepSeek && this.config.deepSeekOptions) {
+    if (isDeepSeek && this.config?.deepSeekOptions) {
       if (this.config.deepSeekOptions.temperature !== undefined) {
         body.temperature = this.config.deepSeekOptions.temperature;
       }
@@ -154,14 +201,15 @@ class AIService {
     recentTags: string[],
     customPrompt?: string,
   ): Promise<string[]> {
-    if (!this.config?.apiKey) {
+    if (!this.getActiveProvider().apiKey && !this.config?.glm?.apiKey) {
       throw new Error('AI API Key 未配置');
     }
+    const config = this.config!;
 
-    const maxTags = this.config.smartTag?.maxTags ?? 6;
-    const minTags = this.config.smartTag?.minTags ?? 1;
+    const maxTags = config.smartTag?.maxTags ?? 6;
+    const minTags = config.smartTag?.minTags ?? 1;
 
-    const promptTemplate = customPrompt || this.config.smartTag?.tagSuggestPrompt ||
+    const promptTemplate = customPrompt || config.smartTag?.tagSuggestPrompt ||
       `你是一个标签建议助手。请分析以下文本内容，从用户最近使用过的标签中选出 ${minTags}-${maxTags} 个最合适的标签。
 
 重要规则：
@@ -221,12 +269,13 @@ class AIService {
     existingGroups: string[],
     recentEntries?: string[],
   ): Promise<string[]> {
-    if (!this.config?.apiKey) {
+    if (!this.getActiveProvider().apiKey && !this.config?.glm?.apiKey) {
       throw new Error('AI API Key 未配置');
     }
+    const config = this.config!;
 
-    const promptTemplate = this.config.smartGroup?.groupSuggestPrompt ||
-      this.config.prompts.groupSuggestion ||
+    const promptTemplate = config.smartGroup?.groupSuggestPrompt ||
+      config.prompts.groupSuggestion ||
       `你是一个分组建议助手。请分析以下条目内容，从已有的分组中选出 1-3 个合适的分组。
 
 重要规则：
@@ -269,12 +318,13 @@ class AIService {
   async suggestConnections(
     entries: { id: string; content: string }[],
   ): Promise<{ sourceId: string; targetId: string; description: string }[]> {
-    if (!this.config?.apiKey) {
+    if (!this.getActiveProvider().apiKey && !this.config?.glm?.apiKey) {
       throw new Error('AI API Key 未配置');
     }
+    const config = this.config!;
 
-    const promptTemplate = this.config.connectionSuggestion?.connectionSuggestPrompt ||
-      this.config.prompts.connectionSuggestion ||
+    const promptTemplate = config.connectionSuggestion?.connectionSuggestPrompt ||
+      config.prompts.connectionSuggestion ||
       `你是一个知识关联发现助手。请分析以下条目，找出可能有关联的条目对。
 
 要求：

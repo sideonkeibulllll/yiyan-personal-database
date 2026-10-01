@@ -18,7 +18,7 @@
  * - chatTypes / chatUtils / chatStream / chatExport：类型、工具函数、流式请求、图片导出
  */
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useSettingsStore } from '@/stores/settingsStore';
 import {
@@ -34,13 +34,13 @@ import { getDatabase } from '@/services/database';
 import { getTodoDatabase } from '@/services/todoDatabase';
 import { EntryPickerPanel } from '@/components/EntryPickerPanel';
 import { IconBack } from '@/components/icons';
-import type { Entry, Todo } from '@/types';
+import type { Entry, Todo, AIProviderId } from '@/types';
 import {
   loadChatSessions,
   saveChatSession as saveSessionDb,
   deleteChatSession as deleteSessionDb,
 } from '@/services/chatSessionService';
-import { loadSessionsSync, createId, generateTitle } from './chatUtils';
+import { loadSessionsSync, createId, generateTitle, buildModelOptions } from './chatUtils';
 import type { ChatMessage, ChatSession, SearchSelectedResult, ThinkingEffort } from './chatTypes';
 import { streamChatCompletion } from './chatStream';
 import { ChatSidebar } from './components/ChatSidebar';
@@ -170,16 +170,28 @@ export function ChatPage() {
   const currentSession = sessions.find(s => s.id === currentSessionId) || null;
   const messages = currentSession?.messages ?? [];
   const currentModel = currentSession?.model || settings.ai.model || 'deepseek-v4-flash';
+
+  // v2.5.0: 当前激活的付费提供商（providers[provider] 优先，回落扁平字段）
+  const activeProviderId: AIProviderId = settings.ai.provider
+    || (settings.ai.isDeepSeek ? 'deepseek' : 'openai');
+  const activeProvider = settings.ai.providers?.[activeProviderId];
+  const providerModel = activeProvider?.model || settings.ai.model || 'deepseek-v4-flash';
+  const providerBaseURL = activeProvider?.baseURL || settings.ai.baseURL || 'https://api.deepseek.com';
+  const providerAPIKey = activeProvider?.apiKey || settings.ai.apiKey || '';
+
   // e.4: 智能GLM处理
   const effectiveModel = currentModel === '__glm_smart__' && settings.ai.glm?.enabled
     ? (settings.ai.glm.model || 'glm-4-flash')
-    : currentModel;
+    : (currentModel === '' || currentModel === providerModel ? providerModel : currentModel);
   const effectiveBaseURL = currentModel === '__glm_smart__' && settings.ai.glm?.enabled
     ? (settings.ai.glm.baseURL || 'https://open.bigmodel.cn/api/paas/v4')
-    : (settings.ai.baseURL || 'https://api.deepseek.com');
+    : providerBaseURL;
   const effectiveAPIKey = currentModel === '__glm_smart__' && settings.ai.glm?.enabled
     ? (settings.ai.glm.apiKey || '')
-    : (settings.ai.apiKey || '');
+    : providerAPIKey;
+
+  // v2.5.0: 模型选项按当前提供商动态生成
+  const modelOptions = useMemo(() => buildModelOptions(settings.ai), [settings.ai]);
 
   // 首次挂载：从数据库异步加载对话历史（覆盖 localStorage 同步初始值）
   useEffect(() => {
@@ -384,7 +396,7 @@ export function ChatPage() {
   const BALANCE_STORAGE_KEY = 'yiyan_last_balance';
 
   const handleQueryBalance = useCallback(async () => {
-    if (!settings.ai.apiKey) {
+    if (!providerAPIKey) {
       alert('请先在设置页面配置 AI API Key');
       return;
     }
@@ -392,21 +404,13 @@ export function ChatPage() {
     setBalanceInfo(prev => ({ ...prev, isQuerying: true }));
 
     try {
-      const baseURL = settings.ai.baseURL.replace(/\/$/, '');
-      let balanceURL: string;
-
-      if (baseURL.includes('siliconflow.cn')) {
-        balanceURL = `${baseURL}/user/balance`;
-      } else if (baseURL.includes('deepseek.com')) {
-        balanceURL = `${baseURL}/user/balance`;
-      } else {
-        balanceURL = `${baseURL}/user/balance`;
-      }
+      const baseURL = providerBaseURL.replace(/\/$/, '');
+      const balanceURL = `${baseURL}/user/balance`;
 
       const response = await fetch(balanceURL, {
         method: 'GET',
         headers: {
-          'Authorization': `Bearer ${settings.ai.apiKey}`,
+          'Authorization': `Bearer ${providerAPIKey}`,
           'Content-Type': 'application/json',
         },
       });
@@ -453,7 +457,7 @@ export function ChatPage() {
       setBalanceInfo(prev => ({ ...prev, isQuerying: false }));
       alert(`余额查询失败: ${(error as Error).message}`);
     }
-  }, [settings.ai.apiKey, settings.ai.baseURL, balanceInfo.currentBalance]);
+  }, [providerAPIKey, providerBaseURL, balanceInfo.currentBalance]);
 
   /* === MCP 搜索 === */
   const handleMcpSearch = useCallback(async () => {
@@ -844,7 +848,7 @@ export function ChatPage() {
           timestamp: Date.now(),
           isThinking: thinkingEnabled,
           thinkingEffort: thinkingEnabled ? thinkingEffort : undefined,
-          model: currentModel,
+          model: effectiveModel,
         };
         loopDisplayMsgs = [...loopDisplayMsgs, nextAiMsg];
         updateSessionMessages(sessionId, loopDisplayMsgs);
@@ -952,6 +956,7 @@ export function ChatPage() {
         currentSessionId={currentSessionId}
         sidebarOpen={sidebarOpen}
         isMobile={isMobile}
+        modelOptions={modelOptions}
         renamingId={renamingId}
         renameValue={renameValue}
         onRenameValueChange={setRenameValue}
@@ -987,6 +992,7 @@ export function ChatPage() {
           title={currentSession?.title || 'Chat'}
           currentSessionModel={currentSession?.model || ''}
           currentModel={currentModel}
+          modelOptions={modelOptions}
           modelPickerOpen={modelPickerOpen}
           onToggleModelPicker={() => setModelPickerOpen(!modelPickerOpen)}
           onSelectModel={handleSelectModel}
@@ -1010,7 +1016,7 @@ export function ChatPage() {
           selectMode={selectMode}
           selectedMsgIds={selectedMsgIds}
           isLoading={isLoading}
-          hasApiKey={!!settings.ai.apiKey}
+          hasApiKey={!!providerAPIKey}
           containerRef={messagesContainerRef}
           endRef={messagesEndRef}
           onToggleSelect={handleToggleSelectMsg}

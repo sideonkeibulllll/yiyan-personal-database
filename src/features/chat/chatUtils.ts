@@ -25,14 +25,32 @@ export function generateTitle(content: string): string {
   return trimmed.slice(0, 20) + '…';
 }
 
-/** 可选模型列表 */
-export const MODEL_OPTIONS = [
-  { value: '', label: '全局默认' },
-  { value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' },
-  { value: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash' },
-  // e.4: 添加「智能GLM」选项
-  { value: '__glm_smart__', label: '智能 GLM' },
-];
+/**
+ * 生成模型选择器选项。
+ *
+ * v2.5.0：改为按「当前激活提供商」的模型候选动态生成，
+ * 而非写死列表，这样新增提供商（如硅基流动）能自动出现。
+ * 末尾始终附带「智能 GLM」选项（免费池）。
+ */
+export function buildModelOptions(ai: {
+  provider?: import('@/types').AIProviderId;
+  isDeepSeek?: boolean;
+  providers?: import('@/types').AIProvidersConfig;
+}): Array<{ value: string; label: string }> {
+  const providerId = ai.provider || (ai.isDeepSeek ? 'deepseek' : 'openai');
+  const entry = ai.providers?.[providerId];
+
+  const options: Array<{ value: string; label: string }> = [{ value: '', label: '全局默认' }];
+
+  for (const m of entry?.models ?? []) {
+    options.push({ value: m, label: m });
+  }
+
+  // e.4 / v2.5.0: 智能 GLM（免费模型池）
+  options.push({ value: '__glm_smart__', label: '智能 GLM（免费池）' });
+
+  return options;
+}
 
 /** 格式化时间（时:分） */
 export function formatTime(ts: number): string {

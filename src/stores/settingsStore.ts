@@ -3,7 +3,7 @@
  */
 import { create } from 'zustand';
 import type { Settings } from '@/types';
-import { DEFAULT_SETTINGS } from '@/types';
+import { DEFAULT_SETTINGS, migrateAIConfig } from '@/types';
 import { getDatabase } from '@/services/database';
 
 interface SettingsStore {
@@ -21,16 +21,47 @@ interface SettingsStore {
 
 const STORAGE_KEY = 'yiyan_settings';
 
+/**
+ * 深合并 ai 段（浅合并会让 ai 整个被替换，导致新增的 providers 丢失），
+ * 并对 AI 配置跑一次迁移，兼容老版本扁平的 apiKey/baseURL/model 结构。
+ *
+ * 注意：合并时**不能**把 DEFAULT_SETTINGS.ai.providers 带入，
+ * 否则老配置会被误判为「已有 providers」而丢失 apiKey/model。
+ */
+function normalizeSettings(raw: Partial<Settings>): Settings {
+  const rawAi: Partial<Settings['ai']> = raw.ai || {};
+  const merged: Settings = {
+    ...DEFAULT_SETTINGS,
+    ...raw,
+    ai: {
+      ...DEFAULT_SETTINGS.ai,
+      ...rawAi,
+      prompts: {
+        ...DEFAULT_SETTINGS.ai.prompts,
+        ...(rawAi.prompts || {}),
+      },
+      deepSeekOptions: {
+        ...DEFAULT_SETTINGS.ai.deepSeekOptions,
+        ...(rawAi.deepSeekOptions || {}),
+      },
+      // 只有原始数据真的带了 providers 才保留，否则交由 migrateAIConfig 从扁平字段推导
+      providers: rawAi.providers,
+    },
+  };
+  merged.ai = migrateAIConfig(merged.ai);
+  return merged;
+}
+
 function loadFromLocalStorage(): Settings {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
-      return { ...DEFAULT_SETTINGS, ...JSON.parse(stored) };
+      return normalizeSettings(JSON.parse(stored));
     }
   } catch {
     // ignore
   }
-  return DEFAULT_SETTINGS;
+  return normalizeSettings({});
 }
 
 function saveToLocalStorage(settings: Settings): void {
@@ -66,7 +97,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   loadSettings: async () => {
     const dbSettings = await loadFromDatabase();
     if (dbSettings) {
-      const merged = { ...DEFAULT_SETTINGS, ...dbSettings };
+      const merged = normalizeSettings(dbSettings);
       saveToLocalStorage(merged);
       set({ settings: merged, isLoaded: true });
       return;
@@ -75,9 +106,11 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   },
 
   setSettings: (settings) => {
-    saveToLocalStorage(settings);
-    saveToDatabase(settings);
-    set({ settings });
+    // 云备份恢复可能带回老结构，统一走一次归一化
+    const normalized = normalizeSettings(settings);
+    saveToLocalStorage(normalized);
+    saveToDatabase(normalized);
+    set({ settings: normalized });
   },
 
   updateAIConfig: (config) => {

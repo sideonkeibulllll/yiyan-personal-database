@@ -213,12 +213,132 @@ export interface AIConfig {
   smartGroup?: SmartGroupOptions;
   /** 连线建议配置 */
   connectionSuggestion?: ConnectionSuggestionOptions;
-  /** GLM 模型配置 */
+  /** GLM 模型配置（免费模型池，非 chat 场景自动轮询） */
   glm?: GLMConfig;
   /** Chat Soul 提示词（对话系统提示词） */
   chatSoul?: string;
   /** 数据选择器「最近」勾选项数量 */
   recentPickerCount?: number;
+  /** 当前激活的付费提供商（v2.5.0 新增，缺省按 isDeepSeek 推导） */
+  provider?: AIProviderId;
+  /** 各付费提供商的独立配置（v2.5.0 新增，互不影响） */
+  providers?: AIProvidersConfig;
+}
+
+/** 付费 AI 提供商 ID */
+export type AIProviderId = 'deepseek' | 'openai' | 'siliconflow';
+
+/** 单个提供商的独立配置 */
+export interface ProviderEntry {
+  /** 该提供商的 API Key（各自独立保存，切换时无需重填） */
+  apiKey: string;
+  /** API Base URL（不含结尾斜杠） */
+  baseURL: string;
+  /** 当前选用的模型 */
+  model: string;
+  /** 可选模型候选列表（用于设置页与 chat 页下拉） */
+  models: string[];
+}
+
+/** 各提供商的配置集合 */
+export type AIProvidersConfig = Record<AIProviderId, ProviderEntry>;
+
+/** 提供商元信息（展示名 + 默认配置） */
+export interface ProviderPreset {
+  id: AIProviderId;
+  /** 显示名称 */
+  label: string;
+  /** 默认 Base URL */
+  baseURL: string;
+  /** 默认模型 */
+  defaultModel: string;
+  /** 可选模型候选 */
+  models: string[];
+  /** API Key 输入框占位符 */
+  keyPlaceholder: string;
+}
+
+/**
+ * 内置提供商预设表（v2.5.0 新增）。
+ * 切换提供商时用其 baseURL / defaultModel 自动填充。
+ */
+export const PROVIDER_PRESETS: Record<AIProviderId, ProviderPreset> = {
+  deepseek: {
+    id: 'deepseek',
+    label: 'DeepSeek 官方',
+    baseURL: 'https://api.deepseek.com',
+    defaultModel: 'deepseek-v4-flash',
+    models: ['deepseek-v4-flash', 'deepseek-v4-pro'],
+    keyPlaceholder: 'sk-...',
+  },
+  openai: {
+    id: 'openai',
+    label: 'OpenAI',
+    baseURL: 'https://api.openai.com/v1',
+    defaultModel: 'gpt-4o-mini',
+    models: ['gpt-4o-mini', 'gpt-4o', 'gpt-4-turbo', 'o3-mini'],
+    keyPlaceholder: 'sk-...',
+  },
+  siliconflow: {
+    id: 'siliconflow',
+    label: '硅基流动 SiliconFlow',
+    baseURL: 'https://api.siliconflow.cn/v1',
+    defaultModel: 'deepseek-ai/DeepSeek-V4-Flash',
+    models: [
+      'deepseek-ai/DeepSeek-V4-Flash',
+      'deepseek-ai/DeepSeek-V3',
+      'deepseek-ai/DeepSeek-R1',
+      'Qwen/Qwen2.5-7B-Instruct',
+      'Qwen/Qwen2.5-72B-Instruct',
+    ],
+    keyPlaceholder: 'sk-...',
+  },
+};
+
+/** 提供商的稳定遍历顺序 */
+export const AI_PROVIDER_ORDER: AIProviderId[] = ['deepseek', 'openai', 'siliconflow'];
+
+/** 根据 ID 取预设（找不到回落到 deepseek） */
+export function getProviderPreset(id: AIProviderId): ProviderPreset {
+  return PROVIDER_PRESETS[id] || PROVIDER_PRESETS.deepseek;
+}
+
+/**
+ * 从任意（可能是老版本的）AIConfig 推导出 providers 配置。
+ *
+ * 迁移规则：
+ * - 若已存在 providers，逐项补全缺失字段（防止新版本新增 provider 后老数据缺项）
+ * - 否则用旧版扁平字段（apiKey / baseURL / model）灌入「当前 provider」对应的槽位
+ */
+export function migrateAIConfig(config: AIConfig): AIConfig {
+  const providerId: AIProviderId = config.provider
+    || (config.isDeepSeek ? 'deepseek' : 'openai');
+
+  const existing = config.providers;
+  const providers = {} as AIProvidersConfig;
+
+  for (const id of AI_PROVIDER_ORDER) {
+    const preset = PROVIDER_PRESETS[id];
+    const prev = existing?.[id];
+    // 老配置：只把旧扁平字段灌入当前 provider，其它用 preset 默认值
+    const isLegacySlot = !prev && id === providerId;
+    providers[id] = {
+      apiKey: prev?.apiKey ?? (isLegacySlot ? (config.apiKey || '') : ''),
+      baseURL: prev?.baseURL ?? (isLegacySlot && config.baseURL ? config.baseURL : preset.baseURL),
+      model: prev?.model ?? (isLegacySlot && config.model ? config.model : preset.defaultModel),
+      models: prev?.models ?? [...preset.models],
+    };
+  }
+
+  return {
+    ...config,
+    provider: providerId,
+    providers,
+    // 扁平字段保持同步，供未迁移的旧代码路径读取
+    apiKey: providers[providerId].apiKey,
+    baseURL: providers[providerId].baseURL,
+    model: providers[providerId].model,
+  };
 }
 
 export interface DeepSeekOptions {
@@ -256,17 +376,30 @@ export interface ConnectionSuggestionOptions {
   connectionSuggestPrompt: string;
 }
 
-/** GLM 模型配置 */
+/** GLM 模型配置（免费模型池） */
 export interface GLMConfig {
-  /** 是否启用 GLM 智能切换 */
+  /** 是否启用 GLM 免费模型池（非 chat 场景自动轮询） */
   enabled: boolean;
   /** GLM API Key */
   apiKey: string;
-  /** GLM 模型名称 */
+  /** GLM 模型名称（保留字段，实际由 FREE_MODEL_POOL 轮询） */
   model: string;
   /** GLM API Base URL */
   baseURL: string;
 }
+
+/**
+ * GLM 免费模型池（v2.5.0）。
+ *
+ * 设计初衷：这些是智谱提供的免费模型，无需用户手动选择，
+ * 非 chat 场景（标签/分组/连线建议等简单任务）按顺序轮询请求，
+ * 分摊单模型的配额压力。用户只需开关 + Key。
+ */
+export const GLM_FREE_MODEL_POOL: string[] = [
+  'glm-4-flash',
+  'glm-4-flash-250414',
+  'glm-z1-flash',
+];
 
 export interface PromptConfig {
   tagSuggestion: string;
@@ -423,6 +556,27 @@ export const DEFAULT_SETTINGS: Settings = {
       apiKey: '',
       model: 'glm-4-flash',
       baseURL: 'https://open.bigmodel.cn/api/paas/v4',
+    },
+    provider: 'deepseek',
+    providers: {
+      deepseek: {
+        apiKey: '',
+        baseURL: PROVIDER_PRESETS.deepseek.baseURL,
+        model: PROVIDER_PRESETS.deepseek.defaultModel,
+        models: [...PROVIDER_PRESETS.deepseek.models],
+      },
+      openai: {
+        apiKey: '',
+        baseURL: PROVIDER_PRESETS.openai.baseURL,
+        model: PROVIDER_PRESETS.openai.defaultModel,
+        models: [...PROVIDER_PRESETS.openai.models],
+      },
+      siliconflow: {
+        apiKey: '',
+        baseURL: PROVIDER_PRESETS.siliconflow.baseURL,
+        model: PROVIDER_PRESETS.siliconflow.defaultModel,
+        models: [...PROVIDER_PRESETS.siliconflow.models],
+      },
     },
     chatSoul: '',
     recentPickerCount: 30,
