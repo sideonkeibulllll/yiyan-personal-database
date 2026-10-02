@@ -10,6 +10,7 @@ import { getDatabase } from '@/services/database';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { ai } from '@/services/ai';
 import { BottomNav } from '@/components/BottomNav';
+import { hasAIAccess } from '@/utils/aiAccess';
 import type { Entry, Link } from '@/types';
 import './LinkPage.css';
 
@@ -131,7 +132,7 @@ export function LinkPage() {
 
   // b.4: 连线建议 — 发送最近100条给 AI
   const handleConnectionSuggestion = useCallback(async () => {
-    if (!settings.ai.apiKey) {
+    if (!hasAIAccess(settings.ai)) {
       alert('请先在设置页面配置 AI API Key');
       return;
     }
@@ -318,7 +319,7 @@ export function LinkPage() {
           <button
             className="connection-suggest-btn glass"
             onClick={handleConnectionSuggestion}
-            disabled={connectionSuggesting || !settings.ai.apiKey}
+            disabled={connectionSuggesting || !hasAIAccess(settings.ai)}
           >
             <IconBot />
             <span>{connectionSuggesting ? 'AI 分析中...' : '连线建议'}</span>
@@ -413,7 +414,7 @@ export function LinkPage() {
                   <button
                     className="link-ai-btn"
                     onClick={handleAISuggest}
-                    disabled={aiSuggesting || !settings.ai.apiKey}
+                    disabled={aiSuggesting || !hasAIAccess(settings.ai)}
                   >
                     <IconBot /> {aiSuggesting ? 'AI 思考中...' : 'AI 建议描述'}
                   </button>

@@ -133,6 +133,14 @@ export function RandomPage() {
 
   const [showMenu, setShowMenu] = useState(false);
   const [menuEntry, setMenuEntry] = useState<Entry | null>(null);
+  // v2.6.3: 轻提示（如「已加入预备」），由 QuickMenu 通过 onToast 触发
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const showToastMessage = useCallback((msg: string) => {
+    setToastMsg(msg);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToastMsg(null), 1800);
+  }, []);
   const [showFilter, setShowFilter] = useState(false);
   const [showTagSelector, setShowTagSelector] = useState(false);
   const [tagSelectorEntry, setTagSelectorEntry] = useState<Entry | null>(null);
@@ -604,6 +612,7 @@ export function RandomPage() {
             setShowMenu(false);
             navigate(`/entry/${entry.id}/edit`);
           }}
+          onToast={showToastMessage}
         />
       )}
 
@@ -711,6 +720,13 @@ export function RandomPage() {
           startIndex={viewerState.startIndex}
           onClose={() => setViewerState(null)}
         />
+      )}
+
+      {/* 轻提示（v2.6.3） */}
+      {toastMsg && (
+        <div className="toast glass">
+          <span>{toastMsg}</span>
+        </div>
       )}
 
       <BottomNav />

@@ -111,23 +111,25 @@ export function ChatPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
-  // 从 QuickMenu「就此内容谈话」跳转处理
+  // 从 QuickMenu「就此内容谈话」跳转处理 + 预备列表消费
+  // v2.6.3: 预备列表**不再依赖 entryId** —— 此前只有带 entryId 进来才会读取，
+  // 导致「只加了预备、然后直接点底部导航进 Chat」时预备永远不生效。
   useEffect(() => {
     const entryId = searchParams.get('entryId');
     const from = searchParams.get('from');
-    if (entryId) {
-      setPickerInitialEntryId(entryId);
-      // 合并预备列表中的条目
-      const PREPARED_KEY = '__yiyan_prepared_entry_ids__';
-      const prepared: string[] = (window as any)[PREPARED_KEY] || [];
-      const allIds = new Set<string>([entryId, ...prepared]);
-      setPickerSelectedIds(allIds);
-      setEntryPickerOpen(true);
-      if (from) {
-        setReturnTarget(from);
-      }
-      // 注意：预备列表在发送对话后清除（handleSend finally 中）
+    const PREPARED_KEY = '__yiyan_prepared_entry_ids__';
+    const prepared: string[] = (window as any)[PREPARED_KEY] || [];
+
+    if (!entryId && prepared.length === 0) return;
+
+    if (entryId) setPickerInitialEntryId(entryId);
+    const allIds = new Set<string>([...(entryId ? [entryId] : []), ...prepared]);
+    setPickerSelectedIds(allIds);
+    setEntryPickerOpen(true);
+    if (from) {
+      setReturnTarget(from);
     }
+    // 注意：预备列表在发送对话后清除（handleSend finally 中，且仅当本次确实消费过）
   }, [searchParams]);
 
   // e.2: 「最近」勾选项 — 自动选中最近 N 条
@@ -166,6 +168,8 @@ export function ChatPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // v2.6.3: 本次发送是否实际消费了「预备列表」（决定发送后是否清除）
+  const consumedPreparedRef = useRef(false);
 
   const currentSession = sessions.find(s => s.id === currentSessionId) || null;
   const messages = currentSession?.messages ?? [];
@@ -557,6 +561,10 @@ export function ChatPage() {
       return;
     }
 
+    // v2.6.3: 记录本次是否有预备条目被消费（发送后据此决定是否清除，避免误清）
+    const preparedIds: string[] = (window as any)['__yiyan_prepared_entry_ids__'] || [];
+    consumedPreparedRef.current = preparedIds.length > 0;
+
     // 确保 session 存在
     let sessionId = currentSessionId ?? createId();
     let session = sessions.find(s => s.id === sessionId);
@@ -897,9 +905,11 @@ export function ChatPage() {
       // === 修复 3：发送后清除预备状态（按钮状态结束）===
       setPickerSelectedIds(new Set());
       setPickerInitialEntryId(undefined);
-      // 清除全局预备列表
-      const PREPARED_KEY = '__yiyan_prepared_entry_ids__';
-      delete (window as any)[PREPARED_KEY];
+      // v2.6.3: 仅当本次确实消费过预备列表时才清除（此前无条件清除会误清未使用的预备）
+      if (consumedPreparedRef.current) {
+        delete (window as any)['__yiyan_prepared_entry_ids__'];
+        consumedPreparedRef.current = false;
+      }
       // 注意：MCP 工具激活改为对话级持久化（session.mcpEnabledTools），
       // 不再在每次发送后清空，让用户在一次对话内可以连续多次调用工具。
     }

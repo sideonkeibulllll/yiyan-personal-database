@@ -10,6 +10,7 @@ import { useTodoStore } from '@/stores/todoStore';
 import { getDatabase } from '@/services/database';
 import { BottomNav } from '@/components/BottomNav';
 import { QuickMenu } from '@/features/random/QuickMenu';
+import { TagSelector } from '@/components/TagSelector';
 import type { Entry, Todo, TodoSearchTimeFilter, Tag } from '@/types';
 import './SearchPage.css';
 
@@ -62,7 +63,14 @@ export function SearchPage() {
   const [keyword, setKeyword] = useState('');
   const [results, setResults] = useState<Entry[]>([]);
   const [isSearching, setIsSearching] = useState(false);
-  const [showToast, setShowToast] = useState(false);
+  // v2.6.3: 轻提示改为可自定义文案（原实现硬编码「已复制」，其它场景复用时会显示错误文案）
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const showToastMessage = useCallback((msg: string) => {
+    setToastMsg(msg);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToastMsg(null), 1800);
+  }, []);
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [filterStarred, setFilterStarred] = useState<boolean | undefined>(undefined);
   const [filterHasAttachment, setFilterHasAttachment] = useState<boolean | undefined>(undefined);
@@ -71,6 +79,9 @@ export function SearchPage() {
   const [todoTimeFilter, setTodoTimeFilter] = useState<TodoSearchTimeFilter>('future');
   const [menuEntry, setMenuEntry] = useState<Entry | null>(null);
   const [showMenu, setShowMenu] = useState(false);
+  // v2.6.3: 「编辑标签」改为打开 TagSelector 覆盖层（与随机页行为统一）
+  const [tagSelectorEntry, setTagSelectorEntry] = useState<Entry | null>(null);
+  const [showTagSelector, setShowTagSelector] = useState(false);
   const longPressTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   // 修复7：标签搜索模式 + 关联标签推荐
@@ -201,8 +212,7 @@ export function SearchPage() {
     try {
       await navigator.clipboard.writeText(entry.content);
       markAsUsed(entry.id);
-      setShowToast(true);
-      setTimeout(() => setShowToast(false), 1500);
+      showToastMessage('已复制');
     } catch {
       // 降级方案
       const textarea = document.createElement('textarea');
@@ -212,8 +222,7 @@ export function SearchPage() {
       document.execCommand('copy');
       document.body.removeChild(textarea);
       markAsUsed(entry.id);
-      setShowToast(true);
-      setTimeout(() => setShowToast(false), 1500);
+      showToastMessage('已复制');
     }
   }, [markAsUsed]);
 
@@ -275,8 +284,7 @@ export function SearchPage() {
     });
     setSmartTagName('');
     setShowSaveSmartTag(false);
-    setShowToast(true);
-    setTimeout(() => setShowToast(false), 1500);
+    showToastMessage('已保存为智能标签');
   }, [smartTagName, keyword, selectedTagIds, filterStarred, filterHasAttachment]);
 
   return (
@@ -500,9 +508,9 @@ export function SearchPage() {
       </main>
 
       {/* 轻提示 */}
-      {showToast && (
+      {toastMsg && (
         <div className="toast glass">
-          <span>已复制</span>
+          <span>{toastMsg}</span>
         </div>
       )}
 
@@ -523,13 +531,66 @@ export function SearchPage() {
           }}
           onEditTags={() => {
             setShowMenu(false);
-            navigate(`/entry/${menuEntry.id}/edit`);
+            setTagSelectorEntry(menuEntry);
+            setShowTagSelector(true);
           }}
           onAIChat={(entryId) => {
             setShowMenu(false);
             navigate(`/chat?entryId=${entryId}&from=/search`);
           }}
+          onToast={showToastMessage}
         />
+      )}
+
+      {/* 标签选择器 — v2.6.3: 与随机页/录入页保持一致的就地打标签 */}
+      {showTagSelector && tagSelectorEntry && (
+        <div className="home-tag-overlay" onClick={() => setShowTagSelector(false)}>
+          <div className="home-tag-panel glass" onClick={e => e.stopPropagation()}>
+            <TagSelector
+              selectedTagIds={tagSelectorEntry.tags?.map(t => t.id) || []}
+              onSelectionChange={async (tagIds) => {
+                try {
+                  const db = await getDatabase();
+                  const currentTags = tagSelectorEntry.tags?.map(t => t.id) || [];
+                  const toAdd = tagIds.filter(id => !currentTags.includes(id));
+                  const toRemove = currentTags.filter(id => !tagIds.includes(id));
+                  for (const tagId of toAdd) {
+                    await db.addTagToEntry(tagSelectorEntry.id, tagId);
+                  }
+                  for (const tagId of toRemove) {
+                    await db.removeTagFromEntry(tagSelectorEntry.id, tagId);
+                  }
+                  const updatedEntry = {
+                    ...tagSelectorEntry,
+                    tags: tagIds.map(id => tags.find(t => t.id === id)).filter(Boolean) as Tag[],
+                  };
+                  setTagSelectorEntry(updatedEntry);
+                  setResults(prev => prev.map(e => e.id === updatedEntry.id ? updatedEntry : e));
+                } catch (err) {
+                  console.error('[SearchPage] 保存标签失败:', err);
+                }
+                setShowTagSelector(false);
+              }}
+              onClose={() => setShowTagSelector(false)}
+              entryId={tagSelectorEntry.id}
+              entryContent={tagSelectorEntry.content}
+            />
+            <div className="home-tag-actions">
+              <button
+                className="home-tag-btn home-tag-cancel"
+                onClick={() => setShowTagSelector(false)}
+              >
+                取消
+              </button>
+              <button
+                className="home-tag-btn home-tag-confirm"
+                onClick={() => setShowTagSelector(false)}
+              >
+                确定
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* 保存为智能标签弹窗 */}

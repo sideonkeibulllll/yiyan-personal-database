@@ -6,6 +6,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { getDatabase } from '@/services/database';
 import ai from '@/services/ai';
+import { hasAIAccess } from '@/utils/aiAccess';
 import type { Entry } from '@/types';
 import './AIChatPanel.css';
 
@@ -49,7 +50,7 @@ export function AIChatPanel({ entry, onClose }: AIChatPanelProps) {
   const handleSend = useCallback(async () => {
     if (!input.trim() || isLoading) return;
 
-    if (!settings.ai.apiKey) {
+    if (!hasAIAccess(settings.ai)) {
       setMessages(prev => [...prev, {
         id: Date.now().toString(),
         role: 'assistant',

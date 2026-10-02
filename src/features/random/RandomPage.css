@@ -410,3 +410,18 @@
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   animation: slideUp var(--duration-normal) var(--ease-out);
 }
+
+/* v2.6.3: 轻提示（与搜索页/录入页保持一致的视觉） */
+.toast {
+  position: fixed;
+  bottom: calc(100px + var(--safe-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  padding: var(--space-3) var(--space-5);
+  border-radius: var(--radius-full);
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+  animation: fadeIn 0.3s var(--ease-out);
+  z-index: 200;
+  box-shadow: 0 4px 20px rgba(247, 103, 7, 0.15);
+}

@@ -13,6 +13,7 @@ import { TagSelector } from '@/components/TagSelector/TagSelector';
 import { GroupSelector } from '@/components/GroupSelector/GroupSelector';
 import { pickImages, saveImageForEntry, deleteAttachmentFiles, readThumbAsSrc } from '@/services/attachmentService';
 import { ImageViewer } from '@/components/ImageViewer/ImageViewer';
+import { hasAIAccess } from '@/utils/aiAccess';
 import type { Entry, Tag, Group, Attachment } from '@/types';
 import './EntryEditPage.css';
 
@@ -312,7 +313,7 @@ export function EntryEditPage() {
       alert('请先输入内容');
       return;
     }
-    if (!settings.ai.apiKey) {
+    if (!hasAIAccess(settings.ai)) {
       alert('请先在设置中配置 AI API Key');
       return;
     }
@@ -354,7 +355,7 @@ export function EntryEditPage() {
       alert('请先输入内容');
       return;
     }
-    if (!settings.ai.apiKey) {
+    if (!hasAIAccess(settings.ai)) {
       alert('请先在设置中配置 AI API Key');
       return;
     }

@@ -28,6 +28,8 @@ interface QuickMenuProps {
   onConvertToTodo?: (entry: Entry) => void;
   /** 编辑详情回调 */
   onEditInfo?: (entry: Entry) => void;
+  /** 轻提示回调（v2.6.3）：由父页面负责渲染 toast */
+  onToast?: (message: string) => void;
 }
 
 type PanelMode = 'menu' | 'group' | 'ai-chat';
@@ -128,6 +130,7 @@ export function QuickMenu({
   onAIChat,
   onConvertToTodo,
   onEditInfo,
+  onToast,
 }: QuickMenuProps) {
   const navigate = useNavigate();
   const [panel, setPanel] = useState<PanelMode>('menu');
@@ -195,13 +198,17 @@ export function QuickMenu({
   // b.5: 添加预备 — 对接 ChatPage 数据选择器，关闭快捷操作（不跳转）
   const handleAddPrepare = useCallback(() => {
     const prepared: string[] = (window as any)[PREPARED_KEY] || [];
-    if (!prepared.includes(entry.id)) {
+    const already = prepared.includes(entry.id);
+    if (!already) {
       prepared.push(entry.id);
       (window as any)[PREPARED_KEY] = prepared;
     }
-    // 关闭快捷操作，不跳转到 Chat 页面
+    // v2.6.3: 给出明确反馈（此前点完直接关菜单，用户不知道有没有生效）
+    onToast?.(already
+      ? `已在预备列表（共 ${prepared.length} 条）`
+      : `已加入预备（共 ${prepared.length} 条），在 AI 对话中自动选中`);
     onClose();
-  }, [entry.id, onClose]);
+  }, [entry.id, onClose, onToast]);
 
   // b.6: 就此内容谈话 — 跳到 AI 页面并选中数据（不单开一页）
   const handleStartChat = useCallback(() => {
@@ -257,21 +264,23 @@ export function QuickMenu({
   const timeValue = showUpdatedTime ? formatDateTime(entry.updatedAt) : formatDate(entry.createdAt);
 
   // 菜单项
-  const menuItems = [
-    { icon: <TagIcon />, label: '编辑标签', action: onEditTags },
-    { icon: entry.isStarred ? <StarFilledIcon /> : <StarOutlineIcon />, label: entry.isStarred ? '取消星标' : '星标', action: onToggleStar },
-    // b.2: 移除「详情」选项，改为直接在菜单底部显示时间
+  // v2.6.3: 显式声明 closeOnClick，替代此前按数组下标（index===0||1||3）判断——
+  // 下标判断在菜单项增删后会静默错位。
+  const menuItems: { icon: React.ReactNode; label: string; action?: () => void; closeOnClick: boolean }[] = [
+    { icon: <TagIcon />, label: '编辑标签', action: onEditTags, closeOnClick: true },
+    { icon: entry.isStarred ? <StarFilledIcon /> : <StarOutlineIcon />, label: entry.isStarred ? '取消星标' : '星标', action: onToggleStar, closeOnClick: true },
     // b.3: 组标签支持多选
-    { icon: <PaperclipIcon />, label: '组标签', action: () => setPanel('group') },
-    { icon: <LinkIcon />, label: '查看连线', action: onViewLinks },
-    { icon: <MessageCircleIcon />, label: 'AI 对话', action: () => setPanel('ai-chat') },
-    // b.7: 转为待办后变为「编辑新建的待办」
+    { icon: <PaperclipIcon />, label: '组标签', action: () => setPanel('group'), closeOnClick: false },
+    { icon: <LinkIcon />, label: '查看连线', action: onViewLinks, closeOnClick: true },
+    { icon: <MessageCircleIcon />, label: 'AI 对话', action: () => setPanel('ai-chat'), closeOnClick: false },
+    // b.7: 转为待办后变为「编辑新建的待办」（回调内部自行 onClose）
     ...(createdTodoId
-      ? [{ icon: <EditIcon />, label: '编辑新建的待办', action: handleEditCreatedTodo }]
+      ? [{ icon: <EditIcon />, label: '编辑新建的待办', action: handleEditCreatedTodo, closeOnClick: false }]
       : (onConvertToTodo
-        ? [{ icon: <CheckCircleIcon />, label: '转为待办', action: handleConvertToTodo }]
+        ? [{ icon: <CheckCircleIcon />, label: '转为待办', action: handleConvertToTodo, closeOnClick: false }]
         : [])),
-    ...(onEditInfo ? [{ icon: <FileTextIcon />, label: '编辑详情', action: () => { onEditInfo(entry); onClose(); } }] : []),
+    // 编辑详情：回调内部调用 onEditInfo 后再 onClose
+    ...(onEditInfo ? [{ icon: <FileTextIcon />, label: '编辑详情', action: () => { onEditInfo(entry); onClose(); }, closeOnClick: false }] : []),
   ];
 
   return (
@@ -287,23 +296,14 @@ export function QuickMenu({
             </div>
 
             <div className="menu-items">
-              {menuItems.map((item, index) => (
+              {menuItems.map((item) => (
                 <button
-                  key={index}
+                  key={item.label}
                   className="menu-item"
                   onClick={() => {
-                    if (item.action) {
-                      item.action();
-                      // 只有需要关闭菜单的操作才关闭：编辑标签(0)、星标(1)、查看连线(3)
-                      // 组标签(2)、AI对话(4)、转为待办(5/编辑待办) 不关闭
-                      if (index === 0 || index === 1 || index === 3) {
-                        onClose();
-                      }
-                      // 编辑详情也关闭
-                      if (item.label === '编辑详情') {
-                        // onEditInfo 回调中已调用 onClose
-                      }
-                    }
+                    if (!item.action) return;
+                    item.action();
+                    if (item.closeOnClick) onClose();
                   }}
                 >
                   <span className="item-icon">{item.icon}</span>
