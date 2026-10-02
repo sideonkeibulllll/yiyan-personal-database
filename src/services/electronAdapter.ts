@@ -29,6 +29,30 @@ class ElectronSQLiteDBConnection {
   async query(sql: string, params: unknown[] = []): Promise<{ values: Record<string, unknown>[] }> {
     return await (window as any).electronAPI.db.query(this.dbName, sql, params);
   }
+
+  /**
+   * 批量执行多条语句，兼容 Capacitor SQLite 的 db.execute
+   * （v2.6.1 补齐：createTables 等已依赖此方法，缺失会导致 Electron 端建表直接报错）
+   */
+  async execute(sql: string): Promise<void> {
+    const statements = sql
+      .split(';')
+      .map(s => s.trim())
+      .filter(Boolean);
+    for (const stmt of statements) {
+      await (window as any).electronAPI.db.run(this.dbName, stmt, []);
+    }
+  }
+
+  /**
+   * 批量参数化执行，兼容 Capacitor SQLite 的 db.executeSet
+   */
+  async executeSet(set: { statement?: string; values?: unknown[] }[]): Promise<void> {
+    for (const item of set) {
+      if (!item.statement) continue;
+      await (window as any).electronAPI.db.run(this.dbName, item.statement, item.values || []);
+    }
+  }
 }
 
 /**

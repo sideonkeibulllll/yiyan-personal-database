@@ -247,11 +247,11 @@ export function TodoEditPage() {
     });
   }, []);
 
-  // 创建新标签
+  // 创建新标签（同名标签会复用已有记录，需去重避免重复选中）
   const handleCreateTag = useCallback(async () => {
     if (!newTagName.trim()) return;
     const tag = await createTag(newTagName.trim(), newTagColor);
-    setSelectedTagIds(prev => [...prev, tag.id]);
+    setSelectedTagIds(prev => (prev.includes(tag.id) ? prev : [...prev, tag.id]));
     setNewTagName('');
     setShowTagEditor(false);
   }, [newTagName, newTagColor, createTag]);

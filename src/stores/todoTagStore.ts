@@ -35,7 +35,9 @@ export const useTodoTagStore = create<TodoTagStore>((set, get) => ({
   createTag: async (name, color) => {
     const db = await getTodoDatabase();
     const tag = await db.createTodoTag(name, color);
-    set(state => ({ tags: [tag, ...state.tags] }));
+    // v2.6.1：同名标签会复用已有记录（见 nativeTodoDatabase.createTodoTag），
+    // 此时 tag 已存在于列表中，不能重复前插，否则 UI 会出现两个同名标签
+    set(state => (state.tags.some(t => t.id === tag.id) ? state : { tags: [tag, ...state.tags] }));
     return tag;
   },
 

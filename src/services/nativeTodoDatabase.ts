@@ -36,7 +36,32 @@ class NativeTodoDatabaseService implements ITodoDatabaseService {
 
     await this.initConnection();
     await this.createTables();
+    await this.initTagIntegrity();
     this.isInitialized = true;
+  }
+
+  /**
+   * 标签关联完整性（v2.6.1）
+   * 1. 开启外键约束 —— SQLite 默认关闭外键，建表时声明的 ON DELETE CASCADE 实际不生效。
+   *    PRAGMA 是「连接级」设置，每次建立连接后都必须重新执行。
+   * 2. 清理历史孤儿关联 —— 修复前 deleteTodoTag/永久删除待办都不会清理关联表，
+   *    残留的关联会让 todo.tagIds 指向不存在的标签（卡片取色失败回落默认色）。
+   */
+  private async initTagIntegrity(): Promise<void> {
+    if (!this.db) return;
+    try {
+      await this.db.execute('PRAGMA foreign_keys = ON;');
+    } catch (err) {
+      console.warn('[NativeTodoDatabase] enable foreign_keys failed:', err);
+    }
+    try {
+      await this.db.execute(
+        'DELETE FROM todo_tag_relations WHERE todo_id NOT IN (SELECT id FROM todos);\n' +
+        'DELETE FROM todo_tag_relations WHERE tag_id NOT IN (SELECT id FROM todo_tags);'
+      );
+    } catch (err) {
+      console.warn('[NativeTodoDatabase] cleanup orphan tag relations failed:', err);
+    }
   }
 
   /**
@@ -218,6 +243,13 @@ class NativeTodoDatabaseService implements ITodoDatabaseService {
     if (updates.folderDate !== undefined) { fields.push('folder_date = ?'); values.push(updates.folderDate); }
     fields.push('updated_at = ?'); values.push(Date.now()); values.push(id);
     await this.db.run(`UPDATE todos SET ${fields.join(', ')} WHERE id = ?`, values);
+
+    // v2.6.1 修复：标签关联存在 todo_tag_relations 表，必须单独同步。
+    // 修复前此处完全忽略 tagIds，导致「编辑保存一次 = 标签全部丢失」
+    // （表现为待办卡片回落默认颜色、再次编辑时标签显示未选中）。
+    if (updates.tagIds !== undefined) {
+      await this.setTodoTags(id, updates.tagIds);
+    }
   }
 
   async deleteTodo(id: string): Promise<void> {
@@ -248,7 +280,7 @@ class NativeTodoDatabaseService implements ITodoDatabaseService {
     const todos: Todo[] = [];
     if (result.values) {
       for (const row of result.values) {
-        todos.push(await this.rowToTodo(row, tagMap.get(row.id as string)));
+        todos.push(await this.rowToTodo(row, tagMap.get(row.id as string) || []));
       }
     }
     return todos;
@@ -264,7 +296,7 @@ class NativeTodoDatabaseService implements ITodoDatabaseService {
     const todos: Todo[] = [];
     if (result.values) {
       for (const row of result.values) {
-        todos.push(await this.rowToTodo(row, tagMap.get(row.id as string)));
+        todos.push(await this.rowToTodo(row, tagMap.get(row.id as string) || []));
       }
     }
     return todos;
@@ -279,7 +311,7 @@ class NativeTodoDatabaseService implements ITodoDatabaseService {
     const todos: Todo[] = [];
     if (result.values) {
       for (const row of result.values) {
-        todos.push(await this.rowToTodo(row, tagMap.get(row.id as string)));
+        todos.push(await this.rowToTodo(row, tagMap.get(row.id as string) || []));
       }
     }
     return todos;
@@ -301,7 +333,7 @@ class NativeTodoDatabaseService implements ITodoDatabaseService {
     const todos: Todo[] = [];
     if (result.values) {
       for (const row of result.values) {
-        todos.push(await this.rowToTodo(row, tagMap.get(row.id as string)));
+        todos.push(await this.rowToTodo(row, tagMap.get(row.id as string) || []));
       }
     }
     return todos;
@@ -336,7 +368,7 @@ class NativeTodoDatabaseService implements ITodoDatabaseService {
     const todos: Todo[] = [];
     if (result.values) {
       for (const row of result.values) {
-        todos.push(await this.rowToTodo(row, tagMap.get(row.id as string)));
+        todos.push(await this.rowToTodo(row, tagMap.get(row.id as string) || []));
       }
     }
     return todos;
@@ -370,6 +402,21 @@ class NativeTodoDatabaseService implements ITodoDatabaseService {
 
   async createTodoTag(name: string, color?: string, options?: { id?: string }): Promise<TodoTag> {
     if (!this.db) throw new Error('Database not initialized');
+    // v2.6.1：查重（todo_tags.name 有 UNIQUE 约束，重复插入会直接抛异常）
+    // 对齐 web 端行为：同名标签直接返回已有记录，不报错、不重复创建
+    const dupSql = options?.id ? 'SELECT * FROM todo_tags WHERE id = ?' : 'SELECT * FROM todo_tags WHERE name = ?';
+    const dupVal = options?.id || name;
+    const dup = await this.db.query(dupSql, [dupVal]);
+    if (dup.values && dup.values.length > 0) {
+      const row = dup.values[0];
+      return {
+        id: row.id as string,
+        name: row.name as string,
+        color: (row.color as string | null) ?? undefined,
+        createdAt: row.created_at as number,
+      };
+    }
+
     const tag: TodoTag = {
       id: options?.id || this.generateId(),
       name,
@@ -406,6 +453,9 @@ class NativeTodoDatabaseService implements ITodoDatabaseService {
 
   async deleteTodoTag(tagId: string): Promise<void> {
     if (!this.db) throw new Error('Database not initialized');
+    // v2.6.1 修复：删除标签时同步清理关联表，避免留下孤儿关联
+    // （todo.tagIds 指向已不存在的标签 → 卡片取色失败回落默认色）
+    await this.db.run('DELETE FROM todo_tag_relations WHERE tag_id = ?', [tagId]);
     await this.db.run('DELETE FROM todo_tags WHERE id = ?', [tagId]);
   }
 
@@ -413,13 +463,14 @@ class NativeTodoDatabaseService implements ITodoDatabaseService {
     if (!this.db) throw new Error('Database not initialized');
     // 先清除现有关联
     await this.db.run('DELETE FROM todo_tag_relations WHERE todo_id = ?', [todoId]);
-    // 再插入新关联
-    for (const tagId of tagIds) {
-      await this.db.run(
-        'INSERT OR IGNORE INTO todo_tag_relations (todo_id, tag_id) VALUES (?, ?)',
-        [todoId, tagId]
-      );
-    }
+    if (tagIds.length === 0) return;
+    // 再批量插入新关联（一次跨桥提交，替代逐条 run）
+    await this.db.executeSet(
+      tagIds.map(tagId => ({
+        statement: 'INSERT OR IGNORE INTO todo_tag_relations (todo_id, tag_id) VALUES (?, ?)',
+        values: [todoId, tagId],
+      }))
+    );
   }
 
   // ==================== 模板 ====================

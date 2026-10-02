@@ -211,6 +211,8 @@ export function TodoPage() {
     if (l.move) window.removeEventListener('pointermove', l.move);
     if (l.up) { window.removeEventListener('pointerup', l.up); window.removeEventListener('pointercancel', l.up); }
     dragListenersRef.current = {};
+    // 解锁页面滚动
+    document.body.classList.remove('todo-dragging');
   }, []);
 
   const handleDragStart = useCallback((e: React.PointerEvent, id: string, index: number, itemEl: HTMLElement | null) => {
@@ -226,6 +228,8 @@ export function TodoPage() {
 
     dragStateRef.current = { id, startY, fromIndex: index, toIndex: index };
     setDraggingId(id);
+    // 锁定页面滚动：防止拖拽手势同时带动页面上下滑动
+    document.body.classList.add('todo-dragging');
 
     const onMove = (ev: PointerEvent) => {
       const st = dragStateRef.current;
@@ -269,27 +273,30 @@ export function TodoPage() {
   const touchStartY = useRef(0);
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    // 排序模式下禁用下拉新建（避免与拖拽手势冲突）
+    if (sortMode) return;
     if (window.scrollY === 0) {
       touchStartY.current = e.touches[0].clientY;
       setIsPulling(true);
     }
-  }, []);
+  }, [sortMode]);
 
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
-    if (!isPulling) return;
+    if (sortMode || !isPulling) return;
     const diff = e.touches[0].clientY - touchStartY.current;
     if (diff > 0) {
       setPullDistance(Math.min(diff, 80));
     }
-  }, [isPulling]);
+  }, [sortMode, isPulling]);
 
   const handleTouchEnd = useCallback(() => {
-    if (pullDistance >= 80) {
+    // 始终重置下拉状态，排序模式下只是不执行跳转
+    if (!sortMode && pullDistance >= 80) {
       navigate('/todo/new');
     }
     setIsPulling(false);
     setPullDistance(0);
-  }, [pullDistance, navigate]);
+  }, [sortMode, pullDistance, navigate]);
 
   // 从模板导入
   const handleImportTemplate = useCallback(() => {
