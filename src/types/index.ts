@@ -191,6 +191,25 @@ export const DEFAULT_TODO_CONFIG: TodoConfig = {
   recycleBinRetentionDays: 30,
 };
 
+/**
+ * Cloudflare 中转站配置（v2.7.0）
+ *
+ * 密钥不再打包进安装包：token 由用户在设置页手填，存在这里（settings → localStorage）。
+ * 其余字段留空时回退到 config/cloudflare.ts 的默认值。
+ */
+export interface CloudConfig {
+  /** 中转站地址（留空用默认） */
+  url?: string;
+  /** 中转站密钥 —— 唯一必填项 */
+  token?: string;
+  /** D1 逻辑库名（默认 memory） */
+  db?: string;
+  /** R2 逻辑桶名（默认 memory） */
+  bucket?: string;
+  /** R2 附件公开域名（留空用默认） */
+  publicDomain?: string;
+}
+
 export interface Settings {
   ai: AIConfig;
   context: ContextConfig;
@@ -198,6 +217,8 @@ export interface Settings {
   random: RandomConfig;
   /** 待办配置 */
   todo: TodoConfig;
+  /** Cloudflare 中转站配置（密钥手填） */
+  cloud?: CloudConfig;
 }
 
 export interface AIConfig {
@@ -582,6 +603,14 @@ export const DEFAULT_SETTINGS: Settings = {
     contentCollapseLength: 300,
   },
   todo: DEFAULT_TODO_CONFIG,
+  // Cloudflare 中转站（v2.7.0）：密钥由用户手填，这里默认全空
+  cloud: {
+    url: '',
+    token: '',
+    db: 'memory',
+    bucket: 'memory',
+    publicDomain: '',
+  },
 };
 
 /** ============ 决定转盘（v2.3.0） ============ */

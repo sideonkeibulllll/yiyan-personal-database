@@ -20,11 +20,50 @@ import {
   getLastOrCreateMemo, getMemo, saveMemo, saveMemoAnchor,
   createMemo, getAllMemos, deleteMemo, setLastMemoId,
 } from '@/services/memoDatabase';
+import {
+  compressImage, ensureImageUrl, extractLocalImageIds, putImage,
+} from '@/services/memoImageStore';
 import type { MemoEditorHandle } from './components/MemoEditor';
 import { MemoFormatBar } from './components/MemoFormatBar';
 import { MemoOutline } from './components/MemoOutline';
-import { extractHeadings, offsetOfHeading, deriveTitle, type FormatAction } from './memoMarkdown';
+import { extractHeadings, offsetOfHeading, offsetOfLine, deriveTitle, type FormatAction } from './memoMarkdown';
 import './Memo.css';
+
+/**
+ * 唤起系统「单张图片选择器」。
+ *
+ * 用 `<input type="file" accept="image/*">` 而不是 @capacitor/camera：
+ * Capacitor 的 BridgeActivity 实现了 onShowFileChooser，WebView 里点击 input
+ * 会直接调起系统相册/文件选择器，Web 端行为也一致，省一层平台分支。
+ *
+ * 关于取消：浏览器没有可靠的「选择器取消」事件，
+ * 用 window 重新聚焦做兜底探测（change 已触发则 settled 短路）。
+ */
+function pickSingleImage(): Promise<File | null> {
+  return new Promise(resolve => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.style.position = 'fixed';
+    input.style.left = '-9999px';
+    document.body.appendChild(input);
+
+    let settled = false;
+    const done = (file: File | null) => {
+      if (settled) return;
+      settled = true;
+      input.remove();
+      resolve(file);
+    };
+
+    input.addEventListener('change', () => done(input.files?.[0] ?? null));
+    window.addEventListener('focus', () => {
+      setTimeout(() => done(input.files?.[0] ?? null), 800);
+    }, { once: true });
+
+    input.click();
+  });
+}
 
 /**
  * 懒加载编辑器（v2.4.3 性能优化）
@@ -57,6 +96,8 @@ export function MemoPage() {
   const pendingRef = useRef<{ content: string } | null>(null);
   const anchorRef = useRef<string | null>(null);
   const didJumpRef = useRef(false);
+  /** 已经解析过 blob URL 的本地图片 id（避免重复解析） */
+  const resolvedIdsRef = useRef<Set<string>>(new Set());
 
   const headings = useMemo(() => extractHeadings(content), [content]);
 
@@ -155,6 +196,26 @@ export function MemoPage() {
   const handleInsert = useCallback((action: FormatAction) => {
     const handle = editorRef.current;
     if (!handle) return;
+
+    /* ---- 图片：唤起系统选择器 → 压缩 → 存 IndexedDB → 插入 local: 引用 ---- */
+    if (action.kind === 'image') {
+      void (async () => {
+        const file = await pickSingleImage();
+        if (!file) return; // 用户取消，静默返回
+        try {
+          const compressed = await compressImage(file);
+          const id = await putImage(compressed);
+          resolvedIdsRef.current.add(id);
+          // 光标落在 alt 位置（`![` 之后），方便顺手补一句描述
+          handle.insertAtCursor(`![](local:${id})`, 2);
+        } catch (err) {
+          console.error('[MemoPage] 图片插入失败:', err);
+          window.alert('图片插入失败：' + (err instanceof Error ? err.message : String(err)));
+        }
+      })();
+      return;
+    }
+
     const snippet = action.snippet;
 
     // 包裹类符号（B / I / S / `）：选中文字则自动包起来
@@ -191,6 +252,47 @@ export function MemoPage() {
     if (offset === null) return;
     setShowOutline(false);
     setTimeout(() => editorRef.current?.jumpToOffset(offset), 80);
+  }, [content]);
+
+  /* ---- 解析正文里的本地图片（local:<id> → blob URL） ---- */
+  useEffect(() => {
+    const ids = extractLocalImageIds(content);
+    const fresh = ids.filter(id => !resolvedIdsRef.current.has(id));
+    if (fresh.length === 0) return;
+    fresh.forEach(id => resolvedIdsRef.current.add(id));
+
+    let cancelled = false;
+    (async () => {
+      const urls = await Promise.all(fresh.map(ensureImageUrl));
+      if (cancelled || !urls.some(Boolean)) return;
+      // 编辑器是懒加载 chunk，首次进入可能还没挂载 → 稍后补刷一次
+      editorRef.current?.refreshDecorations();
+      setTimeout(() => {
+        if (!cancelled) editorRef.current?.refreshDecorations();
+      }, 400);
+    })();
+
+    return () => { cancelled = true; };
+  }, [content]);
+
+  /**
+   * 跳到上一个 / 下一个 # 标题。
+   * 按钮已 preventDefault，不会让编辑器失焦，所以键盘不会闪。
+   */
+  const jumpToHeading = useCallback((dir: -1 | 1) => {
+    const list = extractHeadings(content)
+      .map(h => ({ ...h, offset: offsetOfLine(content, h.line) }))
+      .sort((a, b) => a.offset - b.offset);
+    if (list.length === 0) return;
+
+    const cursor = editorRef.current?.getCursorOffset() ?? 0;
+    if (dir === 1) {
+      const next = list.find(h => h.offset > cursor);
+      if (next) editorRef.current?.jumpToOffset(next.offset);
+    } else {
+      const prev = [...list].reverse().find(h => h.offset < cursor);
+      editorRef.current?.jumpToOffset(prev ? prev.offset : 0);
+    }
   }, [content]);
 
   /** 切换文档 */
@@ -330,7 +432,33 @@ export function MemoPage() {
       <footer className="memo-footer">
         <span>{charCount} 字</span>
         <span className="memo-footer-anchor">
-          {activeAnchor ? `定位：${activeAnchor}` : '定位：无（光标移到 # 标题下即可记住）'}
+          <button
+            className="memo-footer-nav"
+            onPointerDown={e => e.preventDefault()}
+            onClick={() => jumpToHeading(-1)}
+            type="button"
+            title="上一个 # 标题"
+            aria-label="上一个标题"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m18 15-6-6-6 6" />
+            </svg>
+          </button>
+          <button
+            className="memo-footer-nav"
+            onPointerDown={e => e.preventDefault()}
+            onClick={() => jumpToHeading(1)}
+            type="button"
+            title="下一个 # 标题"
+            aria-label="下一个标题"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m6 9 6 6 6-6" />
+            </svg>
+          </button>
+          <span className="memo-footer-anchor-text">
+            {activeAnchor ? `定位：${activeAnchor}` : '定位：无（光标移到 # 标题下即可记住）'}
+          </span>
         </span>
       </footer>
     </div>

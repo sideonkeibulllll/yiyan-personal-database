@@ -1,57 +1,20 @@
 // Cloudflare D1 REST API 客户端 — 函数式扁平结构
-// 参照 Blog 项目 d1.ts 重构：原生端用 CapacitorHttp 绕过 CORS，Web 端用 fetch
+// v2.7.0：**只走中转站**（Cloudflare Worker 代理），D1 直连与 apiToken 已移除。
+// 原生端用 CapacitorHttp 绕过 CORS，Web 端用 fetch。
 import { CapacitorHttp, Capacitor } from "@capacitor/core";
-import { D1_API, CF, TRANSFER_STATION } from "@/config/cloudflare";
+import { TRANSFER_STATION } from "@/config/cloudflare";
 import { D1_INIT_SQL } from "./cloudBackupTypes";
 
 type SqlParam = string | number | null | undefined;
 
 /**
- * 执行 SQL 查询（自动选择直连/中转站）
+ * 执行 SQL 查询（走中转站）
  */
 export async function d1Query<T = any>(
   sql: string,
   params: SqlParam[] = [],
 ): Promise<T[]> {
-  if (TRANSFER_STATION.url) {
-    return d1QueryViaTransferStation<T>(sql, params);
-  }
-  return d1QueryDirect<T>(sql, params);
-}
-
-/** 直连 Cloudflare D1 REST API */
-async function d1QueryDirect<T = any>(
-  sql: string,
-  params: SqlParam[] = [],
-): Promise<T[]> {
-  const options = {
-    url: D1_API,
-    headers: {
-      Authorization: `Bearer ${CF.d1ApiToken}`,
-      "Content-Type": "application/json",
-    },
-    data: { sql, params },
-  };
-
-  let json: any;
-  if (Capacitor.isNativePlatform()) {
-    const res = await CapacitorHttp.post(options);
-    if (res.status < 200 || res.status >= 300) {
-      throw new Error(`D1 HTTP ${res.status}: ${JSON.stringify(res.data).slice(0, 300)}`);
-    }
-    json = typeof res.data === "string" ? JSON.parse(res.data) : res.data;
-  } else {
-    const res = await fetch(D1_API, {
-      method: "POST",
-      headers: options.headers,
-      body: JSON.stringify(options.data),
-    });
-    if (!res.ok) throw new Error(`D1 HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
-    json = await res.json();
-  }
-
-  if (!json.success) throw new Error(`D1 查询失败: ${JSON.stringify(json.errors)}`);
-  return (json.result?.[0]?.results ?? []) as T[];
+  return d1QueryViaTransferStation<T>(sql, params);
 }
 
 /** 走中转站 D1 查询 */

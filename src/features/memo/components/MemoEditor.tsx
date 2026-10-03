@@ -18,7 +18,7 @@ import {
 } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
-import { livePreview } from './livePreview';
+import { livePreview, forceRerenderDecorations } from './livePreview';
 import { findHeadingAtCursor } from '../memoMarkdown';
 
 export interface MemoEditorHandle {
@@ -40,6 +40,10 @@ export interface MemoEditorHandle {
    */
   snapshotSelection: () => void;
   reportAnchor: () => void;
+  /** 取当前光标（或选区末端）的字符偏移 —— 「跳上一个/下一个 # 标题」用 */
+  getCursorOffset: () => number;
+  /** 强制重建装饰 —— 本地图片 blob URL 就绪后调用（文档没变但渲染要更新） */
+  refreshDecorations: () => void;
 }
 
 interface MemoEditorProps {
@@ -213,6 +217,16 @@ export const MemoEditor = forwardRef<MemoEditorHandle, MemoEditorProps>(function
       const view = viewRef.current;
       if (!view) return;
       cbs.current.onAnchorChange(findHeadingAtCursor(view.state.doc.toString(), lastSelRef.current.from));
+    },
+    getCursorOffset() {
+      const view = viewRef.current;
+      if (!view) return 0;
+      // 有焦点时以真实光标为准；失焦后 CM 可能把 selection 归零，改用快照
+      return view.hasFocus ? view.state.selection.main.head : lastSelRef.current.to;
+    },
+    refreshDecorations() {
+      // 空 transaction 不会触发 StateField.update 重建，必须走 StateEffect
+      viewRef.current?.dispatch({ effects: forceRerenderDecorations.of(null) });
     },
   }), []);
 

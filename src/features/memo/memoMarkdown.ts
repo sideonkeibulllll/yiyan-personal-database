@@ -54,15 +54,21 @@ export function findHeadingAtCursor(content: string, selectionStart: number): st
   return found ? found.text : null;
 }
 
+/** 计算某一行的起始字符偏移（0 基行号）。用于「跳上一个/下一个标题」。 */
+export function offsetOfLine(content: string, line: number): number {
+  const lines = content.split('\n');
+  const clamped = Math.max(0, Math.min(line, Math.max(lines.length - 1, 0)));
+  let offset = 0;
+  for (let i = 0; i < clamped; i++) offset += lines[i].length + 1;
+  return offset;
+}
+
 /** 计算某个标题在正文中的字符偏移（用于 textarea 光标定位） */
 export function offsetOfHeading(content: string, anchorText: string): number | null {
   const headings = extractHeadings(content);
   const hit = headings.find(h => h.text === anchorText);
   if (!hit) return null;
-  const lines = content.split('\n');
-  let offset = 0;
-  for (let i = 0; i < hit.line; i++) offset += lines[i].length + 1;
-  return offset;
+  return offsetOfLine(content, hit.line);
 }
 
 /** 简易 Markdown 渲染（预览用，独立于 utils/markdown.ts） */
@@ -146,12 +152,17 @@ export interface FormatAction {
   snippet: string;
   /** 光标最终偏移（相对插入文本起点；-1 表示放末尾） */
   caret?: number;
+  /**
+   * 特殊动作标记：不走「插入文本」流程，由父组件接管。
+   * - `image`：唤起系统图片选择器，压缩后存 IndexedDB 并插入 `![](local:<id>)`
+   */
+  kind?: 'image';
 }
 
 export const FORMAT_ACTIONS: FormatAction[] = [
-  { label: 'H1', snippet: '# ' },
-  { label: 'H2', snippet: '## ' },
-  { label: 'H3', snippet: '### ' },
+  // v2.7.0：H1/H2/H3 合并为单个 # —— 点击只插入一个 "#"，不加空格
+  //（markdown 语义上的「# + 空格」由主人自己敲，不做任何判定/递增逻辑）
+  { label: '#', snippet: '#' },
   { label: 'B', snippet: '****', caret: 2 },
   { label: 'I', snippet: '**', caret: 1 },
   { label: 'S', snippet: '~~~~', caret: 2 },
@@ -161,7 +172,8 @@ export const FORMAT_ACTIONS: FormatAction[] = [
   { label: '1.', snippet: '1. ' },
   { label: '[]', snippet: '- [ ] ' },
   { label: '链接', snippet: '[](url)', caret: 1 },
-  { label: '图片', snippet: '![](url)', caret: 2 },
+  // 图片：唤起系统单图选择器（不再插入 ![](url)，要写 URL 直接关掉选择器手写即可）
+  { label: '图片', snippet: '', kind: 'image' },
   { label: '表格', snippet: '| 列1 | 列2 |\n| --- | --- |\n| 内容 | 内容 |\n' },
   { label: '---', snippet: '\n---\n' },
   { label: '代码', snippet: '```\n\n```', caret: 4 },

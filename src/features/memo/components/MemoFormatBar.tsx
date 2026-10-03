@@ -18,23 +18,33 @@ interface MemoFormatBarProps {
 export function MemoFormatBar({ onInsert, onBeforeInsert }: MemoFormatBarProps) {
   return (
     <div className="memo-format-bar">
-      {FORMAT_ACTIONS.map(action => (
-        <button
-          key={action.label}
-          className="memo-format-btn"
-          onPointerDown={e => {
-            // 快照选区 → 再阻止焦点转移
-            onBeforeInsert();
-            e.preventDefault();
-          }}
-          onMouseDown={e => e.preventDefault()}
-          onClick={() => onInsert(action)}
-          type="button"
-          title={action.label}
-        >
-          {action.label}
-        </button>
-      ))}
+      {FORMAT_ACTIONS.map(action => {
+        /**
+         * 图片按钮要唤起系统文件选择器，必须保留浏览器的「用户激活」状态，
+         * 所以它不能 preventDefault（否则 input.click() 会被 WebView 拒绝）。
+         * 其余按钮照旧 preventDefault，避免编辑器失焦、键盘闪烁。
+         */
+        const needsUserActivation = action.kind === 'image';
+        return (
+          <button
+            key={action.label}
+            className="memo-format-btn"
+            onPointerDown={e => {
+              // 快照选区 → 再阻止焦点转移
+              onBeforeInsert();
+              if (!needsUserActivation) e.preventDefault();
+            }}
+            onMouseDown={e => {
+              if (!needsUserActivation) e.preventDefault();
+            }}
+            onClick={() => onInsert(action)}
+            type="button"
+            title={action.label}
+          >
+            {action.label}
+          </button>
+        );
+      })}
     </div>
   );
 }

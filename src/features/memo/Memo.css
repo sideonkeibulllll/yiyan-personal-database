@@ -300,17 +300,131 @@
   font-style: normal;
 }
 
-/* 列表行：用伪元素补回被隐藏的「-」项目符号 */
-.memo-editor-cm .cm-line:has(.cm-md-li) {
-  padding-left: 1.15em;
+/* ===== 列表（v2.7.0：无序 / 有序 / 任务 分别处理）===== */
+
+/* 无序列表行：标记「-」已被隐藏，用伪元素补回 • */
+.memo-editor-cm .cm-line:has(.cm-md-li-ul) {
   position: relative;
+  padding-left: 1.15em;
 }
 
-.memo-editor-cm .cm-line:has(.cm-md-li)::before {
+.memo-editor-cm .cm-line:has(.cm-md-li-ul)::before {
   content: "•";
   position: absolute;
   left: 0.35em;
   color: var(--color-text-tertiary);
+}
+
+/* 任务列表行：勾选框本身就是符号，不再补圆点 */
+.memo-editor-cm .cm-line:has(.cm-md-li-task) {
+  position: relative;
+  padding-left: 1.6em;
+}
+
+/* 任务勾选框（点击可切换） */
+.memo-editor-cm .cm-md-task-box {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 1.05em;
+  height: 1.05em;
+  margin-right: 0.45em;
+  vertical-align: -0.17em;
+  border: 1.5px solid var(--color-border-accent);
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out),
+              border-color var(--duration-fast) var(--ease-out);
+}
+
+.memo-editor-cm .cm-md-task-box.is-checked {
+  background: var(--color-accent-primary);
+  border-color: var(--color-accent-primary);
+}
+
+.memo-editor-cm .cm-md-task-box.is-checked::after {
+  content: "";
+  width: 0.28em;
+  height: 0.52em;
+  border: solid var(--color-bg-primary);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg) translate(-0.05em, -0.08em);
+}
+
+/* 有序列表行：序号由 widget 提供，行本身只做缩进 */
+.memo-editor-cm .cm-line:has(.cm-md-li-ol) {
+  padding-left: 0.2em;
+}
+
+.memo-editor-cm .cm-md-ol-num {
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+/* 嵌套列表缩进（1~6 级，每级 1.2em） */
+.memo-editor-cm .cm-line:has(.cm-md-indent-1) { padding-left: 2.35em; }
+.memo-editor-cm .cm-line:has(.cm-md-indent-2) { padding-left: 3.55em; }
+.memo-editor-cm .cm-line:has(.cm-md-indent-3) { padding-left: 4.75em; }
+.memo-editor-cm .cm-line:has(.cm-md-indent-4) { padding-left: 5.95em; }
+.memo-editor-cm .cm-line:has(.cm-md-indent-5) { padding-left: 7.15em; }
+.memo-editor-cm .cm-line:has(.cm-md-indent-6) { padding-left: 8.35em; }
+
+.memo-editor-cm .cm-line:has(.cm-md-indent-1)::before { left: 1.55em; }
+.memo-editor-cm .cm-line:has(.cm-md-indent-2)::before { left: 2.75em; }
+.memo-editor-cm .cm-line:has(.cm-md-indent-3)::before { left: 3.95em; }
+.memo-editor-cm .cm-line:has(.cm-md-indent-4)::before { left: 5.15em; }
+.memo-editor-cm .cm-line:has(.cm-md-indent-5)::before { left: 6.35em; }
+.memo-editor-cm .cm-line:has(.cm-md-indent-6)::before { left: 7.55em; }
+
+/* ===== 表格（v2.7.0）===== */
+.memo-editor-cm .cm-md-table {
+  margin: 0.6em 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.memo-editor-cm .cm-md-table table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.92em;
+  line-height: 1.5;
+}
+
+.memo-editor-cm .cm-md-table th,
+.memo-editor-cm .cm-md-table td {
+  border: 1px solid var(--color-border-primary);
+  padding: 0.35em 0.6em;
+  text-align: left;
+  vertical-align: top;
+}
+
+.memo-editor-cm .cm-md-table th {
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.memo-editor-cm .cm-md-table td {
+  color: var(--color-text-secondary);
+}
+
+.memo-editor-cm .cm-md-table code {
+  padding: 0.1em 0.3em;
+  border-radius: var(--radius-xs);
+  background: var(--color-bg-float);
+  color: var(--color-accent-tertiary);
+  font-family: ui-monospace, monospace;
+  font-size: 0.9em;
+}
+
+/* 缩进代码块（4 空格 / Tab）：行首缩进已被隐藏，整块加底色 */
+.memo-editor-cm .cm-md-fenced-code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.9em;
+  color: var(--color-text-secondary);
 }
 
 /* 引用行左侧竖条（对齐 Obsidian / 博客正文观感） */
@@ -331,7 +445,7 @@
 }
 
 .memo-editor-cm .cm-md-li {
-  /* 列表项本身无特殊样式；项目符号由行伪元素提供 */
+  /* 列表项本身无特殊样式；项目符号 / 序号由行伪元素或 widget 提供 */
 }
 
 /* === 分割线（整行替换成一条横线）=== */
@@ -356,6 +470,16 @@
   max-height: 40vh;
   border-radius: var(--radius-sm);
   display: block;
+}
+
+/* 本地图片（local:<id>）尚未解析出 blob URL 时的占位 */
+.memo-editor-cm .cm-md-image-pending {
+  display: inline-block;
+  padding: 0.15em 0.6em;
+  border-radius: var(--radius-xs);
+  background: var(--color-bg-float);
+  color: var(--color-text-tertiary);
+  font-size: 0.9em;
 }
 
 /* === 活动行（只给文字加很轻的底色，帮助确认光标位置）=== */
@@ -568,8 +692,38 @@
 }
 
 .memo-footer-anchor {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  max-width: 80%;
+}
+
+.memo-footer-anchor-text {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 70%;
+  min-width: 0;
+}
+
+/* 上一个 / 下一个 # 标题（v2.7.0） */
+.memo-footer-nav {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-xs);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-primary);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.memo-footer-nav:active {
+  color: var(--color-accent-primary);
+  border-color: var(--color-border-accent);
+  transform: scale(0.92);
 }

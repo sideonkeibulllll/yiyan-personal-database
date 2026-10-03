@@ -2,9 +2,22 @@
  * 设置状态管理
  */
 import { create } from 'zustand';
-import type { Settings } from '@/types';
+import type { CloudConfig, Settings } from '@/types';
 import { DEFAULT_SETTINGS, migrateAIConfig } from '@/types';
 import { getDatabase } from '@/services/database';
+import { setTransferConfig } from '@/config/cloudflare';
+
+/** 设置里存的中转站配置 → 注入到运行时的 Cloudflare 客户端 */
+export function applyCloudConfig(settings: Settings): void {
+  const c = settings.cloud;
+  setTransferConfig({
+    url: c?.url || undefined,
+    token: c?.token || undefined,
+    db: c?.db || undefined,
+    bucket: c?.bucket || undefined,
+    publicDomain: c?.publicDomain || undefined,
+  });
+}
 
 interface SettingsStore {
   settings: Settings;
@@ -16,6 +29,8 @@ interface SettingsStore {
   updatePushConfig: (config: Partial<Settings['push']>) => void;
   updateRandomConfig: (config: Partial<Settings['random']>) => void;
   updateTodoConfig: (config: Partial<Settings['todo']>) => void;
+  /** Cloudflare 中转站配置（v2.7.0：密钥手填） */
+  updateCloudConfig: (config: Partial<CloudConfig>) => void;
   resetSettings: () => void;
 }
 
@@ -49,6 +64,10 @@ function normalizeSettings(raw: Partial<Settings>): Settings {
     },
   };
   merged.ai = migrateAIConfig(merged.ai);
+  merged.cloud = {
+    ...DEFAULT_SETTINGS.cloud,
+    ...(raw.cloud || {}),
+  };
   return merged;
 }
 
@@ -90,14 +109,19 @@ async function loadFromDatabase(): Promise<Settings | null> {
   }
 }
 
+/** 启动时先注入一次（localStorage 里可能已有用户手填的中转站密钥） */
+const initialSettings = loadFromLocalStorage();
+applyCloudConfig(initialSettings);
+
 export const useSettingsStore = create<SettingsStore>((set, get) => ({
-  settings: loadFromLocalStorage(),
+  settings: initialSettings,
   isLoaded: false,
 
   loadSettings: async () => {
     const dbSettings = await loadFromDatabase();
     if (dbSettings) {
       const merged = normalizeSettings(dbSettings);
+      applyCloudConfig(merged);
       saveToLocalStorage(merged);
       set({ settings: merged, isLoaded: true });
       return;
@@ -108,6 +132,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   setSettings: (settings) => {
     // 云备份恢复可能带回老结构，统一走一次归一化
     const normalized = normalizeSettings(settings);
+    applyCloudConfig(normalized);
     saveToLocalStorage(normalized);
     saveToDatabase(normalized);
     set({ settings: normalized });
@@ -163,7 +188,20 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     set({ settings });
   },
 
+  updateCloudConfig: (config) => {
+    const settings = {
+      ...get().settings,
+      cloud: { ...get().settings.cloud, ...config },
+    };
+    // 立即注入运行时，设置页保存后无需重启
+    applyCloudConfig(settings);
+    saveToLocalStorage(settings);
+    saveToDatabase(settings);
+    set({ settings });
+  },
+
   resetSettings: () => {
+    applyCloudConfig(DEFAULT_SETTINGS);
     saveToLocalStorage(DEFAULT_SETTINGS);
     saveToDatabase(DEFAULT_SETTINGS);
     set({ settings: DEFAULT_SETTINGS });
