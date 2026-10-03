@@ -131,6 +131,46 @@ export function extractLocalImageIds(content: string): string[] {
   return [...ids];
 }
 
+/** 列出 IndexedDB 里所有图片 id（getAllKeys 是一次读取，比逐条 get 快得多） */
+export async function getAllImageIds(): Promise<string[]> {
+  try {
+    const keys = await tx<IDBValidKey[]>('readonly', store => store.getAllKeys());
+    return keys.map(k => String(k));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 清理「没有被任何备忘录正文引用」的本地图片（孤儿图）。
+ *
+ * ⚠️ `usedIds` 必须来自**所有备忘录文档**的引用合集（外加当前正在编辑的正文），
+ * 只传当前文档的话会把其它文档正在用的图片删掉。
+ *
+ * @returns 实际删除的数量
+ */
+export async function pruneUnusedImages(usedIds: Iterable<string>): Promise<number> {
+  const used = new Set(usedIds);
+  const all = await getAllImageIds();
+  const orphans = all.filter(id => !used.has(id));
+  if (orphans.length === 0) return 0;
+  await Promise.all(orphans.map(id => deleteImage(id)));
+  return orphans.length;
+}
+
+/**
+ * 释放所有缓存的 blob URL。
+ *
+ * 在离开备忘录页时调用 —— blob URL 是页面级资源，不主动 revoke 的话
+ * 会随着浏览的图片越来越多而一直累积（内存只增不减）。
+ * 刻意**不做使用中淘汰**：一旦 revoke 掉正在渲染的图片，画面会直接变空白。
+ */
+export function releaseAllImageUrls(): void {
+  urlCache.forEach(url => URL.revokeObjectURL(url));
+  urlCache.clear();
+  pending.clear();
+}
+
 /* ------------------------------------------------------------------ *
  * 图片压缩
  * ------------------------------------------------------------------ */

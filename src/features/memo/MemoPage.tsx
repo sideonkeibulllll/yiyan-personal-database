@@ -22,6 +22,7 @@ import {
 } from '@/services/memoDatabase';
 import {
   compressImage, ensureImageUrl, extractLocalImageIds, putImage,
+  pruneUnusedImages, releaseAllImageUrls,
 } from '@/services/memoImageStore';
 import type { MemoEditorHandle } from './components/MemoEditor';
 import { MemoFormatBar } from './components/MemoFormatBar';
@@ -98,6 +99,9 @@ export function MemoPage() {
   const didJumpRef = useRef(false);
   /** 已经解析过 blob URL 的本地图片 id（避免重复解析） */
   const resolvedIdsRef = useRef<Set<string>>(new Set());
+  /** 最近一次正文（供清理孤儿图时读取，避免把 content 塞进依赖导致频繁重建） */
+  const contentRef = useRef('');
+  contentRef.current = content;
 
   const headings = useMemo(() => extractHeadings(content), [content]);
 
@@ -272,9 +276,28 @@ export function MemoPage() {
 
     let cancelled = false;
     (async () => {
-      const urls = await Promise.all(fresh.map(ensureImageUrl));
-      if (cancelled || !urls.some(Boolean)) return;
-      // 编辑器是懒加载 chunk，首次进入可能还没挂载 → 稍后补刷一次
+      /**
+       * 分批解析，一批 8 张。
+       * 之前是 `Promise.all(fresh.map(ensureImageUrl))` —— 文档里引用上千张图时
+       * 会**瞬间**同时发起上千个 createObjectURL + 渲染，进文档那一刻直接卡死。
+       */
+      const BATCH = 8;
+      let hasAny = false;
+      for (let i = 0; i < fresh.length; i += BATCH) {
+        if (cancelled) return;
+        const batch = fresh.slice(i, i + BATCH);
+        const urls = await Promise.all(batch.map(ensureImageUrl));
+        if (cancelled) return;
+        if (urls.some(Boolean)) {
+          if (!hasAny) {
+            hasAny = true;
+            // 第一批完成就先刷一次，让开头的图尽快出现
+            editorRef.current?.refreshDecorations();
+          }
+        }
+      }
+      if (!hasAny) return;
+      // 编辑器是懒加载 chunk，首次进入可能还没挂载 → 稍后补刷一次兜底
       editorRef.current?.refreshDecorations();
       setTimeout(() => {
         if (!cancelled) editorRef.current?.refreshDecorations();
@@ -283,6 +306,35 @@ export function MemoPage() {
 
     return () => { cancelled = true; };
   }, [content]);
+
+  /**
+   * 清理没有被任何备忘录引用的本地图片（孤儿图）。
+   *
+   * ⚠️ 基准 = 「所有备忘录文档的引用」∪「当前正在编辑的正文」。
+   * 只看当前文档会误删其它文档正在用的图；不算当前正文则会误删刚插入还没落盘的图。
+   */
+  const pruneOrphanImages = useCallback(async () => {
+    try {
+      const memos = await getAllMemos();
+      const used = new Set<string>();
+      memos.forEach(m => extractLocalImageIds(m.content).forEach(id => used.add(id)));
+      extractLocalImageIds(contentRef.current).forEach(id => used.add(id));
+      const removed = await pruneUnusedImages(used);
+      if (removed > 0) console.log(`[MemoPage] 已清理 ${removed} 张无引用图片`);
+    } catch (err) {
+      console.warn('[MemoPage] 清理孤儿图片失败:', err);
+    }
+  }, []);
+
+  // 进入 / 切换文档后延迟清理一次孤儿图（避开刚打开页面的 IO 高峰）
+  useEffect(() => {
+    if (!memo?.id) return;
+    const t = setTimeout(() => { void pruneOrphanImages(); }, 3000);
+    return () => clearTimeout(t);
+  }, [memo?.id, pruneOrphanImages]);
+
+  // 离开备忘录页时释放所有 blob URL，避免内存只增不减
+  useEffect(() => () => { releaseAllImageUrls(); }, []);
 
   /**
    * 跳到上一个 / 下一个 # 标题。
@@ -350,7 +402,9 @@ export function MemoPage() {
     }
     setAllMemos(await getAllMemos());
     setShowMenu(false);
-  }, [memo]);
+    // 被删文档引用的图片可能再也没人用了 → 立刻清一次
+    void pruneOrphanImages();
+  }, [memo, pruneOrphanImages]);
 
   const charCount = content.length;
   const saveLabel = savedAt

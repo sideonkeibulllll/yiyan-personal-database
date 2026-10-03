@@ -148,6 +148,8 @@ export function RandomPage() {
 
   // 每张卡片的长按计时器
   const longPressTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  /** 长按起点坐标 —— 用来判断手指是否在滑动（即用户其实想滚动列表） */
+  const pressStartPosRef = useRef<Map<string, { x: number; y: number }>>(new Map());
   const [pressedId, setPressedId] = useState<string | null>(null);
 
   // 筛选条件
@@ -315,9 +317,19 @@ export function RandomPage() {
     });
   }, [addTodo]);
 
+  /**
+   * 手指在卡片上移动超过这么多像素，就判定为「用户其实在滚动」而不是长按。
+   * 修复：以前卡片只绑了 touchStart / touchEnd —— 滚动时手指始终没离开卡片，
+   * touchend 不触发，500ms 的计时器照常走完，于是「滚动」被误判成「长按」弹出悬浮菜单。
+   */
+  const LONG_PRESS_MOVE_TOLERANCE = 8;
+
   // 长按开始
-  const handlePressStart = useCallback((entryId: string) => {
+  const handlePressStart = useCallback((entryId: string, clientX?: number, clientY?: number) => {
     setPressedId(entryId);
+    if (typeof clientX === 'number' && typeof clientY === 'number') {
+      pressStartPosRef.current.set(entryId, { x: clientX, y: clientY });
+    }
     const timer = setTimeout(() => {
       const entry = currentEntries.find(e => e.id === entryId);
       if (entry) {
@@ -331,6 +343,7 @@ export function RandomPage() {
         setShowMenu(true);
       }
       setPressedId(null);
+      pressStartPosRef.current.delete(entryId);
     }, 500);
     longPressTimersRef.current.set(entryId, timer);
   }, [currentEntries]);
@@ -338,11 +351,38 @@ export function RandomPage() {
   // 长按结束
   const handlePressEnd = useCallback((entryId: string) => {
     setPressedId(null);
+    pressStartPosRef.current.delete(entryId);
     const timer = longPressTimersRef.current.get(entryId);
     if (timer) {
       clearTimeout(timer);
       longPressTimersRef.current.delete(entryId);
     }
+  }, []);
+
+  /** 手指移动：超过容差就取消长按（滚动优先于长按） */
+  const handlePressMove = useCallback((entryId: string, clientX: number, clientY: number) => {
+    const start = pressStartPosRef.current.get(entryId);
+    if (!start) return;
+    if (Math.hypot(clientX - start.x, clientY - start.y) > LONG_PRESS_MOVE_TOLERANCE) {
+      handlePressEnd(entryId);
+    }
+  }, [handlePressEnd]);
+
+  /**
+   * 兜底：只要发生滚动，就立刻取消所有长按计时器。
+   * touchmove 在滚动过程中可能被浏览器「吃掉」（passive listener / touch-action），
+   * 所以在捕获阶段再监听一次 scroll，双保险。
+   */
+  useEffect(() => {
+    const cancelAll = () => {
+      if (longPressTimersRef.current.size === 0) return;
+      longPressTimersRef.current.forEach(timer => clearTimeout(timer));
+      longPressTimersRef.current.clear();
+      pressStartPosRef.current.clear();
+      setPressedId(null);
+    };
+    window.addEventListener('scroll', cancelAll, { capture: true, passive: true });
+    return () => window.removeEventListener('scroll', cancelAll, true);
   }, []);
 
   // 切换星标
@@ -483,11 +523,16 @@ export function RandomPage() {
                     key={entry.id}
                     className={`card-item ${pressedId === entry.id ? 'pressed' : ''}`}
                     onClick={() => handleCopy(entry)}
-                    onMouseDown={() => handlePressStart(entry.id)}
+                    onMouseDown={(e) => handlePressStart(entry.id, e.clientX, e.clientY)}
                     onMouseUp={() => handlePressEnd(entry.id)}
                     onMouseLeave={() => handlePressEnd(entry.id)}
-                    onTouchStart={() => handlePressStart(entry.id)}
+                    onTouchStart={(e) => handlePressStart(entry.id, e.touches[0]?.clientX, e.touches[0]?.clientY)}
+                    onTouchMove={(e) => {
+                      const t = e.touches[0];
+                      if (t) handlePressMove(entry.id, t.clientX, t.clientY);
+                    }}
                     onTouchEnd={() => handlePressEnd(entry.id)}
+                    onTouchCancel={() => handlePressEnd(entry.id)}
                   >
                     <div className="entry-card glass">
                       <div className="card-content">
