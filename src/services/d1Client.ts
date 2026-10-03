@@ -2,7 +2,7 @@
 // v2.7.0：**只走中转站**（Cloudflare Worker 代理），D1 直连与 apiToken 已移除。
 // 原生端用 CapacitorHttp 绕过 CORS，Web 端用 fetch。
 import { CapacitorHttp, Capacitor } from "@capacitor/core";
-import { TRANSFER_STATION } from "@/config/cloudflare";
+import { TRANSFER_STATION, assertTransferReady } from "@/config/cloudflare";
 import { D1_INIT_SQL } from "./cloudBackupTypes";
 
 type SqlParam = string | number | null | undefined;
@@ -22,6 +22,8 @@ async function d1QueryViaTransferStation<T = any>(
   sql: string,
   params: SqlParam[] = [],
 ): Promise<T[]> {
+  // 先给出人话错误，避免原生端抛 "no protocol" 这种看不出所以然的异常
+  assertTransferReady();
   const url = `${TRANSFER_STATION.url}/d1/query`;
   const body = { db: TRANSFER_STATION.db, sql, params };
 

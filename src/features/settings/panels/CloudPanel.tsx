@@ -93,6 +93,9 @@ export function CloudPanel({
           autoComplete="off"
           spellCheck={false}
         />
+        <div className="form-hint">
+          不用写 <code>https://</code>，会自动补全；留空则用默认地址
+        </div>
       </div>
 
       <div className="form-group">

@@ -4,7 +4,7 @@
 // 直连模式（aws4fetch 签名 + R2 AK/SK + R2_ENDPOINT）已整体移除，
 // 因为那些密钥会被打包进 APK。附件读取仍可用公开域名直链（非密钥）。
 import { CapacitorHttp, Capacitor } from "@capacitor/core";
-import { CF, TRANSFER_STATION } from "@/config/cloudflare";
+import { CF, TRANSFER_STATION, assertTransferReady } from "@/config/cloudflare";
 
 function extOf(name: string, mime: string): string {
   const m = /\.([a-zA-Z0-9]+)$/.exec(name);
@@ -70,6 +70,7 @@ async function r2PutViaTransferStation(
   data: Uint8Array,
   contentType: string,
 ): Promise<void> {
+  assertTransferReady();
   const url = `${TRANSFER_STATION.url}/r2/put/${encodeURIComponent(key)}?bucket=${TRANSFER_STATION.bucket}`;
 
   if (Capacitor.isNativePlatform()) {
@@ -125,6 +126,7 @@ export async function r2GetBase64(key: string): Promise<string> {
 
 /** 走中转站下载 */
 async function r2GetViaTransferStation(key: string): Promise<Uint8Array> {
+  assertTransferReady();
   const url = `${TRANSFER_STATION.url}/r2/get?bucket=${TRANSFER_STATION.bucket}&key=${encodeURIComponent(key)}`;
 
   if (Capacitor.isNativePlatform()) {
@@ -165,9 +167,7 @@ async function r2GetViaTransferStation(key: string): Promise<Uint8Array> {
  */
 export async function r2TestConnection(): Promise<{ ok: boolean; message: string }> {
   try {
-    if (!TRANSFER_STATION.token) {
-      return { ok: false, message: "未填写中转站密钥" };
-    }
+    assertTransferReady();
 
     const url = `${TRANSFER_STATION.url}/r2/get?bucket=${TRANSFER_STATION.bucket}&key=__connection_test__`;
 
