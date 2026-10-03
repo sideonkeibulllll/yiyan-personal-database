@@ -30,8 +30,10 @@ Thumbs.db
 .env.local
 .env.*.local
 
-# Secret-bearing config (keys injected at build time via .env; file itself must NOT be tracked)
-src/config/cloudflare.ts
+# Cloudflare 接入配置
+# 自 v2.7.1 起**纳入版本管理**：该文件已不含任何密钥
+# （token 由用户在「设置 → 云端备份」手填，存本机；D1/R2 直连密钥与端点已整体删除）
+# ⚠️ 后续规矩不变：任何真实 token / AK·SK 一律不得写进源码或本文件。
 
 # Local-only helper scripts
 _apkserve.py
