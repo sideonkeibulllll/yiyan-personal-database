@@ -499,10 +499,22 @@ export function SettingsPage() {
   const handleTestCloud = async () => {
     if (!cloudModule) return;
     setCloudBusy(true);
-    setCloudMessage('正在测试连接...');
+    setCloudMessage('正在测试 D1 连接…');
     try {
-      const result = await cloudModule.testCloudConnection();
-      setCloudMessage(`D1: ${result.d1}\nR2: ${result.r2}`);
+      /**
+       * D1 通常 <1s，R2 探测要 2~4s（它会真的走一趟 Worker → R2 取一个不存在的对象）。
+       * 分开 await，让先回来的先显示 —— 之前用 Promise.all 会让人对着「测试中」干等最慢的那个。
+       */
+      const d1Promise = cloudModule.d1TestConnection();
+      const r2Promise = cloudModule.r2TestConnection().catch(err => ({
+        ok: false,
+        message: err instanceof Error ? err.message : 'R2 探测异常',
+      }));
+
+      const d1 = await d1Promise;
+      setCloudMessage(`D1: ${d1.message}\nR2: 测试中…（R2 要走一趟中转站 → R2，会慢几秒）`);
+      const r2 = await r2Promise;
+      setCloudMessage(`D1: ${d1.message}\nR2: ${r2.message}`);
     } catch (err) {
       setCloudMessage(`测试失败: ${err instanceof Error ? err.message : '未知错误'}`);
     } finally {

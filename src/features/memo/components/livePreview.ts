@@ -26,7 +26,7 @@ import { RangeSetBuilder, StateField, StateEffect } from '@codemirror/state';
 import type { EditorState as EditorStateType, Extension } from '@codemirror/state';
 import { syntaxTree } from '@codemirror/language';
 import type { SyntaxNode } from '@lezer/common';
-import { getCachedImageUrl } from '@/services/memoImageStore';
+import { getCachedImageUrl, ensureImageUrl } from '@/services/memoImageStore';
 
 /* ------------------------------------------------------------------ *
  * 图片内联预览 Widget
@@ -68,10 +68,29 @@ class LocalImagePendingWidget extends WidgetType {
     return other.id === this.id && other.alt === this.alt;
   }
 
-  toDOM(): HTMLElement {
+  toDOM(view: EditorView): HTMLElement {
     const wrap = document.createElement('span');
     wrap.className = 'cm-md-image cm-md-image-pending';
     wrap.textContent = this.alt ? `图片：${this.alt}` : '图片加载中…';
+    wrap.title = '点一下重新加载';
+
+    const stop = (e: Event) => { e.preventDefault(); e.stopPropagation(); };
+    wrap.addEventListener('mousedown', stop);
+    wrap.addEventListener('touchstart', stop, { passive: false });
+    wrap.addEventListener('click', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      wrap.textContent = '正在重新加载…';
+      // 手动重试：从 IndexedDB 再取一次，拿到就重绘，拿不到就是本地缓存真丢了
+      void ensureImageUrl(this.id).then(url => {
+        if (url) {
+          view.dispatch({ effects: forceRerenderDecorations.of(null) });
+        } else {
+          wrap.textContent = '图片不存在（本地缓存已丢失）';
+        }
+      });
+    });
+
     return wrap;
   }
 

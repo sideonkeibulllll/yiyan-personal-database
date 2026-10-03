@@ -44,7 +44,7 @@ import type {
   CloudRestoreResult,
 } from './cloudBackupTypes';
 
-const APP_VERSION = '2.7.1';
+const APP_VERSION = '2.7.2';
 const SYNC_STATE_KEY = 'last_backup_ts';
 
 /** 并发批处理（限制并发数，避免一次性发起过多 I/O） */
@@ -75,6 +75,12 @@ export async function testCloudConnection(): Promise<{ d1: string; r2: string; o
     ok: d1Result.ok && r2Result.ok,
   };
 }
+
+/**
+ * 单独暴露两个探测，方便设置页「先回来的先显示」。
+ * （D1 通常 <1s，R2 要 2~4s；一起 Promise.all 会让用户对着「测试中」干等最慢的那个。）
+ */
+export { d1TestConnection, r2TestConnection };
 
 /** ============ 备份 ============ */
 

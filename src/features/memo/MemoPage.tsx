@@ -205,9 +205,18 @@ export function MemoPage() {
         try {
           const compressed = await compressImage(file);
           const id = await putImage(compressed);
+          /**
+           * ⚠️ 必须**先把 blob URL 解析出来再插入**。
+           * 之前这里只把 id 记进 resolvedIdsRef，导致下面的 content effect 认为
+           * 「这个 id 已经解析过」而直接跳过 → urlCache 永远为空 →
+           * 图片永远停在「图片加载中…」。
+           */
+          await ensureImageUrl(id);
           resolvedIdsRef.current.add(id);
           // 光标落在 alt 位置（`![` 之后），方便顺手补一句描述
           handle.insertAtCursor(`![](local:${id})`, 2);
+          // 下一帧重建装饰即可拿到缓存里的 blob URL
+          requestAnimationFrame(() => editorRef.current?.refreshDecorations());
         } catch (err) {
           console.error('[MemoPage] 图片插入失败:', err);
           window.alert('图片插入失败：' + (err instanceof Error ? err.message : String(err)));

@@ -8,6 +8,13 @@ import { D1_INIT_SQL } from "./cloudBackupTypes";
 type SqlParam = string | number | null | undefined;
 
 /**
+ * CapacitorHttp 超时（ms）。
+ * ⚠️ 原生端底层是 HttpURLConnection，**默认没有超时**，
+ * 网络异常时会一直干等（表现就是「测试连接」转圈十几秒）。
+ */
+const HTTP_TIMEOUT_MS = 10000;
+
+/**
  * 执行 SQL 查询（走中转站）
  */
 export async function d1Query<T = any>(
@@ -36,6 +43,8 @@ async function d1QueryViaTransferStation<T = any>(
         "Content-Type": "application/json",
       },
       data: body,
+      connectTimeout: HTTP_TIMEOUT_MS,
+      readTimeout: HTTP_TIMEOUT_MS,
     });
     if (res.status < 200 || res.status >= 300) {
       throw new Error(`D1(TS) HTTP ${res.status}: ${JSON.stringify(res.data).slice(0, 300)}`);

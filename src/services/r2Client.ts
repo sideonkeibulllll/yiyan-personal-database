@@ -17,6 +17,12 @@ function extOf(name: string, mime: string): string {
 const FETCH_TIMEOUT_MS = 15000;
 /** 测试连接超时（ms，更短以快速失败） */
 const TEST_TIMEOUT_MS = 8000;
+/**
+ * CapacitorHttp 超时（ms）。
+ * ⚠️ 原生端底层是 HttpURLConnection，**默认没有超时**，
+ * 网络异常时会一直干等（表现就是「测试连接」转圈十几秒）。
+ */
+const HTTP_TIMEOUT_MS = 10000;
 
 /** 带 AbortController 超时的 fetch 封装 */
 async function fetchWithTimeout(
@@ -87,6 +93,8 @@ async function r2PutViaTransferStation(
         "Content-Type": contentType,
       },
       data: b64,
+      connectTimeout: HTTP_TIMEOUT_MS,
+      readTimeout: HTTP_TIMEOUT_MS,
     });
     if (res.status < 200 || res.status >= 300) {
       throw new Error(`R2(TS) 上传失败 ${res.status}: ${JSON.stringify(res.data).slice(0, 200)}`);
@@ -133,6 +141,8 @@ async function r2GetViaTransferStation(key: string): Promise<Uint8Array> {
     const res = await CapacitorHttp.get({
       url,
       headers: { Authorization: `Bearer ${TRANSFER_STATION.token}` },
+      connectTimeout: HTTP_TIMEOUT_MS,
+      readTimeout: HTTP_TIMEOUT_MS,
     });
     if (res.status < 200 || res.status >= 300) {
       if (res.status === 404) throw new Error(`R2 object not found: ${key}`);
@@ -162,8 +172,25 @@ async function r2GetViaTransferStation(key: string): Promise<Uint8Array> {
 }
 
 /**
+ * 判定探测响应。
+ * 404 表示「连上了，只是这个测试对象不存在」—— 符合预期；
+ * 401/403 才是密钥问题；5xx 是中转站/上游故障。
+ */
+function judgeProbe(status: number): { ok: boolean; message: string } {
+  if (status === 401 || status === 403) {
+    return { ok: false, message: `中转站密钥无效（HTTP ${status}）` };
+  }
+  if (status >= 500) {
+    return { ok: false, message: `中转站服务异常（HTTP ${status}）` };
+  }
+  return { ok: true, message: `R2 中转站连接成功（HTTP ${status}）` };
+}
+
+/**
  * 测试连接：用一个必定 404 的 key 探测中转站是否可达
  * （404 说明「连上了，只是对象不存在」，符合预期）
+ *
+ * 注：这个探测会真的走一趟 Worker → R2，实测比 D1 慢 2~4 秒，属于正常现象。
  */
 export async function r2TestConnection(): Promise<{ ok: boolean; message: string }> {
   try {
@@ -175,21 +202,17 @@ export async function r2TestConnection(): Promise<{ ok: boolean; message: string
       const res = await CapacitorHttp.get({
         url,
         headers: { Authorization: `Bearer ${TRANSFER_STATION.token}` },
+        connectTimeout: TEST_TIMEOUT_MS,
+        readTimeout: TEST_TIMEOUT_MS,
       });
-      if (res.status === 404 || (res.status >= 200 && res.status < 300)) {
-        return { ok: true, message: "R2 中转站连接成功" };
-      }
-      return { ok: false, message: `R2(TS) 连接失败 ${res.status}` };
+      return judgeProbe(res.status);
     }
 
     const resp = await fetchWithTimeout(url, {
       method: "GET",
       headers: { Authorization: `Bearer ${TRANSFER_STATION.token}` },
     }, TEST_TIMEOUT_MS);
-    if (resp.ok || resp.status === 404) {
-      return { ok: true, message: "R2 中转站连接成功" };
-    }
-    return { ok: false, message: `R2(TS) 连接失败 ${resp.status}: ${resp.statusText}` };
+    return judgeProbe(resp.status);
   } catch (err) {
     const msg = err instanceof Error
       ? (err.name === "AbortError" ? "连接超时（8秒）" : err.message)
