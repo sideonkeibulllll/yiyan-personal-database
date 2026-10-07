@@ -16,7 +16,7 @@ import {
   EditorView, keymap, placeholder as cmPlaceholder,
   drawSelection, highlightActiveLine, rectangularSelection, highlightSpecialChars,
 } from '@codemirror/view';
-import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
+import { defaultKeymap, history, historyKeymap, indentWithTab, undo, redo } from '@codemirror/commands';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { livePreview, forceRerenderDecorations } from './livePreview';
 import { findHeadingAtCursor } from '../memoMarkdown';
@@ -44,6 +44,10 @@ export interface MemoEditorHandle {
   getCursorOffset: () => number;
   /** 强制重建装饰 —— 本地图片 blob URL 就绪后调用（文档没变但渲染要更新） */
   refreshDecorations: () => void;
+  /** 撤销上一次编辑（Ctrl+Z 的按钮版） */
+  undo: () => void;
+  /** 恢复被撤销的编辑（Ctrl+Y 的按钮版） */
+  redo: () => void;
 }
 
 interface MemoEditorProps {
@@ -227,6 +231,16 @@ export const MemoEditor = forwardRef<MemoEditorHandle, MemoEditorProps>(function
     refreshDecorations() {
       // 空 transaction 不会触发 StateField.update 重建，必须走 StateEffect
       viewRef.current?.dispatch({ effects: forceRerenderDecorations.of(null) });
+    },
+    undo() {
+      const view = viewRef.current;
+      if (!view) return;
+      undo(view);
+    },
+    redo() {
+      const view = viewRef.current;
+      if (!view) return;
+      redo(view);
     },
   }), []);
 

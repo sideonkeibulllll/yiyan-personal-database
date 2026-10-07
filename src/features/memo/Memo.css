@@ -379,10 +379,30 @@
 .memo-editor-cm .cm-line:has(.cm-md-indent-6)::before { left: 7.55em; }
 
 /* ===== 表格（v2.7.0）===== */
+/*
+ * 内嵌横滑（deepseek 式）：容器宽度受编辑器约束（max-width:100%），
+ * 表格超出时在容器内横向滚动，不再把 .cm-line / .cm-content 撑出屏幕。
+ * 关键三点：
+ * 1. display:block —— 让 div 脱离行内排版，宽度才能被约束住；
+ * 2. max-width:100% —— 没有它 overflow-x:auto 形同虚设（此前表格直接撑开页面）；
+ * 3. table width:100% + td 允许换行 —— 短表撑满、长表（多列/nowrap 表头）自然溢出触发横滑。
+ */
 .memo-editor-cm .cm-md-table {
+  display: block;
+  max-width: 100%;
   margin: 0.6em 0;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+}
+
+.memo-editor-cm .cm-md-table::-webkit-scrollbar {
+  height: 5px;
+}
+
+.memo-editor-cm .cm-md-table::-webkit-scrollbar-thumb {
+  background: var(--color-border-primary);
+  border-radius: 3px;
 }
 
 .memo-editor-cm .cm-md-table table {
@@ -398,6 +418,8 @@
   padding: 0.35em 0.6em;
   text-align: left;
   vertical-align: top;
+  /* 长英文串/URL 不撑宽单元格，改为折行 */
+  overflow-wrap: anywhere;
 }
 
 .memo-editor-cm .cm-md-table th {

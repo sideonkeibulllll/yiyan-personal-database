@@ -24,6 +24,7 @@ import {
   compressImage, ensureImageUrl, extractLocalImageIds, putImage,
   pruneUnusedImages, releaseAllImageUrls,
 } from '@/services/memoImageStore';
+import { MEMOS_CHANGED_EVENT } from '@/services/memoEvents';
 import type { MemoEditorHandle } from './components/MemoEditor';
 import { MemoFormatBar } from './components/MemoFormatBar';
 import { MemoOutline } from './components/MemoOutline';
@@ -124,6 +125,16 @@ export function MemoPage() {
       }
     })();
     return () => { cancelled = true; };
+  }, []);
+
+  // === 监听「AI 通过 chat 改动了备忘录」的广播：刷新列表 ===
+  // （正文不强刷，避免覆盖用户正在编辑的内容；当前备忘录在重新进入时会自行载入最新）
+  useEffect(() => {
+    const handler = () => {
+      getAllMemos().then(list => setAllMemos(list)).catch(() => { /* 忽略 */ });
+    };
+    window.addEventListener(MEMOS_CHANGED_EVENT, handler);
+    return () => window.removeEventListener(MEMOS_CHANGED_EVENT, handler);
   }, []);
 
   // === 自动跳转到上次聚焦的标题（一次性）===
@@ -495,6 +506,33 @@ export function MemoPage() {
       <footer className="memo-footer">
         <span>{charCount} 字</span>
         <span className="memo-footer-anchor">
+          {/* 撤销 / 恢复（Ctrl+Z / Ctrl+Y 的按钮版），与标题跳转箭头同款防失焦处理 */}
+          <button
+            className="memo-footer-nav"
+            onPointerDown={e => e.preventDefault()}
+            onClick={() => editorRef.current?.undo()}
+            type="button"
+            title="撤销 (Ctrl+Z)"
+            aria-label="撤销"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m9 14-4-4 4-4" />
+              <path d="M20 20v-7a4 4 0 0 0-4-4H5" />
+            </svg>
+          </button>
+          <button
+            className="memo-footer-nav"
+            onPointerDown={e => e.preventDefault()}
+            onClick={() => editorRef.current?.redo()}
+            type="button"
+            title="恢复 (Ctrl+Y)"
+            aria-label="恢复"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m15 14 4-4-4-4" />
+              <path d="M4 20v-7a4 4 0 0 1 4-4h11" />
+            </svg>
+          </button>
           <button
             className="memo-footer-nav"
             onPointerDown={e => e.preventDefault()}

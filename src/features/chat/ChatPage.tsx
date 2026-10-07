@@ -28,6 +28,8 @@ import {
   executeToolCall,
   formatToolResultMessage,
   formatToolResultForUI,
+  DANGEROUS_TOOLS,
+  describeToolAction,
   type ResolvedToolCall,
 } from '@/services/chatBridge';
 import { getDatabase } from '@/services/database';
@@ -40,7 +42,8 @@ import {
   saveChatSession as saveSessionDb,
   deleteChatSession as deleteSessionDb,
 } from '@/services/chatSessionService';
-import { loadSessionsSync, createId, generateTitle, buildModelOptions, parseModelValue } from './chatUtils';
+import { loadSessionsSync, createId, generateTitle, buildModelOptions, parseModelValue, truncateApiMessagesSafely } from './chatUtils';
+import type { ApiMessage } from './chatUtils';
 import type { ChatMessage, ChatSession, SearchSelectedResult, ThinkingEffort } from './chatTypes';
 import { streamChatCompletion } from './chatStream';
 import { ChatSidebar } from './components/ChatSidebar';
@@ -168,6 +171,8 @@ export function ChatPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  /** 危险操作的确认 resolver：confirmId → resolve(approved)。agent loop 停在这里等用户点击 */
+  const confirmResolversRef = useRef<Map<string, (approved: boolean) => void>>(new Map());
   // v2.6.3: 本次发送是否实际消费了「预备列表」（决定发送后是否清除）
   const consumedPreparedRef = useRef(false);
 
@@ -252,6 +257,12 @@ export function ChatPage() {
       else next.add(msgId);
       return next;
     });
+  }, []);
+
+  /** 用户点击危险操作确认卡片：resolve 对应的 resolver，让 agent loop 继续 */
+  const resolveConfirm = useCallback((confirmId: string, approved: boolean) => {
+    const resolver = confirmResolversRef.current.get(confirmId);
+    if (resolver) resolver(approved);
   }, []);
 
   // 导出选中的消息为图片（DOM 截图逻辑见 chatExport.ts）
@@ -548,6 +559,9 @@ export function ChatPage() {
 
   /* === 停止生成 === */
   const handleStop = useCallback(() => {
+    // 若正卡在危险操作确认上，先放行（当作取消），避免 loop 永久挂起
+    confirmResolversRef.current.forEach(resolve => resolve(false));
+    confirmResolversRef.current.clear();
     abortRef.current?.abort();
   }, []);
 
@@ -702,12 +716,17 @@ export function ChatPage() {
         }
       }
 
-      // 构建 API 消息（保留最近 20 条 + system），同时保留 assistant 的 tool_calls
-      // 与 tool 消息的 tool_call_id，以便 agent loop 第二轮起模型能看到完整上下文。
-      const buildApiMessage = (m: ChatMessage): { role: string; content?: string; tool_calls?: unknown[]; tool_call_id?: string } | null => {
+      // 构建 API 消息，保留 assistant 的 tool_calls 与 tool 消息的 tool_call_id，
+      // 以便 agent loop 第二轮起模型能看到完整上下文。
+      const buildApiMessage = (m: ChatMessage): ApiMessage | null => {
         if (m.role === 'user') return { role: 'user', content: m.content };
         if (m.role === 'assistant') {
-          const msg: { role: string; content?: string; tool_calls?: unknown[] } = {
+          // 丢弃「无内容且无 tool_calls」的空 assistant（agent loop 命中上限时
+          // 会残留一个空占位消息），避免污染上下文 / 触发部分网关的校验错误。
+          if (!m.content?.trim() && (!m.toolCalls || m.toolCalls.length === 0)) {
+            return null;
+          }
+          const msg: ApiMessage = {
             role: 'assistant',
             content: m.content || '',
           };
@@ -726,10 +745,16 @@ export function ChatPage() {
         return null;
       };
 
-      const apiMessages = [
+      // 保 tool_calls / tool 配对的智能截断：直接 slice 会把 assistant(tool_calls)
+      // 与其 tool 结果切开 → 服务端 400 "role 'tool' must be a response to a preceding
+      // message with 'tool_calls'"（且孤儿永久留档 → 后续每条都报错）。
+      const apiHistory = updatedMessages
+        .map(buildApiMessage)
+        .filter(Boolean) as ApiMessage[];
+      const apiMessages: ApiMessage[] = [
         { role: 'system', content: systemPrompt },
-        ...updatedMessages.map(buildApiMessage).filter(Boolean) as Array<{ role: string; content?: string; tool_calls?: unknown[]; tool_call_id?: string }>,
-      ].slice(-22);
+        ...truncateApiMessagesSafely(apiHistory, 21),
+      ];
 
       // 工具 schema（替代旧的提示词注入）
       const enabledTools = mcpEnabled ? (session.mcpEnabledTools ?? mcpActiveTools) : [];
@@ -745,9 +770,41 @@ export function ChatPage() {
       let loopDisplayMsgs = [...currentMsgs];   // UI 显示的消息序列（含初始 AI 占位）
       let currentAiMsgId = aiMsgId;
 
-      const MAX_ITERATIONS = 5;
+      // 循环轮数上限（防止无限循环）
+      const MAX_ITERATIONS = 12;
+      // 本次对话累计工具调用次数预算（批量场景比「轮数」更合理）
+      const MAX_TOOL_CALLS = 20;
       let iteration = 0;
+      let toolCallBudget = MAX_TOOL_CALLS;
       let hitLimit = false;
+
+      // 危险操作确认：把确认卡片插入对话，阻塞等待用户点击「确认 / 取消」。
+      // 未确认前不执行、不返回，agent loop 停在这一行。
+      const requestConfirm = (toolName: string, args: Record<string, unknown>): Promise<boolean> => {
+        return new Promise<boolean>(resolve => {
+          const confirmId = createId();
+          const summary = describeToolAction(toolName, args);
+          const confirmMsg: ChatMessage = {
+            id: createId(),
+            role: 'assistant',
+            content: '',
+            timestamp: Date.now(),
+            confirmRequest: { id: confirmId, toolName, summary, status: 'pending' },
+          };
+          confirmResolversRef.current.set(confirmId, (approved: boolean) => {
+            confirmResolversRef.current.delete(confirmId);
+            loopDisplayMsgs = loopDisplayMsgs.map(m =>
+              m.id === confirmMsg.id && m.confirmRequest
+                ? { ...m, confirmRequest: { ...m.confirmRequest, status: approved ? 'approved' : 'rejected' } }
+                : m
+            );
+            updateSessionMessages(sessionId, loopDisplayMsgs);
+            resolve(approved);
+          });
+          loopDisplayMsgs = [...loopDisplayMsgs, confirmMsg];
+          updateSessionMessages(sessionId, loopDisplayMsgs);
+        });
+      };
 
       while (iteration < MAX_ITERATIONS) {
         iteration++;
@@ -802,7 +859,37 @@ export function ChatPage() {
         const apiToolMessages: Array<{ role: 'tool'; tool_call_id: string; content: string }> = [];
 
         for (const tc of resolvedToolCalls) {
+          // 全局工具调用预算：耗尽后不再执行，但仍返回占位结果以保持配对完整
+          if (toolCallBudget <= 0) {
+            hitLimit = true;
+            const skipped = { success: false, error: '已达到本次对话的工具调用次数上限，该操作未执行' };
+            apiToolMessages.push(formatToolResultMessage(skipped, tc.id));
+            toolCallResults.push({
+              name: tc.function.name,
+              success: false,
+              summary: formatToolResultForUI(skipped, tc.function.name),
+            });
+            continue;
+          }
+          toolCallBudget--;
+
           const args = parseToolArguments(tc.function.arguments);
+
+          // 危险操作（删除类）：先请求用户确认，用户点「确认」才执行
+          if (DANGEROUS_TOOLS.has(tc.function.name)) {
+            const approved = await requestConfirm(tc.function.name, args);
+            if (!approved) {
+              const cancelled = { success: false, error: '用户取消了该操作，未执行' };
+              apiToolMessages.push(formatToolResultMessage(cancelled, tc.id));
+              toolCallResults.push({
+                name: tc.function.name,
+                success: false,
+                summary: formatToolResultForUI(cancelled, tc.function.name),
+              });
+              continue;
+            }
+          }
+
           const result = await executeToolCall(tc.function.name, args);
           apiToolMessages.push(formatToolResultMessage(result, tc.id));
           toolCallResults.push({
@@ -847,6 +934,12 @@ export function ChatPage() {
           },
           ...apiToolMessages,
         ];
+
+        // 工具预算耗尽：结束循环，让用户决定是否继续
+        if (toolCallBudget <= 0) {
+          hitLimit = true;
+          break;
+        }
 
         // 新建一个 AI 占位消息，用于下一轮流式续写
         const nextAiMsg: ChatMessage = {
@@ -1031,6 +1124,7 @@ export function ChatPage() {
           containerRef={messagesContainerRef}
           endRef={messagesEndRef}
           onToggleSelect={handleToggleSelectMsg}
+          onConfirmAction={resolveConfirm}
         />
 
         {/* === MCP 搜索面板（半页，支持数据/待办切换）=== */}

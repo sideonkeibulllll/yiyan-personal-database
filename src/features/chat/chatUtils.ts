@@ -105,3 +105,123 @@ export function formatDate(ts: number): string {
   if (diff < 172800000) return '昨天';
   return new Date(ts).toLocaleDateString('zh-CN');
 }
+
+// ===== API 消息安全截断（v2.7.4）=====
+
+/** 传给大模型 API 的工具调用（OpenAI 兼容格式） */
+export interface ApiToolCall {
+  id: string;
+  type: string;
+  function: { name: string; arguments: string };
+}
+
+/** 传给大模型 API 的消息（OpenAI 兼容格式，含 tool_calls / tool_call_id） */
+export interface ApiMessage {
+  role: string;
+  content?: string;
+  tool_calls?: ApiToolCall[];
+  tool_call_id?: string;
+}
+
+/** 因上下文截断而缺失的工具结果占位文本 */
+export const TRUNCATED_TOOL_PLACEHOLDER = '(工具结果已因上下文过长被截断)';
+
+/**
+ * 补齐「缺结果的 assistant(tool_calls)」：在 `out[assistantIndex]` 之后
+ * 追加合成的 tool 响应（工具结果被截断时使用）。
+ */
+function appendMissingToolResults(
+  out: ApiMessage[],
+  assistantIndex: number,
+  answeredIds: Set<string>,
+): void {
+  const assistant = out[assistantIndex];
+  for (const tc of assistant.tool_calls || []) {
+    if (!answeredIds.has(tc.id)) {
+      out.push({
+        role: 'tool',
+        tool_call_id: tc.id,
+        content: TRUNCATED_TOOL_PLACEHOLDER,
+      });
+    }
+  }
+}
+
+/**
+ * 修复消息序列的 tool 配对：
+ *  - 丢弃「前置没有对应 tool_calls」的孤儿 tool 消息；
+ *  - 为「带 tool_calls 却缺 tool 响应」的 assistant 补合成响应。
+ */
+export function repairToolPairing(messages: ApiMessage[]): ApiMessage[] {
+  const out: ApiMessage[] = [];
+  let pendingIds: Set<string> | null = null;
+  let pendingAssistantIndex = -1;
+  let answeredIds = new Set<string>();
+
+  const flushPending = () => {
+    if (pendingIds && pendingAssistantIndex >= 0) {
+      appendMissingToolResults(out, pendingAssistantIndex, answeredIds);
+    }
+  };
+
+  for (const msg of messages) {
+    if (msg.role === 'tool') {
+      const id = msg.tool_call_id || '';
+      // 只有能对上前置 tool_calls 的 tool 消息才保留，否则丢弃（避免 400）
+      if (pendingIds && pendingIds.has(id)) {
+        out.push(msg);
+        answeredIds.add(id);
+      }
+      continue;
+    }
+
+    // 进入下一条非 tool 消息前，先把上一组未响应的 tool_calls 补齐
+    flushPending();
+
+    if (msg.role === 'assistant' && msg.tool_calls && msg.tool_calls.length > 0) {
+      out.push(msg);
+      pendingAssistantIndex = out.length - 1;
+      pendingIds = new Set(msg.tool_calls.map(tc => tc.id));
+      answeredIds = new Set();
+    } else {
+      out.push(msg);
+      pendingIds = null;
+      pendingAssistantIndex = -1;
+      answeredIds = new Set();
+    }
+  }
+
+  flushPending();
+  return out;
+}
+
+/**
+ * 在保证 tool_calls / tool 配对完整的前提下，截取最近 maxHistory 条消息。
+ *
+ * 为什么需要：ChatPage 原先直接 `.slice(-22)`。历史里一旦存在 agent loop 产生的
+ * `assistant(tool_calls)` + `tool` 消息，切点可能正好把这对切开，于是 tool 消息
+ * 失去前置的 tool_calls → 服务端返回 400
+ * "Messages with role 'tool' must be a response to a preceding message with 'tool_calls'"。
+ * 此孤儿会永久留在会话里，导致后续每条消息都报同样的错。
+ *
+ * 本函数保证输出序列：
+ *  1) 不以孤立的 tool 消息开头；
+ *  2) 每个 tool 消息都能找到前面带同 id 的 assistant(tool_calls)；
+ *  3) 每个带 tool_calls 的 assistant 后面都有对应的 tool 响应。
+ */
+export function truncateApiMessagesSafely(
+  messages: ApiMessage[],
+  maxHistory: number,
+): ApiMessage[] {
+  let result = repairToolPairing(messages);
+  if (maxHistory > 0 && result.length > maxHistory) {
+    result = result.slice(result.length - maxHistory);
+    // 截断后重跑一次配对修复：丢掉新产生的头部孤儿、补齐被切掉的 tool 响应
+    result = repairToolPairing(result);
+    // 兜底：确保开头不是孤立的 tool
+    let i = 0;
+    while (i < result.length && result[i].role === 'tool') i++;
+    if (i > 0) result = result.slice(i);
+  }
+  return result;
+}

@@ -2,11 +2,18 @@
  * Chat Bridge — 基于 OpenAI 原生 function calling 的工具桥接层
  *
  * 提供 AI 在对话中操作记忆库的能力：
- * - 创建卡片（条目）— 支持内容/来源/补充/标签/组/星标
- * - 搜索卡片 — 支持关键字/标签/组筛选，返回结果列表
- * - 编辑组 — 设置或移除组归属
- * - 编辑标签 — 添加或移除标签
- * - 创建/搜索/完成待办
+ * - 创建/搜索/编辑/星标/删除 卡片（条目）— 支持内容/来源/补充/标签/组/星标
+ * - 列出现有标签/分组（帮助 AI 复用而非新建）
+ * - 编辑组 / 编辑标签（支持批量）
+ * - 创建/搜索/编辑/完成/删除 待办
+ * - 备忘录：搜索/读取/新建/追加/覆写/删除
+ * - 数据连线
+ *
+ * 批量操作：写操作参数统一升级为 ID 数组（`entryIds[]` / `todoIds[]` / `memoIds[]`），
+ * 同时兼容旧的单值参数（`entryId` / `todoId`）。
+ *
+ * 危险操作（删除类）：见 `DANGEROUS_TOOLS`。执行前由界面层弹出确认按钮，
+ * 用户确认后才真正执行；未确认时工具返回「用户取消」。
  *
  * 工作原理（agent loop）：
  * 1. 用户在对话中启用某类工具，工具 schema 通过 `tools` 字段传给模型
@@ -21,10 +28,19 @@
 
 import { getDatabase } from '@/services/database';
 import { getTodoDatabase } from '@/services/todoDatabase';
+import { getAllMemos, getMemo, createMemo, saveMemo, deleteMemo } from '@/services/memoDatabase';
+import { broadcastMemosChanged } from '@/services/memoEvents';
 import { useEntryStore } from '@/stores/entryStore';
 import { useTagStore } from '@/stores/tagStore';
 import { useTodoStore } from '@/stores/todoStore';
 import type { Entry, Todo, Link } from '@/types';
+
+/** 把单值 / 数组参数统一成字符串数组 */
+function toStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) return value.filter((v): v is string => typeof v === 'string' && v.length > 0);
+  if (typeof value === 'string' && value.length > 0) return [value];
+  return [];
+}
 
 /** 工具元数据（仅用于内部描述，传给 API 时由 buildToolsPayload 转换） */
 export interface BridgeTool {
@@ -109,28 +125,73 @@ export const BRIDGE_TOOLS: BridgeTool[] = [
     },
   },
   {
-    name: 'edit_group',
-    description: '编辑条目的所属组。可以设置或移除组归属。',
+    name: 'list_tags',
+    description: '列出记忆库中现有的所有标签（名称 + 使用数量）。创建/编辑卡片需要打标签前，务必先调用此工具查看已有标签，优先复用，避免标签越用越碎。',
+    parameters: {
+      type: 'object',
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: 'list_groups',
+    description: '列出记忆库中现有的所有分组。为卡片指定组名前先查看，避免拼写不一致产生重复分组。',
+    parameters: {
+      type: 'object',
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: 'edit_card',
+    description: '编辑一条或多条数据卡片的内容/来源/补充信息/星标状态。未提供的字段保持不变。',
     parameters: {
       type: 'object',
       properties: {
-        entryId: { type: 'string', description: '条目ID' },
+        entryIds: { type: 'array', items: { type: 'string' }, description: '要编辑的卡片ID列表（至少1个）' },
+        content: { type: 'string', description: '新的卡片内容（可选）' },
+        source: { type: 'string', description: '新的来源（可选）' },
+        supplement: { type: 'string', description: '新的补充信息（可选）' },
+        isStarred: { type: 'boolean', description: '是否星标（可选）' },
+      },
+      required: ['entryIds'],
+    },
+  },
+  {
+    name: 'star_card',
+    description: '批量设置或取消数据卡片的星标。星标会让卡片在随机页更常被抽到。',
+    parameters: {
+      type: 'object',
+      properties: {
+        entryIds: { type: 'array', items: { type: 'string' }, description: '卡片ID列表（至少1个）' },
+        isStarred: { type: 'boolean', description: 'true 设为星标，false 取消星标' },
+      },
+      required: ['entryIds', 'isStarred'],
+    },
+  },
+  {
+    name: 'edit_group',
+    description: '编辑一条或多条卡片的所属组。可以设置或移除组归属（支持批量）。',
+    parameters: {
+      type: 'object',
+      properties: {
+        entryIds: { type: 'array', items: { type: 'string' }, description: '条目ID列表（至少1个）' },
         groupName: { type: 'string', description: '组名称（留空表示移除组归属）' },
       },
-      required: ['entryId'],
+      required: ['entryIds'],
     },
   },
   {
     name: 'edit_tags',
-    description: '编辑条目的标签。可以添加或移除标签。',
+    description: '批量为一条或多条卡片添加或移除标签。',
     parameters: {
       type: 'object',
       properties: {
-        entryId: { type: 'string', description: '条目ID' },
+        entryIds: { type: 'array', items: { type: 'string' }, description: '条目ID列表（至少1个）' },
         addTags: { type: 'array', items: { type: 'string' }, description: '要添加的标签名列表' },
         removeTags: { type: 'array', items: { type: 'string' }, description: '要移除的标签名列表' },
       },
-      required: ['entryId'],
+      required: ['entryIds'],
     },
   },
   // === 待办 MCP 工具 ===
@@ -165,15 +226,52 @@ export const BRIDGE_TOOLS: BridgeTool[] = [
     },
   },
   {
-    name: 'complete_todo',
-    description: '将一条待办标记为已完成或重新激活。',
+    name: 'get_today_todos',
+    description: '获取今天的待办概览（默认只返回未完成的）。用于快速了解用户今天的安排。',
     parameters: {
       type: 'object',
       properties: {
-        todoId: { type: 'string', description: '待办ID' },
+        includeDone: { type: 'boolean', description: '是否包含已完成（默认 false）' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'complete_todo',
+    description: '将一条或多条待办标记为已完成或重新激活（支持批量）。',
+    parameters: {
+      type: 'object',
+      properties: {
+        todoIds: { type: 'array', items: { type: 'string' }, description: '待办ID列表（至少1个）' },
         uncomplete: { type: 'boolean', description: '如果为 true 则重新激活，默认 false' },
       },
-      required: ['todoId'],
+      required: ['todoIds'],
+    },
+  },
+  {
+    name: 'edit_todo',
+    description: '编辑一条或多条待办的标题/备注/时间/日期（支持批量）。未提供的字段保持不变。',
+    parameters: {
+      type: 'object',
+      properties: {
+        todoIds: { type: 'array', items: { type: 'string' }, description: '待办ID列表（至少1个）' },
+        title: { type: 'string', description: '新的标题（可选）' },
+        note: { type: 'string', description: '新的备注（可选）' },
+        time: { type: 'string', description: '新的开始时间，ISO 8601 或自然语言如"明天下午3点"（可选）' },
+        folderDate: { type: 'string', description: '新的日期文件夹，YYYY-MM-DD 格式（可选）' },
+      },
+      required: ['todoIds'],
+    },
+  },
+  {
+    name: 'delete_todo',
+    description: '删除一条或多条待办。这是危险操作，执行前系统会自动向用户弹出确认按钮，用户确认后才会真正删除。',
+    parameters: {
+      type: 'object',
+      properties: {
+        todoIds: { type: 'array', items: { type: 'string' }, description: '要删除的待办ID列表' },
+      },
+      required: ['todoIds'],
     },
   },
   // === 数据连线 MCP 工具 ===
@@ -204,14 +302,135 @@ export const BRIDGE_TOOLS: BridgeTool[] = [
       required: ['entryId'],
     },
   },
+  {
+    name: 'delete_card',
+    description: '删除一条或多条数据卡片。这是危险操作，执行前系统会自动向用户弹出确认按钮，用户确认后才会真正删除。',
+    parameters: {
+      type: 'object',
+      properties: {
+        entryIds: { type: 'array', items: { type: 'string' }, description: '要删除的卡片ID列表' },
+      },
+      required: ['entryIds'],
+    },
+  },
+  // === 备忘录 MCP 工具 ===
+  {
+    name: 'search_memos',
+    description: '搜索备忘录。支持关键字搜索标题与正文，返回备忘录列表（含 ID、标题、摘要、更新时间）。',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: '搜索关键字（可选，留空返回全部）' },
+        limit: { type: 'number', description: '返回数量上限，默认10' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'read_memo',
+    description: '读取一篇备忘录的完整正文（超长会自动截断）。',
+    parameters: {
+      type: 'object',
+      properties: {
+        memoId: { type: 'string', description: '备忘录ID' },
+      },
+      required: ['memoId'],
+    },
+  },
+  {
+    name: 'create_memo',
+    description: '新建一篇备忘录。用户说"记录到备忘录 / 帮我记一下"时使用。',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: '标题（可选，默认取正文首个 # 标题或"未命名"）' },
+        content: { type: 'string', description: 'Markdown 正文（可选）' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'append_memo',
+    description: '在指定备忘录末尾追加一段内容（AI 做笔记 / 续写最常用）。',
+    parameters: {
+      type: 'object',
+      properties: {
+        memoId: { type: 'string', description: '备忘录ID' },
+        content: { type: 'string', description: '要追加的 Markdown 内容' },
+      },
+      required: ['memoId', 'content'],
+    },
+  },
+  {
+    name: 'update_memo',
+    description: '覆盖一篇备忘录的正文（整段替换）。会丢失原有内容，谨慎使用；追加内容请改用 append_memo。',
+    parameters: {
+      type: 'object',
+      properties: {
+        memoId: { type: 'string', description: '备忘录ID' },
+        content: { type: 'string', description: '新的完整 Markdown 正文' },
+        title: { type: 'string', description: '新的标题（可选）' },
+      },
+      required: ['memoId', 'content'],
+    },
+  },
+  {
+    name: 'delete_memo',
+    description: '删除一篇或多篇备忘录。这是危险操作，执行前系统会自动向用户弹出确认按钮，用户确认后才会真正删除。',
+    parameters: {
+      type: 'object',
+      properties: {
+        memoIds: { type: 'array', items: { type: 'string' }, description: '要删除的备忘录ID列表' },
+      },
+      required: ['memoIds'],
+    },
+  },
 ];
 
 /** 所有工具名称 */
 export const ALL_TOOL_NAMES = BRIDGE_TOOLS.map(t => t.name);
 
 /** 按类型分组的工具名 */
-export const ENTRY_TOOLS = ['create_card', 'search_cards', 'edit_group', 'edit_tags', 'link_cards', 'get_card_links'];
-export const TODO_TOOLS = ['create_todo', 'search_todos', 'complete_todo'];
+export const ENTRY_TOOLS = [
+  'create_card', 'search_cards', 'list_tags', 'list_groups',
+  'edit_card', 'star_card', 'edit_group', 'edit_tags',
+  'link_cards', 'get_card_links', 'delete_card',
+];
+export const TODO_TOOLS = [
+  'create_todo', 'search_todos', 'get_today_todos',
+  'complete_todo', 'edit_todo', 'delete_todo',
+];
+export const MEMO_TOOLS = [
+  'search_memos', 'read_memo', 'create_memo',
+  'append_memo', 'update_memo', 'delete_memo',
+];
+
+/** 需要用户确认后才执行的危险工具（删除类） */
+export const DANGEROUS_TOOLS = new Set(['delete_card', 'delete_todo', 'delete_memo']);
+
+/** 工具名 → 中文显示名（用于确认弹窗） */
+export const TOOL_DISPLAY_NAMES: Record<string, string> = {
+  create_card: '创建卡片', search_cards: '搜索卡片', list_tags: '列出标签', list_groups: '列出分组',
+  edit_card: '编辑卡片', star_card: '设置星标', edit_group: '编辑分组', edit_tags: '编辑标签',
+  link_cards: '连接卡片', get_card_links: '查询连线', delete_card: '删除卡片',
+  create_todo: '创建待办', search_todos: '搜索待办', get_today_todos: '今日待办',
+  complete_todo: '完成待办', edit_todo: '编辑待办', delete_todo: '删除待办',
+  search_memos: '搜索备忘录', read_memo: '读取备忘录', create_memo: '新建备忘录',
+  append_memo: '追加备忘录', update_memo: '覆写备忘录', delete_memo: '删除备忘录',
+};
+
+/**
+ * 生成危险操作的确认摘要（展示在对话内的确认卡片上）。
+ */
+export function describeToolAction(toolName: string, args: Record<string, unknown>): string {
+  const count = (v: unknown) => (Array.isArray(v) ? v.length : typeof v === 'string' && v ? 1 : 0);
+  switch (toolName) {
+    case 'delete_card': return `删除 ${count(args.entryIds)} 条数据卡片`;
+    case 'delete_todo': return `删除 ${count(args.todoIds)} 条待办`;
+    case 'delete_memo': return `删除 ${count(args.memoIds)} 篇备忘录`;
+    default: return `执行 ${TOOL_DISPLAY_NAMES[toolName] || toolName}`;
+  }
+}
 
 /**
  * 生成传给 OpenAI/DeepSeek API 的 `tools` 字段（结构化工具 schema）。
@@ -418,9 +637,110 @@ export async function executeToolCall(
         };
       }
 
+      case 'list_tags': {
+        const allTags = await db.getAllTags();
+        const counts: { id: string; name: string; count: number }[] = [];
+        for (const tag of allTags) {
+          const entries = await db.getEntriesByTagId(tag.id);
+          counts.push({ id: tag.id, name: tag.name, count: entries.length });
+        }
+        counts.sort((a, b) => b.count - a.count);
+        return {
+          success: true,
+          data: {
+            total: counts.length,
+            tags: counts,
+            message: counts.length > 0
+              ? `共 ${counts.length} 个标签。打标签时优先复用这些名称。`
+              : '当前没有任何标签。',
+          },
+        };
+      }
+
+      case 'list_groups': {
+        const groups = await db.getAllGroups();
+        return {
+          success: true,
+          data: {
+            total: groups.length,
+            groups: groups.map(g => ({ id: g.id, name: g.name })),
+            message: groups.length > 0
+              ? `共 ${groups.length} 个分组。指定组名时优先复用这些名称。`
+              : '当前没有任何分组。',
+          },
+        };
+      }
+
+      case 'edit_card': {
+        const entryIds = toStringArray(args.entryIds ?? args.entryId);
+        if (entryIds.length === 0) return { success: false, error: 'entryIds 不能为空' };
+
+        const hasContent = typeof args.content === 'string';
+        const hasSource = typeof args.source === 'string';
+        const hasSupplement = typeof args.supplement === 'string';
+        const hasStar = typeof args.isStarred === 'boolean';
+        if (!hasContent && !hasSource && !hasSupplement && !hasStar) {
+          return { success: false, error: '至少要提供 content / source / supplement / isStarred 之一' };
+        }
+
+        const updates: Partial<Entry> = {};
+        if (hasContent) updates.content = String(args.content);
+        if (hasSource) updates.source = String(args.source);
+        if (hasSupplement) updates.supplement = String(args.supplement);
+        if (hasStar) updates.isStarred = Boolean(args.isStarred);
+
+        const updated: string[] = [];
+        const notFound: string[] = [];
+        for (const id of entryIds) {
+          const entry = await db.getEntryById(id);
+          if (!entry) { notFound.push(id); continue; }
+          await db.updateEntry(id, updates);
+          updated.push(id);
+        }
+        await useEntryStore.getState().loadEntries();
+
+        return {
+          success: updated.length > 0,
+          error: updated.length === 0 ? '没有找到可编辑的卡片' : undefined,
+          data: {
+            updatedCount: updated.length,
+            updatedIds: updated,
+            notFoundIds: notFound.length > 0 ? notFound : undefined,
+            message: `已更新 ${updated.length} 条卡片${notFound.length > 0 ? `，${notFound.length} 条未找到` : ''}`,
+          },
+        };
+      }
+
+      case 'star_card': {
+        const entryIds = toStringArray(args.entryIds ?? args.entryId);
+        if (entryIds.length === 0) return { success: false, error: 'entryIds 不能为空' };
+        const isStarred = Boolean(args.isStarred);
+
+        const updated: string[] = [];
+        const notFound: string[] = [];
+        for (const id of entryIds) {
+          const entry = await db.getEntryById(id);
+          if (!entry) { notFound.push(id); continue; }
+          await db.updateEntry(id, { isStarred });
+          updated.push(id);
+        }
+        await useEntryStore.getState().loadEntries();
+
+        return {
+          success: updated.length > 0,
+          error: updated.length === 0 ? '没有找到对应卡片' : undefined,
+          data: {
+            updatedCount: updated.length,
+            isStarred,
+            notFoundIds: notFound.length > 0 ? notFound : undefined,
+            message: `已${isStarred ? '设为星标' : '取消星标'} ${updated.length} 条卡片`,
+          },
+        };
+      }
+
       case 'edit_group': {
-        const entryId = String(args.entryId || '');
-        if (!entryId) return { success: false, error: 'entryId 不能为空' };
+        const entryIds = toStringArray(args.entryIds ?? args.entryId);
+        if (entryIds.length === 0) return { success: false, error: 'entryIds 不能为空' };
 
         const groupName = String(args.groupName || '');
         let groupId: string | undefined;
@@ -436,74 +756,214 @@ export async function executeToolCall(
           }
         }
 
-        await db.updateEntry(entryId, { groupId: groupId || undefined });
+        const updated: string[] = [];
+        const notFound: string[] = [];
+        for (const id of entryIds) {
+          const entry = await db.getEntryById(id);
+          if (!entry) { notFound.push(id); continue; }
+          await db.updateEntry(id, { groupId: groupId || undefined });
+          updated.push(id);
+        }
         await useEntryStore.getState().loadEntries();
 
         return {
-          success: true,
+          success: updated.length > 0,
+          error: updated.length === 0 ? '没有找到对应卡片' : undefined,
           data: {
-            entryId,
+            updatedCount: updated.length,
             groupName: groupName || '(已移除)',
-            message: '组已更新',
+            notFoundIds: notFound.length > 0 ? notFound : undefined,
+            message: `已更新 ${updated.length} 条卡片的组归属`,
           },
         };
       }
 
       case 'edit_tags': {
-        const entryId = String(args.entryId || '');
-        if (!entryId) return { success: false, error: 'entryId 不能为空' };
+        const entryIds = toStringArray(args.entryIds ?? args.entryId);
+        if (entryIds.length === 0) return { success: false, error: 'entryIds 不能为空' };
 
         const addTags = (args.addTags as string[]) || [];
         const removeTags = (args.removeTags as string[]) || [];
-        const allTags = await db.getAllTags();
 
+        let allTags = await db.getAllTags();
+
+        // 预创建 addTags 中不存在的标签（避免每条卡片重复创建）
         for (const tagName of addTags) {
-          let tag = allTags.find(t => t.name === tagName);
-          if (!tag) {
-            tag = await db.createTag(tagName);
+          if (!allTags.find(t => t.name === tagName)) {
+            const tag = await db.createTag(tagName);
+            allTags = [...allTags, tag];
           }
-          await db.addTagToEntry(entryId, tag.id);
         }
 
-        for (const tagName of removeTags) {
-          const tag = allTags.find(t => t.name === tagName);
-          if (tag) {
-            await db.removeTagFromEntry(entryId, tag.id);
+        const updated: string[] = [];
+        const notFound: string[] = [];
+        for (const entryId of entryIds) {
+          const entry = await db.getEntryById(entryId);
+          if (!entry) { notFound.push(entryId); continue; }
+          for (const tagName of addTags) {
+            const tag = allTags.find(t => t.name === tagName);
+            if (tag) await db.addTagToEntry(entryId, tag.id);
           }
+          for (const tagName of removeTags) {
+            const tag = allTags.find(t => t.name === tagName);
+            if (tag) await db.removeTagFromEntry(entryId, tag.id);
+          }
+          updated.push(entryId);
         }
 
         await useTagStore.getState().loadTags();
         await useEntryStore.getState().loadEntries();
 
         return {
-          success: true,
+          success: updated.length > 0,
+          error: updated.length === 0 ? '没有找到对应卡片' : undefined,
           data: {
-            entryId,
+            updatedCount: updated.length,
             addedTags: addTags,
             removedTags: removeTags,
-            message: '标签已更新',
+            notFoundIds: notFound.length > 0 ? notFound : undefined,
+            message: `已更新 ${updated.length} 条卡片的标签`,
+          },
+        };
+      }
+
+      case 'delete_card': {
+        const entryIds = toStringArray(args.entryIds ?? args.entryId);
+        if (entryIds.length === 0) return { success: false, error: 'entryIds 不能为空' };
+
+        const deleted: string[] = [];
+        const notFound: string[] = [];
+        for (const id of entryIds) {
+          const entry = await db.getEntryById(id);
+          if (!entry) { notFound.push(id); continue; }
+          await db.deleteEntry(id);
+          deleted.push(id);
+        }
+        await useEntryStore.getState().loadEntries();
+
+        return {
+          success: deleted.length > 0,
+          error: deleted.length === 0 ? '没有找到可删除的卡片' : undefined,
+          data: {
+            deletedCount: deleted.length,
+            notFoundIds: notFound.length > 0 ? notFound : undefined,
+            message: `已删除 ${deleted.length} 条卡片`,
+          },
+        };
+      }
+
+      case 'get_today_todos': {
+        const includeDone = Boolean(args.includeDone);
+        const today = new Date().toISOString().slice(0, 10);
+        let todos = await todoDb.getAllTodos();
+        todos = todos.filter((t: Todo) => t.folderDate === today);
+        if (!includeDone) todos = todos.filter((t: Todo) => t.status !== 'done');
+        return {
+          success: true,
+          data: {
+            date: today,
+            total: todos.length,
+            todos: todos.map((t: Todo) => ({
+              id: t.id,
+              title: t.title,
+              status: t.status,
+              startTime: t.startTime || null,
+              note: t.note || null,
+            })),
+            message: `今天共有 ${todos.length} 条${includeDone ? '' : '未完成'}待办`,
           },
         };
       }
 
       case 'complete_todo': {
-        const todoId = String(args.todoId || '');
-        if (!todoId) return { success: false, error: 'todoId 不能为空' };
+        const todoIds = toStringArray(args.todoIds ?? args.todoId);
+        if (todoIds.length === 0) return { success: false, error: 'todoIds 不能为空' };
         const uncomplete = Boolean(args.uncomplete);
 
-        if (uncomplete) {
-          await todoDb.updateTodo(todoId, { status: 'pending', completedAt: undefined });
-        } else {
-          await todoDb.updateTodo(todoId, { status: 'done', completedAt: Date.now() });
+        const updated: string[] = [];
+        const notFound: string[] = [];
+        for (const todoId of todoIds) {
+          const todo = await todoDb.getTodoById(todoId);
+          if (!todo) { notFound.push(todoId); continue; }
+          if (uncomplete) {
+            await todoDb.updateTodo(todoId, { status: 'pending', completedAt: undefined });
+          } else {
+            await todoDb.updateTodo(todoId, { status: 'done', completedAt: Date.now() });
+          }
+          updated.push(todoId);
         }
         await useTodoStore.getState().loadAllTodos();
 
         return {
-          success: true,
+          success: updated.length > 0,
+          error: updated.length === 0 ? '没有找到对应待办' : undefined,
           data: {
-            todoId,
+            updatedCount: updated.length,
             action: uncomplete ? '重新激活' : '标记完成',
-            message: '待办状态已更新',
+            notFoundIds: notFound.length > 0 ? notFound : undefined,
+            message: `已${uncomplete ? '重新激活' : '完成'} ${updated.length} 条待办`,
+          },
+        };
+      }
+
+      case 'edit_todo': {
+        const todoIds = toStringArray(args.todoIds ?? args.todoId);
+        if (todoIds.length === 0) return { success: false, error: 'todoIds 不能为空' };
+
+        const updates: Partial<Todo> = {};
+        if (typeof args.title === 'string') updates.title = args.title;
+        if (typeof args.note === 'string') updates.note = args.note;
+        if (typeof args.folderDate === 'string' && args.folderDate) updates.folderDate = args.folderDate;
+        if (typeof args.time === 'string' && args.time) {
+          const parsed = Date.parse(args.time);
+          if (!isNaN(parsed)) updates.startTime = parsed;
+        }
+        if (Object.keys(updates).length === 0) {
+          return { success: false, error: '至少要提供 title / note / time / folderDate 之一' };
+        }
+
+        const updated: string[] = [];
+        const notFound: string[] = [];
+        for (const todoId of todoIds) {
+          const todo = await todoDb.getTodoById(todoId);
+          if (!todo) { notFound.push(todoId); continue; }
+          await todoDb.updateTodo(todoId, updates);
+          updated.push(todoId);
+        }
+        await useTodoStore.getState().loadAllTodos();
+
+        return {
+          success: updated.length > 0,
+          error: updated.length === 0 ? '没有找到对应待办' : undefined,
+          data: {
+            updatedCount: updated.length,
+            notFoundIds: notFound.length > 0 ? notFound : undefined,
+            message: `已更新 ${updated.length} 条待办`,
+          },
+        };
+      }
+
+      case 'delete_todo': {
+        const todoIds = toStringArray(args.todoIds ?? args.todoId);
+        if (todoIds.length === 0) return { success: false, error: 'todoIds 不能为空' };
+
+        const deleted: string[] = [];
+        const notFound: string[] = [];
+        for (const todoId of todoIds) {
+          const todo = await todoDb.getTodoById(todoId);
+          if (!todo) { notFound.push(todoId); continue; }
+          await todoDb.deleteTodo(todoId);
+          deleted.push(todoId);
+        }
+        await useTodoStore.getState().loadAllTodos();
+
+        return {
+          success: deleted.length > 0,
+          error: deleted.length === 0 ? '没有找到可删除的待办' : undefined,
+          data: {
+            deletedCount: deleted.length,
+            notFoundIds: notFound.length > 0 ? notFound : undefined,
+            message: `已删除 ${deleted.length} 条待办`,
           },
         };
       }
@@ -745,6 +1205,131 @@ export async function executeToolCall(
               startTime: t.startTime || null,
               status: t.status,
             })),
+          },
+        };
+      }
+
+      case 'search_memos': {
+        const query = String(args.query || '').toLowerCase();
+        const limit = Number(args.limit) || 10;
+        const all = await getAllMemos();
+        const filtered = query
+          ? all.filter(m =>
+              m.title.toLowerCase().includes(query) ||
+              m.content.toLowerCase().includes(query))
+          : all;
+        return {
+          success: true,
+          data: {
+            total: filtered.length,
+            results: filtered.slice(0, limit).map(m => ({
+              id: m.id,
+              title: m.title,
+              excerpt: m.content.replace(/\s+/g, ' ').slice(0, 120),
+              updatedAt: m.updatedAt,
+            })),
+            message: `找到 ${filtered.length} 篇备忘录`,
+          },
+        };
+      }
+
+      case 'read_memo': {
+        const memoId = String(args.memoId || '');
+        if (!memoId) return { success: false, error: 'memoId 不能为空' };
+        const memo = await getMemo(memoId);
+        if (!memo) return { success: false, error: `备忘录 ${memoId} 不存在` };
+        const truncated = memo.content.length > 4000;
+        return {
+          success: true,
+          data: {
+            id: memo.id,
+            title: memo.title,
+            content: truncated ? memo.content.slice(0, 4000) + '\n…(内容过长已截断)' : memo.content,
+            updatedAt: memo.updatedAt,
+            truncated,
+          },
+        };
+      }
+
+      case 'create_memo': {
+        const content = String(args.content || '');
+        let title = String(args.title || '');
+        if (!title) {
+          const m = content.match(/^#\s+(.+)$/m);
+          title = m ? m[1].trim() : '未命名';
+        }
+        const memo = await createMemo(title, content);
+        broadcastMemosChanged();
+        return {
+          success: true,
+          data: {
+            id: memo.id,
+            title: memo.title,
+            message: '备忘录已创建',
+          },
+        };
+      }
+
+      case 'append_memo': {
+        const memoId = String(args.memoId || '');
+        const content = String(args.content || '');
+        if (!memoId) return { success: false, error: 'memoId 不能为空' };
+        if (!content) return { success: false, error: 'content 不能为空' };
+        const memo = await getMemo(memoId);
+        if (!memo) return { success: false, error: `备忘录 ${memoId} 不存在` };
+        const joiner = memo.content.trim().length > 0 ? '\n\n' : '';
+        await saveMemo({ ...memo, content: memo.content + joiner + content });
+        broadcastMemosChanged();
+        return {
+          success: true,
+          data: {
+            id: memoId,
+            title: memo.title,
+            message: '内容已追加到备忘录末尾',
+          },
+        };
+      }
+
+      case 'update_memo': {
+        const memoId = String(args.memoId || '');
+        const content = String(args.content || '');
+        if (!memoId) return { success: false, error: 'memoId 不能为空' };
+        const memo = await getMemo(memoId);
+        if (!memo) return { success: false, error: `备忘录 ${memoId} 不存在` };
+        const title = typeof args.title === 'string' && args.title ? args.title : memo.title;
+        await saveMemo({ ...memo, content, title });
+        broadcastMemosChanged();
+        return {
+          success: true,
+          data: {
+            id: memoId,
+            title,
+            message: '备忘录已覆写（原内容已被替换）',
+          },
+        };
+      }
+
+      case 'delete_memo': {
+        const memoIds = toStringArray(args.memoIds ?? args.memoId);
+        if (memoIds.length === 0) return { success: false, error: 'memoIds 不能为空' };
+
+        const deleted: string[] = [];
+        const notFound: string[] = [];
+        for (const memoId of memoIds) {
+          const memo = await getMemo(memoId);
+          if (!memo) { notFound.push(memoId); continue; }
+          await deleteMemo(memoId);
+          deleted.push(memoId);
+        }
+        if (deleted.length > 0) broadcastMemosChanged();
+
+        return {
+          success: deleted.length > 0,
+          error: deleted.length === 0 ? '没有找到可删除的备忘录' : undefined,
+          data: {
+            deletedCount: deleted.length,
+            notFoundIds: notFound.length > 0 ? notFound : undefined,
+            message: `已删除 ${deleted.length} 篇备忘录`,
           },
         };
       }

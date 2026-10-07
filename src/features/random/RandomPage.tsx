@@ -152,9 +152,28 @@ export function RandomPage() {
   const pressStartPosRef = useRef<Map<string, { x: number; y: number }>>(new Map());
   const [pressedId, setPressedId] = useState<string | null>(null);
 
-  // 筛选条件
-  const [filterTagIds, setFilterTagIds] = useState<string[]>([]);
-  const [filterStarred, setFilterStarred] = useState<boolean | undefined>(undefined);
+  // 筛选条件（持久化：切到其他页面再回来不丢失，存 localStorage）
+  const FILTER_STORAGE_KEY = 'yiyan_random_filter_v1';
+  const loadPersistedFilter = (): { tagIds: string[]; starred: boolean | undefined } => {
+    try {
+      const raw = localStorage.getItem(FILTER_STORAGE_KEY);
+      if (!raw) return { tagIds: [], starred: undefined };
+      const parsed = JSON.parse(raw);
+      return {
+        tagIds: Array.isArray(parsed.tagIds) ? parsed.tagIds.filter((id: unknown) => typeof id === 'string') : [],
+        starred: typeof parsed.starred === 'boolean' ? parsed.starred : undefined,
+      };
+    } catch {
+      return { tagIds: [], starred: undefined };
+    }
+  };
+  const [filterTagIds, setFilterTagIds] = useState<string[]>(() => loadPersistedFilter().tagIds);
+  const [filterStarred, setFilterStarred] = useState<boolean | undefined>(() => loadPersistedFilter().starred);
+  const persistFilter = useCallback((tagIds: string[], starred: boolean | undefined) => {
+    try {
+      localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify({ tagIds, starred: starred ?? null }));
+    } catch { /* 忽略存储失败 */ }
+  }, []);
 
   // 抽取一批随机条目
   const getRandomEntries = useCallback(() => {
@@ -422,11 +441,11 @@ export function RandomPage() {
     document.body.scrollTop = 0;
   }, [getRandomEntries]);
 
-  // 筛选变更
-  const handleFilterChange = useCallback((tagIds: string[], starred?: boolean) => {
+  // 应用筛选并重新抽卡（不关面板 —— 供筛选面板内连续操作用：选标签/反选即时生效）
+  const applyFilter = useCallback((tagIds: string[], starred?: boolean) => {
     setFilterTagIds(tagIds);
     setFilterStarred(starred);
-    setShowFilter(false);
+    persistFilter(tagIds, starred);
     lastIdsRef.current = new Set();
     setIsLoading(true);
 
@@ -462,7 +481,20 @@ export function RandomPage() {
     // a: 保存快照
     saveSnapshot(result);
     setIsLoading(false);
-  }, [entries, cardsPerPage, saveSnapshot]);
+  }, [entries, cardsPerPage, saveSnapshot, persistFilter]);
+
+  // 筛选变更（星标按钮等点完即关面板的入口）
+  const handleFilterChange = useCallback((tagIds: string[], starred?: boolean) => {
+    applyFilter(tagIds, starred);
+    setShowFilter(false);
+  }, [applyFilter]);
+
+  // 反选：全部标签中未选中的变成选中（在面板内连续操作，不关面板）
+  const handleInvertTags = useCallback(() => {
+    const allTagIds = tags.map(t => t.id);
+    const inverted = allTagIds.filter(id => !filterTagIds.includes(id));
+    applyFilter(inverted, filterStarred);
+  }, [tags, filterTagIds, filterStarred, applyFilter]);
 
   // 清理长按计时器
   useEffect(() => {
@@ -697,10 +729,21 @@ export function RandomPage() {
 
             {/* 标签筛选 */}
             <div className="filter-section">
-              <label className="filter-label">标签筛选</label>
+              <div className="filter-label-row">
+                <label className="filter-label">标签筛选</label>
+                {/* 反选：未选中的标签全部选中，已选中的取消（空选 = 全部，反选后即只看未选过的） */}
+                <button
+                  className="filter-invert-btn"
+                  onClick={handleInvertTags}
+                  type="button"
+                  title="反选标签"
+                >
+                  反选
+                </button>
+              </div>
               <TagSelector
                 selectedTagIds={filterTagIds}
-                onSelectionChange={setFilterTagIds}
+                onSelectionChange={(tagIds) => applyFilter(tagIds, filterStarred)}
               />
             </div>
           </div>

@@ -1,11 +1,11 @@
 /**
- * Chat 页底部输入区 - 工具栏（数据/最近/思考/MCP）、MCP 类型选择、输入框
+ * Chat 页底部输入区 - 工具栏（数据/最近/思考/MCP）、MCP 工具多选、输入框
  *
  * 状态与业务逻辑由父组件 ChatPage 持有，本组件只负责展示。
  */
 import type { KeyboardEvent, RefObject } from 'react';
-import { ENTRY_TOOLS, TODO_TOOLS } from '@/services/chatBridge';
-import { IconUpload, IconBrain, IconTool, IconClose, IconBack, IconSendAlt } from '@/components/icons';
+import { ENTRY_TOOLS, TODO_TOOLS, MEMO_TOOLS } from '@/services/chatBridge';
+import { IconUpload, IconBrain, IconTool, IconClose, IconBack, IconSendAlt, IconCheck } from '@/components/icons';
 import type { ThinkingEffort } from '../chatTypes';
 
 interface ChatInputAreaProps {
@@ -34,6 +34,13 @@ interface ChatInputAreaProps {
   textareaRef: RefObject<HTMLTextAreaElement>;
 }
 
+/** MCP 工具分组（面板上按组多选，勾选即启用整组工具） */
+const MCP_GROUPS: { key: string; icon: string; title: string; desc: string; tools: string[] }[] = [
+  { key: 'entry', icon: '📊', title: '数据卡片', desc: '搜索 / 创建 / 编辑 / 标签 / 星标 / 删除', tools: ENTRY_TOOLS },
+  { key: 'todo', icon: '✅', title: '待办事项', desc: '搜索 / 创建 / 编辑 / 完成 / 删除', tools: TODO_TOOLS },
+  { key: 'memo', icon: '📝', title: '备忘录', desc: '搜索 / 读取 / 新建 / 追加 / 删除', tools: MEMO_TOOLS },
+];
+
 export function ChatInputArea({
   pickerSelectedCount,
   onOpenPicker,
@@ -59,6 +66,14 @@ export function ChatInputArea({
   onStop,
   textareaRef,
 }: ChatInputAreaProps) {
+  // 切换某一组工具：选中则全部启用，取消则全部移除（保留其它组）
+  const toggleGroup = (tools: string[], enable: boolean) => {
+    const next = enable
+      ? Array.from(new Set([...mcpActiveTools, ...tools]))
+      : mcpActiveTools.filter(t => !tools.includes(t));
+    onSetMcpTools(next);
+  };
+
   return (
     <footer className="chat-input-area glass">
       <div className="input-toolbar">
@@ -103,7 +118,7 @@ export function ChatInputArea({
           </button>
         )}
 
-        {/* MCP 开关 - 点击展开选择器面板 */}
+        {/* MCP 开关 - 点击展开多选面板 */}
         <button
           className={`toolbar-btn ${mcpEnabled ? 'active mcp' : ''}`}
           onClick={onToggleMcp}
@@ -113,58 +128,55 @@ export function ChatInputArea({
           <span>MCP{mcpActiveTools.length > 0 ? ` (${mcpActiveTools.length})` : ''}</span>
         </button>
 
-        {/* MCP 类型选择面板 */}
+        {/* MCP 工具多选面板 */}
         {mcpPickerOpen && (
           <div className="mcp-picker-panel glass">
             <div className="mcp-picker-header">
-              <h4>选择 MCP 类型</h4>
+              <h4>
+                选择 MCP 工具
+                {mcpActiveTools.length > 0 && (
+                  <span className="mcp-picker-count">已启用 {mcpActiveTools.length} 个</span>
+                )}
+              </h4>
               <button className="mcp-picker-close" onClick={onCloseMcpPicker}>
                 <IconClose />
               </button>
             </div>
             <div className="mcp-picker-options">
-              <button
-                className="mcp-picker-option"
-                onClick={() => {
-                  const next = [...new Set([...mcpActiveTools, ...ENTRY_TOOLS])];
-                  onSetMcpTools(next);
-                  onCloseMcpPicker();
-                }}
-              >
-                <div className="mcp-picker-icon">📊</div>
-                <div className="mcp-picker-text">
-                  <div className="mcp-picker-title">数据卡片 MCP</div>
-                  <div className="mcp-picker-desc">为本次对话启用数据卡片工具</div>
-                </div>
-              </button>
-              <button
-                className="mcp-picker-option"
-                onClick={() => {
-                  const next = [...new Set([...mcpActiveTools, ...TODO_TOOLS])];
-                  onSetMcpTools(next);
-                  onCloseMcpPicker();
-                }}
-              >
-                <div className="mcp-picker-icon">✅</div>
-                <div className="mcp-picker-text">
-                  <div className="mcp-picker-title">待办卡片 MCP</div>
-                  <div className="mcp-picker-desc">为本次对话启用待办工具</div>
-                </div>
-              </button>
-              {/* 清空工具按钮：方便用户取消已选的工具 */}
+              {MCP_GROUPS.map(g => {
+                const selected = g.tools.filter(t => mcpActiveTools.includes(t)).length;
+                const allOn = selected === g.tools.length && g.tools.length > 0;
+                const partial = selected > 0 && !allOn;
+                return (
+                  <button
+                    key={g.key}
+                    type="button"
+                    className={`mcp-picker-option ${allOn ? 'checked' : ''}`}
+                    onClick={() => toggleGroup(g.tools, !allOn)}
+                    title={allOn ? '点击取消该组' : '点击启用该组'}
+                  >
+                    <span className={`mcp-picker-checkbox ${allOn ? 'checked' : partial ? 'partial' : ''}`}>
+                      {allOn && <IconCheck />}
+                      {partial && <span style={{ color: '#fff', fontSize: 12, lineHeight: 1 }}>–</span>}
+                    </span>
+                    <div className="mcp-picker-icon">{g.icon}</div>
+                    <div className="mcp-picker-text">
+                      <div className="mcp-picker-title">{g.title}</div>
+                      <div className="mcp-picker-desc">{g.desc}</div>
+                    </div>
+                    {selected > 0 && (
+                      <span className="mcp-picker-count-badge">{selected}/{g.tools.length}</span>
+                    )}
+                  </button>
+                );
+              })}
               {mcpActiveTools.length > 0 && (
                 <button
-                  className="mcp-picker-option"
-                  onClick={() => {
-                    onSetMcpTools([]);
-                    onCloseMcpPicker();
-                  }}
+                  className="mcp-picker-clear"
+                  onClick={() => onSetMcpTools([])}
+                  type="button"
                 >
-                  <div className="mcp-picker-icon">🗑️</div>
-                  <div className="mcp-picker-text">
-                    <div className="mcp-picker-title">清空已启用工具</div>
-                    <div className="mcp-picker-desc">当前已启用 {mcpActiveTools.length} 个工具</div>
-                  </div>
+                  清空已启用工具
                 </button>
               )}
             </div>

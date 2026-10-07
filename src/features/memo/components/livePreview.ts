@@ -347,6 +347,11 @@ function buildDecorations(state: EditorStateType): DecorationSet {
     decos.push({ from, to, deco });
   };
 
+  /** 推送一个「点 widget」装饰（from===to，push 会丢弃零宽所以单独处理） */
+  const pushWidget = (pos: number, widget: WidgetType) => {
+    decos.push({ from: pos, to: pos, deco: Decoration.widget({ widget, side: 1 }) });
+  };
+
   /** 把一个标记（含其后紧跟的一个空格）整体隐藏 */
   const hideMark = (from: number, to: number) => {
     let end = to;
@@ -443,26 +448,35 @@ function buildDecorations(state: EditorStateType): DecorationSet {
 
       /* ---------- 5. 图片：整段 ![alt](url) 换成 <img> ---------- */
       if (name === 'Image') {
-        if (active) return;
         const raw = state.sliceDoc(node.from, node.to);
         const m = /^!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/.exec(raw);
         if (!m) return;
         const src = m[2];
         const alt = m[1];
 
-        // 本地图片：local:<id> → IndexedDB blob URL
-        if (src.startsWith('local:')) {
-          const id = src.slice('local:'.length);
-          const url = getCachedImageUrl(id);
-          push(node.from, node.to, Decoration.replace({
-            widget: url ? new ImageWidget(url, alt) : new LocalImagePendingWidget(id, alt),
-          }));
+        const isLocal = src.startsWith('local:');
+        const isRemote = /^(https?:|data:|\/|\.)/.test(src);
+        if (!isLocal && !isRemote) return;
+
+        const localId = isLocal ? src.slice('local:'.length) : '';
+        const localUrl = isLocal ? getCachedImageUrl(localId) : undefined;
+        const buildWidget = (): WidgetType => {
+          if (isLocal) {
+            return localUrl ? new ImageWidget(localUrl, alt) : new LocalImagePendingWidget(localId, alt);
+          }
+          return new ImageWidget(src, alt);
+        };
+
+        // Obsidian 式：光标在图片行时「源码 + 图片同时显示」——图片不再消失，
+        // 页面不会因图片（~40vh）被替换成一行文字而剧烈塌陷/抖动。
+        if (active) {
+          const line = state.doc.lineAt(node.to);
+          pushWidget(line.to, buildWidget());
           return;
         }
 
-        if (/^(https?:|data:|\/|\.)/.test(src)) {
-          push(node.from, node.to, Decoration.replace({ widget: new ImageWidget(src, alt) }));
-        }
+        // 非活动行：隐藏源码，图片就地取代
+        push(node.from, node.to, Decoration.replace({ widget: buildWidget() }));
         return;
       }
 

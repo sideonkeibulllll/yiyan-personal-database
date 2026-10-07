@@ -364,6 +364,34 @@
   margin-bottom: var(--space-3);
 }
 
+/* 标签筛选标题行：左边标签名、右边「反选」按钮 */
+.filter-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-3);
+}
+
+.filter-label-row .filter-label {
+  margin-bottom: 0;
+}
+
+.filter-invert-btn {
+  padding: 4px 12px;
+  font-size: var(--text-xs);
+  color: var(--color-accent-primary);
+  background: color-mix(in srgb, var(--color-accent-primary) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-accent-primary) 35%, transparent);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.filter-invert-btn:active {
+  transform: scale(0.95);
+  background: color-mix(in srgb, var(--color-accent-primary) 22%, transparent);
+}
+
 .star-filter {
   display: flex;
   gap: var(--space-2);

@@ -538,6 +538,11 @@ export function SearchPage() {
             setShowMenu(false);
             navigate(`/chat?entryId=${entryId}&from=/search`);
           }}
+          onEditInfo={(entry) => {
+            // 与随机页长按菜单行为一致：跳转条目编辑页
+            setShowMenu(false);
+            navigate(`/entry/${entry.id}/edit`);
+          }}
           onToast={showToastMessage}
         />
       )}

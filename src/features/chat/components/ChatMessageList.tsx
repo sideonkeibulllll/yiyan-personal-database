@@ -1,5 +1,5 @@
 /**
- * Chat 页消息列表 - 消息渲染、思维链、工具调用结果、选中模式
+ * Chat 页消息列表 - 消息渲染、思维链、工具调用结果、危险操作确认卡片、选中模式
  *
  * 状态与业务逻辑由父组件 ChatPage 持有，本组件只负责展示。
  */
@@ -18,6 +18,8 @@ interface ChatMessageListProps {
   containerRef: RefObject<HTMLDivElement>;
   endRef: RefObject<HTMLDivElement>;
   onToggleSelect: (msgId: string) => void;
+  /** 危险操作确认：confirmId + 是否批准 */
+  onConfirmAction?: (confirmId: string, approved: boolean) => void;
 }
 
 export function ChatMessageList({
@@ -29,6 +31,7 @@ export function ChatMessageList({
   containerRef,
   endRef,
   onToggleSelect,
+  onConfirmAction,
 }: ChatMessageListProps) {
   return (
     <div className="chat-messages" ref={containerRef}>
@@ -42,12 +45,13 @@ export function ChatMessageList({
         </div>
       ) : (
         messages.map(msg => {
-          const isSelectable = selectMode && msg.role !== 'tool';
+          const confirm = msg.confirmRequest;
+          const isSelectable = selectMode && msg.role !== 'tool' && !confirm;
           const isSelected = selectedMsgIds.has(msg.id);
           return (
           <div
             key={msg.id}
-            className={`chat-message ${msg.role} ${selectMode ? 'select-mode' : ''} ${isSelected ? 'selected' : ''}`}
+            className={`chat-message ${msg.role} ${selectMode ? 'select-mode' : ''} ${isSelected ? 'selected' : ''} ${confirm ? 'confirm-msg' : ''}`}
             data-msg-id={msg.id}
             onClick={isSelectable ? () => onToggleSelect(msg.id) : undefined}
           >
@@ -58,7 +62,7 @@ export function ChatMessageList({
               </div>
             )}
             <div className="message-avatar">
-              {msg.role === 'user' ? '我' : msg.role === 'tool' ? '🔧' : 'AI'}
+              {confirm ? '⚠️' : msg.role === 'user' ? '我' : msg.role === 'tool' ? '🔧' : 'AI'}
             </div>
             <div className="message-body">
               {/* 思维链内容（可折叠） */}
@@ -73,14 +77,43 @@ export function ChatMessageList({
                 </details>
               )}
 
-              <div
-                className="message-content markdown-body"
-                dangerouslySetInnerHTML={{
-                  __html: msg.role === 'assistant'
-                    ? renderMarkdown(msg.content || '…')
-                    : renderMarkdown(msg.content)
-                }}
-              />
+              {/* 危险操作确认卡片（删除类工具） */}
+              {confirm ? (
+                <div className={`confirm-card ${confirm.status}`}>
+                  <div className="confirm-card-head">⚠️ 需要你确认</div>
+                  <div className="confirm-card-summary">{confirm.summary}</div>
+                  <div className="confirm-card-tool">工具：{confirm.toolName}</div>
+                  {confirm.status === 'pending' ? (
+                    <div className="confirm-card-actions">
+                      <button
+                        className="confirm-btn cancel"
+                        onClick={(e) => { e.stopPropagation(); onConfirmAction?.(confirm.id, false); }}
+                      >
+                        取消
+                      </button>
+                      <button
+                        className="confirm-btn approve"
+                        onClick={(e) => { e.stopPropagation(); onConfirmAction?.(confirm.id, true); }}
+                      >
+                        确认执行
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="confirm-card-status">
+                      {confirm.status === 'approved' ? '✅ 已确认执行' : '🚫 已取消'}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div
+                  className="message-content markdown-body"
+                  dangerouslySetInnerHTML={{
+                    __html: msg.role === 'assistant'
+                      ? renderMarkdown(msg.content || '…')
+                      : renderMarkdown(msg.content)
+                  }}
+                />
+              )}
 
               {msg.isThinking && !msg.reasoningContent && (
                 <span className="message-tag">深度思考 · {msg.thinkingEffort}</span>
@@ -96,7 +129,7 @@ export function ChatMessageList({
                 </div>
               )}
 
-              {msg.model && msg.role === 'assistant' && (
+              {msg.model && msg.role === 'assistant' && !confirm && (
                 <span className="message-model-tag">{msg.model}</span>
               )}
               <span className="message-time">{formatTime(msg.timestamp)}</span>

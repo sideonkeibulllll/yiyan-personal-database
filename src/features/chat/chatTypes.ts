@@ -21,6 +21,18 @@ export interface ChatMessage {
   toolCallResults?: { name: string; success: boolean; summary: string }[];
   /** role='tool' 时关联的 tool_call_id（用于重建 apiMessages） */
   toolCallId?: string;
+
+  /**
+   * 危险操作等待用户确认（删除类工具）。
+   * 以独立消息渲染成「确认 / 取消」按钮，用户点击后状态变为 approved / rejected，
+   * agent loop 拿到结果才继续。
+   */
+  confirmRequest?: {
+    id: string;
+    toolName: string;
+    summary: string;
+    status: 'pending' | 'approved' | 'rejected';
+  };
 }
 
 export interface ChatSession {

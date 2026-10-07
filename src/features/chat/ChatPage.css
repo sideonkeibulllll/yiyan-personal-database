@@ -1439,6 +1439,176 @@
   margin-top: 2px;
 }
 
+/* ===== MCP 多选面板（v2.7.4）===== */
+.mcp-picker-count {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  font-weight: 400;
+  margin-left: var(--space-1);
+}
+
+/* 多选项：checkbox 左置 + 图标 + 文字 */
+.mcp-picker-option.checked {
+  background: var(--color-accent-subtle);
+  border-color: var(--color-border-accent);
+}
+
+.mcp-picker-checkbox {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  border: 1.5px solid var(--color-border-primary);
+  background: var(--color-bg-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.mcp-picker-checkbox.checked {
+  background: var(--color-accent-primary);
+  border-color: var(--color-accent-primary);
+}
+
+.mcp-picker-checkbox.partial {
+  background: var(--color-accent-primary);
+  border-color: var(--color-accent-primary);
+  opacity: 0.55;
+}
+
+.mcp-picker-checkbox svg {
+  width: 12px;
+  height: 12px;
+  color: #fff;
+}
+
+.mcp-picker-count-badge {
+  flex-shrink: 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-full);
+  padding: 2px 8px;
+}
+
+.mcp-picker-clear {
+  width: 100%;
+  padding: var(--space-2);
+  margin-top: var(--space-1);
+  background: none;
+  border: none;
+  border-top: 1px solid var(--color-border-primary);
+  color: var(--color-text-tertiary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.mcp-picker-clear:hover {
+  color: var(--color-error);
+}
+
+/* ===== 危险操作确认卡片（v2.7.4）===== */
+.chat-message.confirm-msg .message-body {
+  max-width: 100%;
+}
+
+.confirm-card {
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-error);
+  background: color-mix(in srgb, var(--color-error) 8%, transparent);
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.confirm-card.approved {
+  border-color: var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 8%, transparent);
+}
+
+.confirm-card.rejected {
+  border-color: var(--color-border-primary);
+  background: var(--color-bg-elevated);
+}
+
+.confirm-card-head {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-error);
+}
+
+.confirm-card.approved .confirm-card-head {
+  color: var(--color-success);
+}
+
+.confirm-card.rejected .confirm-card-head {
+  color: var(--color-text-tertiary);
+}
+
+.confirm-card-summary {
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+  line-height: 1.5;
+}
+
+.confirm-card-tool {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  font-family: monospace;
+}
+
+.confirm-card-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+
+.confirm-btn {
+  flex: 1;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.confirm-btn.cancel {
+  background: var(--color-bg-elevated);
+  border-color: var(--color-border-primary);
+  color: var(--color-text-secondary);
+}
+
+.confirm-btn.cancel:hover {
+  color: var(--color-text-primary);
+}
+
+.confirm-btn.approve {
+  background: var(--color-error);
+  color: #fff;
+}
+
+.confirm-btn.approve:hover {
+  filter: brightness(1.1);
+}
+
+.confirm-btn:active {
+  transform: scale(0.97);
+}
+
+.confirm-card-status {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--color-success);
+}
+
+.confirm-card.rejected .confirm-card-status {
+  color: var(--color-text-tertiary);
+}
+
 /* === 余额查询样式 === */
 .model-picker-divider {
   height: 1px;
