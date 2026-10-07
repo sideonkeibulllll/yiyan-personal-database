@@ -145,9 +145,16 @@
   color: var(--color-text-primary);
   font-weight: 500;
   flex: 1;
+  /* flex 子项默认 min-width:auto，长标题压不下去会把时间挤出去 */
+  min-width: 0;
+  /* 最多两行：超长标题换行显示，第二行末尾省略号（替代原单行 nowrap 的三个点） */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .todo-countdown {

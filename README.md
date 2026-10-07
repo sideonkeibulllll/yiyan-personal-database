@@ -7,7 +7,7 @@
 一个本地优先的私人记忆库：随手记下、随机重逢、连成网络、还能和 AI 一起翻。
 Android 应用，数据存在你自己的手机里。
 
-[![版本](https://img.shields.io/badge/version-v2.8.0-f76707?style=flat-square)](https://github.com/sideonkeibulllll/yiyan-personal-database)
+[![版本](https://img.shields.io/badge/version-v2.8.1-f76707?style=flat-square)](https://github.com/sideonkeibulllll/yiyan-personal-database)
 [![平台](https://img.shields.io/badge/platform-Android-3ddc84?style=flat-square&logo=android&logoColor=white)](https://github.com/sideonkeibulllll/yiyan-personal-database)
 [![许可](https://img.shields.io/badge/license-CC%20BY--NC%204.0-495057?style=flat-square)](LICENSE)
 
@@ -171,6 +171,9 @@ A：因为作者自己用 Obsidian，觉得它的「源码与渲染共存」手�
 ---
 
 ## 📜 更新日志
+
+### v2.8.1 · 2026-10-07
+- 📝 **待办页的待办标题改成最多两行** —— 长标题不再被压成一行、结尾只剩「…」
 
 ### v2.8.0 · 2026-10-07
 - 🗂️ **新增备忘录 AI 工具**：AI 现在能搜索、读取、新建、追加、覆写备忘录
