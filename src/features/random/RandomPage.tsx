@@ -13,7 +13,6 @@ import { weightedRandomSelect, filterEntries } from '@/services/random';
 import { BottomNav } from '@/components/BottomNav';
 import { QuickMenu } from './QuickMenu';
 import { TagSelector } from '@/components/TagSelector';
-// b.6: AIChatPanel 已移除，改为直接跳转到 Chat 页面
 import { ImageViewer } from '@/components/ImageViewer';
 import { readThumbAsSrc } from '@/services/attachmentService';
 import { hasLocalOriginal, addMissingOriginal } from '@/services/syncService';
@@ -144,7 +143,7 @@ export function RandomPage() {
   const [showFilter, setShowFilter] = useState(false);
   const [showTagSelector, setShowTagSelector] = useState(false);
   const [tagSelectorEntry, setTagSelectorEntry] = useState<Entry | null>(null);
-  // b.6: 不再需要 AIChatPanel，QuickMenu 直接跳转到 /chat
+  // 快捷菜单的「就此内容谈话」直接跳转 /chat，不再内嵌 AI 面板
 
   // 每张卡片的长按计时器
   const longPressTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());

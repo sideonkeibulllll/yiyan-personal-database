@@ -168,3 +168,13 @@ export const IconShare = createIcon('IconShare', 16, 1.5, (
 export const IconCheck = createIcon('IconCheck', 12, 3, (
   <polyline points="20 6 9 17 4 12" />
 ));
+
+/* ===== 输入框撤销 / 重做 ===== */
+
+export const IconUndo = createIcon('IconUndo', 16, 1.5, (
+  <><path d="M3 7v6h6" /><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" /></>
+));
+
+export const IconRedo = createIcon('IconRedo', 16, 1.5, (
+  <><path d="M21 7v6h-6" /><path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13" /></>
+));

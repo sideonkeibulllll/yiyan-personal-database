@@ -5,7 +5,7 @@
  */
 import type { KeyboardEvent, RefObject } from 'react';
 import { ENTRY_TOOLS, TODO_TOOLS, MEMO_TOOLS } from '@/services/chatBridge';
-import { IconUpload, IconBrain, IconTool, IconClose, IconBack, IconSendAlt, IconCheck } from '@/components/icons';
+import { IconUpload, IconBrain, IconTool, IconClose, IconBack, IconSendAlt, IconCheck, IconUndo, IconRedo } from '@/components/icons';
 import type { ThinkingEffort } from '../chatTypes';
 
 interface ChatInputAreaProps {
@@ -28,6 +28,13 @@ interface ChatInputAreaProps {
   input: string;
   onInputChange: (value: string) => void;
   onKeyDown: (e: KeyboardEvent) => void;
+  /** 撤销 / 重做（模拟 Ctrl+Z / Ctrl+Y，供手机端点击） */
+  canUndo: boolean;
+  canRedo: boolean;
+  onUndo: () => void;
+  onRedo: () => void;
+  /** 是否移动端（决定输入框提示文案：手机没有 Ctrl 键） */
+  isMobile: boolean;
   isLoading: boolean;
   onSend: () => void;
   onStop: () => void;
@@ -61,6 +68,11 @@ export function ChatInputArea({
   input,
   onInputChange,
   onKeyDown,
+  canUndo,
+  canRedo,
+  onUndo,
+  onRedo,
+  isMobile,
   isLoading,
   onSend,
   onStop,
@@ -194,13 +206,39 @@ export function ChatInputArea({
             <span>{mcpSearchCount}</span>
           </button>
         )}
+
+        {/* 撤销 / 重做（模拟 Ctrl+Z / Ctrl+Y，固定在工具栏最右侧，方便手机端点按） */}
+        <div className="chat-input-actions">
+          <button
+            type="button"
+            className="chat-history-btn"
+            onMouseDown={e => e.preventDefault()}
+            onClick={onUndo}
+            disabled={!canUndo}
+            title="撤销 (Ctrl+Z)"
+            aria-label="撤销"
+          >
+            <IconUndo size={18} />
+          </button>
+          <button
+            type="button"
+            className="chat-history-btn"
+            onMouseDown={e => e.preventDefault()}
+            onClick={onRedo}
+            disabled={!canRedo}
+            title="重做 (Ctrl+Y)"
+            aria-label="重做"
+          >
+            <IconRedo size={18} />
+          </button>
+        </div>
       </div>
 
       <div className="input-row">
         <textarea
           ref={textareaRef}
           className="chat-input"
-          placeholder="输入消息… (Enter 发送, Shift+Enter 换行)"
+          placeholder={isMobile ? '输入消息…' : '输入消息… (Enter 换行, Ctrl+Enter 发送)'}
           value={input}
           onChange={e => onInputChange(e.target.value)}
           onKeyDown={onKeyDown}

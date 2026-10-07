@@ -1009,11 +1009,66 @@ export function ChatPage() {
   }, [input, isLoading, settings, currentSessionId, sessions, persistSessions, updateSessionMessages, thinkingEnabled, thinkingEffort, mcpEnabled, mcpActiveTools, currentModel, pickerSelectedIds]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    // 手机端/桌面端统一：裸 Enter 换行（不拦截），仅 Ctrl/Cmd+Enter 发送；
+    // 发送也可以直接点右侧发送按钮。Shift+Enter 仍是系统默认换行。
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       handleSend();
     }
   }, [handleSend]);
+
+  /* === 输入框撤销 / 重做（模拟 Ctrl+Z / Ctrl+Y，供手机端点击）===
+   * 浏览器原生撤销栈在受控 textarea 下会被 React 重渲染打断，
+   * 这里自己维护快照栈：记录「上一次 input 变化前的值 + 光标位置」。 */
+  const inputHistoryRef = useRef<{ stack: string[]; index: number }>({ stack: [''], index: 0 });
+  const [historyVersion, setHistoryVersion] = useState(0);
+  const lastInputRef = useRef('');
+  const inputRefMirror = useRef('');
+
+  // 每次 input 变化时压栈（超过 60 步丢弃最旧）
+  useEffect(() => {
+    const h = inputHistoryRef.current;
+    const prevSnapshot = inputRefMirror.current;
+    if (prevSnapshot === input) return;
+    // 若上一次操作是撤销/重做（index 不在末尾），先截断分叉
+    if (h.index < h.stack.length - 1) {
+      h.stack = h.stack.slice(0, h.index + 1);
+    }
+    h.stack.push(input);
+    if (h.stack.length > 60) h.stack.shift();
+    h.index = h.stack.length - 1;
+    inputRefMirror.current = input;
+    setHistoryVersion(v => v + 1);
+  }, [input]);
+
+  const applyHistoryValue = useCallback((value: string) => {
+    setInput(value);
+    inputRefMirror.current = value;
+    setHistoryVersion(v => v + 1);
+    // 光标移到末尾
+    requestAnimationFrame(() => {
+      const ta = textareaRef.current;
+      if (ta) ta.setSelectionRange(value.length, value.length);
+    });
+  }, []);
+
+  const canUndo = inputHistoryRef.current.index > 0;
+  const canRedo = inputHistoryRef.current.index < inputHistoryRef.current.stack.length - 1;
+
+  const handleUndo = useCallback(() => {
+    const h = inputHistoryRef.current;
+    if (h.index <= 0) return;
+    h.index -= 1;
+    applyHistoryValue(h.stack[h.index]);
+  }, [applyHistoryValue]);
+
+  const handleRedo = useCallback(() => {
+    const h = inputHistoryRef.current;
+    if (h.index >= h.stack.length - 1) return;
+    h.index += 1;
+    applyHistoryValue(h.stack[h.index]);
+  }, [applyHistoryValue]);
+  void historyVersion; // 仅用于触发按钮可用态刷新
 
   const handleClearMessages = useCallback(() => {
     if (!currentSession) return;
@@ -1158,6 +1213,11 @@ export function ChatPage() {
           input={input}
           onInputChange={setInput}
           onKeyDown={handleKeyDown}
+          canUndo={canUndo}
+          canRedo={canRedo}
+          onUndo={handleUndo}
+          onRedo={handleRedo}
+          isMobile={isMobile}
           isLoading={isLoading}
           onSend={handleSend}
           onStop={handleStop}

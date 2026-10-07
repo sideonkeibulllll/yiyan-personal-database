@@ -1049,6 +1049,59 @@
   flex: 1;
 }
 
+/* === 撤销 / 重做 按钮组（放在工具栏行最右侧，与「数据/最近/思考/MCP」同行）===
+ * margin-left:auto 把它推到行尾；尺寸比工具栏按钮稍大，方便手机端点按 */
+.chat-input-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.chat-history-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out);
+  /* 手机端触控：取消点击高亮，避免误触相邻按钮 */
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.chat-history-btn:hover:not(:disabled) {
+  background: var(--color-accent-subtle);
+  border-color: var(--color-border-accent);
+  color: var(--color-accent-primary);
+}
+
+.chat-history-btn:active:not(:disabled) {
+  transform: scale(0.92);
+}
+
+.chat-history-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* 手机端再放大一档，拇指更好点 */
+@media (max-width: 767px) {
+  .chat-history-btn {
+    width: 38px;
+    height: 38px;
+  }
+}
+
 /* === v3: MCP 搜索面板（半页）=== */
 .mcp-search-panel {
   position: absolute;
