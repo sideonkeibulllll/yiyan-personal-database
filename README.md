@@ -11,7 +11,7 @@ Android 应用，数据存在你自己的手机里。
 [![平台](https://img.shields.io/badge/platform-Android-3ddc84?style=flat-square&logo=android&logoColor=white)](https://github.com/sideonkeibulllll/yiyan-personal-database)
 [![许可](https://img.shields.io/badge/license-CC%20BY--NC%204.0-495057?style=flat-square)](LICENSE)
 
-### [⬇️ 下载安装](https://yiyan-personal-database-official-website.vercel.app/) 　·　[👀 先看看界面](https://yiyan-personal-database-official-website.vercel.app/app/) 　·　[🐛 反馈问题](https://github.com/sideonkeibulllll/yiyan-personal-database/issues)
+### [⬇️ 下载安装](https://jiyiku.8765777.xyz/) 　·　[👀 先看看界面](https://jiyiku.8765777.xyz/app/) 　·　[🐛 反馈问题](https://github.com/sideonkeibulllll/yiyan-personal-database/issues)
 
 </div>
 
@@ -38,9 +38,9 @@ Android 应用，数据存在你自己的手机里。
 
 ### 📱 Android
 
-**[→ 前往官网下载最新版](https://yiyan-personal-database-official-website.vercel.app/)**
+**[→ 前往官网下载最新版](https://jiyiku.8765777.xyz/)**
 
-官网自动提供最新签名包，并附有 SHA-256 校验值与备用镜像。
+官网自动提供最新签名包，并附有 SHA-256 校验值与备用镜像（**国内可直连，不需要梯子**）。
 
 **安装三步：**
 
@@ -52,7 +52,7 @@ Android 应用，数据存在你自己的手机里。
 
 ### 👀 想先看看长什么样？
 
-**[→ 打开网页版界面预览](https://yiyan-personal-database-official-website.vercel.app/app/)**
+**[→ 打开网页版界面预览](https://jiyiku.8765777.xyz/app/)**
 
 7 屏真实界面，点着玩。数据是编的、按钮不会真的干活 —— 但长相和手感是真的，整个预览只有 240 KB。
 
@@ -217,8 +217,8 @@ A：因为作者自己用 Obsidian，觉得它的「源码与渲染共存」手�
 
 **— 存下来的东西，值得被重新遇见 —**
 
-[官网](https://yiyan-personal-database-official-website.vercel.app/) ·
-[界面预览](https://yiyan-personal-database-official-website.vercel.app/app/) ·
+[官网](https://jiyiku.8765777.xyz/) ·
+[界面预览](https://jiyiku.8765777.xyz/app/) ·
 [问题反馈](https://github.com/sideonkeibulllll/yiyan-personal-database/issues)
 
 <sub>想自己构建？见 <a href="BUILD_AND_RELEASE.md">BUILD_AND_RELEASE.md</a></sub>
