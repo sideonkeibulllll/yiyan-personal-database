@@ -1,9 +1,9 @@
 /**
  * 设置面板 - 桌面橱窗（v2.13.0）
  *
- * 独立性声明：本面板是 services/widgetService 门面在 UI 层的唯一消费方；
- * 同步 / 重绘 / 状态查询全部经 widgetService 导出函数完成，不直接触碰原生插件。
- * 本面板无持久化配置项（形态由「桌面上添加哪一个小组件」决定）；样式一律进 WidgetPanel.css。
+ * 独立性声明：本面板经 services/widgetService 门面完成同步 / 重绘 / 状态查询，不直接触碰原生插件。
+ * 配置项：展示候选范围（settings.widget.filter，v2.14.0）；
+ * 各组件样式在独立面板 WidgetStylePanel（v2.15.0）。样式一律进 WidgetPanel.css。
  */
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import {
@@ -14,7 +14,7 @@ import {
   syncWidgetPlan,
 } from '@/services/widgetService';
 import { useSettingsStore } from '@/stores/settingsStore';
-import { WIDGET_PLAN_DAYS, remainingDays } from '@/utils/widgetPlan';
+import { WIDGET_PLAN_COUNT } from '@/utils/widgetPlan';
 import type { TodoSnapshot, WidgetPlan } from '@/utils/widgetPlan';
 import { EntryFilterPanel } from '@/components/EntryFilterPanel/EntryFilterPanel';
 import { countActiveFilters, isFilterActive, sanitizeEntryFilter } from '@/utils/entryFilterState';
@@ -137,15 +137,14 @@ export function WidgetPanel({ markDirty }: WidgetPanelProps) {
   }
 
   const totalWidgets = baseCount + refreshCount + todoCount;
-  const planDays = plan ? plan.items.length : 0;
-  const planRemaining = plan ? remainingDays(plan, Date.now()) : 0;
+  const planCount = plan ? plan.items.length : 0;
 
   return (
     <div className="settings-panel-content">
       <h2 className="panel-title">桌面橱窗</h2>
       <div className="form-hint">
         把一张记忆卡片放到主屏幕——不打开应用，也能瞥见过去存下的东西。
-        卡片每天自动换一张；点一下直达那张卡的浏览页。
+        每天打开应用时换成新的一批（10 条），点「换一张」可翻看；点一下直达那张卡的浏览页。
       </div>
 
       {/* 当前状态 */}
@@ -164,7 +163,7 @@ export function WidgetPanel({ markDirty }: WidgetPanelProps) {
             <span>展示计划</span>
             <span>
               {plan
-                ? `共 ${planDays} 天 · 剩余 ${planRemaining} 天 · 生成于 ${formatTime(plan.generatedAt)}`
+                ? `${planCount} 条 · 生成于 ${formatTime(plan.generatedAt)}`
                 : '暂无（打开应用会自动生成）'}
             </span>
           </div>
@@ -187,7 +186,7 @@ export function WidgetPanel({ markDirty }: WidgetPanelProps) {
           onClick={() => { void handleSync(); }}
           disabled={busy}
         >
-          {busy ? '同步中…' : `立即同步（重排 ${WIDGET_PLAN_DAYS} 天计划 + 待办快照）`}
+          {busy ? '同步中…' : `立即同步（重排今日 ${WIDGET_PLAN_COUNT} 条计划 + 待办快照）`}
         </button>
         {totalWidgets > 0 && (
           <button

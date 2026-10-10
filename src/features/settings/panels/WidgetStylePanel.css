@@ -1,0 +1,106 @@
+/**
+ * 桌面组件样式面板（v2.15.0 / 三档 v2.15.1）
+ * 仅本面板使用；不要往 SettingsPage.css 里塞本模块样式。
+ */
+
+.widget-style-hint {
+  margin-bottom: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+}
+
+/* 三档样式：竖排整行（每行 = 色块 + 名称 + 右侧说明） */
+.widget-style-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.widget-style-opt {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-primary);
+  background: var(--color-bg-secondary);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.widget-style-opt.active {
+  border-color: var(--color-border-accent);
+  background: var(--color-accent-subtle);
+}
+
+.widget-style-opt-text {
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.widget-style-opt-name {
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+}
+
+.widget-style-opt-desc {
+  margin-left: auto;
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  text-align: right;
+  line-height: 1.4;
+}
+
+/* 色块预览：与原生 drawable 口径一致
+   - default：不透明深棕底 + 棕边
+   - blend / ultra：半透明深色叠在「假壁纸」渐变上，直观展示透明度差异 */
+.widget-style-swatch {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+}
+
+.widget-style-swatch.swatch-default {
+  background: #402407;
+  border: 1px solid #5f431a;
+}
+
+.widget-style-swatch.swatch-blend {
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background:
+    linear-gradient(rgba(20, 10, 3, 0.69), rgba(20, 10, 3, 0.69)),
+    linear-gradient(135deg, #7aa2ff, #ffb3d9);
+}
+
+.widget-style-swatch.swatch-ultra {
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background:
+    linear-gradient(rgba(10, 5, 1, 0.1), rgba(10, 5, 1, 0.1)),
+    linear-gradient(135deg, #7aa2ff, #ffb3d9);
+}
+
+/* niko 底层时钟开关（v2.16.0）：一行复选框 */
+.widget-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
+  cursor: pointer;
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+}
+
+.widget-toggle-row input[type='checkbox'] {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  accent-color: #c9a66b;
+}

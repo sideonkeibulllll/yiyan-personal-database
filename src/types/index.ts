@@ -114,11 +114,29 @@ export interface NotifySettings {
 }
 
 /**
+ * 小组件背景样式（v2.15.0 / +ultra v2.15.1）
+ * - 'default'：现有不透明深棕底（字迹最稳）
+ * - 'blend'  ：透亮融合 —— 半透明底（约 69%），让壁纸透出来但不突兀
+ * - 'ultra'  ：极致透明 —— 几乎全透（约 10% 薄纱），最大程度露出壁纸，
+ *              靠文字投影保证可读（styles.xml 的 WidgetTextShadow）
+ *
+ * ⚠️ 真·背景虚化（毛玻璃）在 AppWidget 上做不到（小组件由 launcher 进程绘制，
+ *    无法跨窗口采样其背后内容）→ 只能做「半透明融合」的视觉近似。
+ */
+export type WidgetStyle = 'default' | 'blend' | 'ultra';
+
+/** 可单独配置样式的小组件种类（键名与原生 WidgetShared 的样式键对齐） */
+export type WidgetStyleTarget = 'memory' | 'memoryRefresh' | 'todo' | 'niko' | 'wheel' | 'clock';
+
+/** 各小组件的样式映射（每个组件独立） */
+export type WidgetStyleMap = Record<WidgetStyleTarget, WidgetStyle>;
+
+/**
  * 「桌面橱窗」配置（v2.14.0）
  *
  * ⚠️ 归属声明：本配置属于「桌面橱窗」模块（见 services/widgetService.ts）。
  * 写入只允许走 settingsStore.updateWidgetConfig，
- * 读取渲染由 WidgetPanel 负责。
+ * 读取渲染由 WidgetPanel / WidgetStylePanel 负责。
  *
  * 未来扩展方向（橱窗布局偏好、换卡频率等）：向此结构**追加可选字段**，
  * 由 DEFAULT_SETTINGS / settingsStore 的 sanitizeWidget 兜底，保证旧配置向后兼容。
@@ -137,6 +155,14 @@ export interface WidgetSettings {
     /** 时间范围（按修改时间；无 preset = 不限） */
     timeRange: { preset?: '1d' | '3d' | '7d' | 'custom'; from?: string; to?: string };
   };
+  /** 各小组件的背景样式（v2.15.0）：每种组件独立配置 */
+  styles: WidgetStyleMap;
+  /**
+   * niko 挂件（v2.16.0）：是否在底层叠一个放大居中的数字时钟（HH : mm）。
+   * ⚠️ 与背景样式**不互斥** —— 可单独开关，和 default/blend/ultra 任意组合
+   *    （时钟是数字层、样式是背景层，两者互不影响）。
+   */
+  nikoClock: boolean;
 }
 
 // ==================== 待办相关类型 ====================
@@ -675,9 +701,18 @@ export const DEFAULT_SETTINGS: Settings = {
     windowEnd: 22,
     dailyCount: 1,
   },
-  /** 桌面橱窗（v2.14.0）：默认不筛选（全部卡片都可能被选到） */
+  /** 桌面橱窗（v2.14.0）：默认不筛选（全部卡片都可能被选到）+ 全部组件默认样式 */
   widget: {
     filter: { tagIds: [], timeRange: {} },
+    styles: {
+      memory: 'default',
+      memoryRefresh: 'default',
+      todo: 'default',
+      niko: 'default',
+      wheel: 'default',
+      clock: 'default',
+    },
+    nikoClock: false,
   },
   todo: DEFAULT_TODO_CONFIG,
   // Cloudflare 中转站（v2.7.0）：密钥由用户手填，这里默认全空

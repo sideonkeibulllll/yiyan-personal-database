@@ -11,7 +11,7 @@
  *  - WidgetPanel  → getWidgetStatus() / syncAll(true) / refreshWidgetViews()
  *
  * 两类橱窗数据（均写入原生 SharedPreferences，由 Provider 渲染）：
- *  - 记忆卡片计划（14 天）：setPlan / getPlan（余量充足时跳过重排）
+ *  - 记忆卡片计划（v2.16.0：今天 10 条候选）：setPlan / getPlan（今天已排则跳过重排）
  *  - 待办快照（三视图：today / timed / untimed，各 1 大 + 5 小）：setTodo / getTodo
  *    v2.13.2：三视图预生成 + 待办变动防抖 2.5s 即时推送（切后台立即 flush）
  *
@@ -22,9 +22,9 @@
  *    （JSON 结构与键名与其对齐；改结构必须两边同步）
  *
  * 数据流：
- *  打开 App → 生成 14 天展示计划（加权选卡 + 曝光去重）
+ *  打开 App → 生成「今天」的 10 条展示计划（加权选卡 + 曝光去重）
  *  → YiyanWidget.setPlan() 写入 SharedPreferences
- *  → 原生 Provider 按天换卡（不依赖 App 常驻）
+ *  → 原生 Provider 渲染今日候选（点「换一张」在 10 条里循环，不依赖 App 常驻）
  *  → 点击走 deep link（com.yiyan.memorydb://entry/<id>）打开卡片浏览页
  */
 import { Capacitor, registerPlugin } from '@capacitor/core';
@@ -39,6 +39,7 @@ import { isFilterActive } from '@/utils/entryFilterState';
 import { makeReunionTitle, toDayKey } from '@/utils/notifyPlan';
 import { getSortOrder } from '@/utils/todoSortOrder';
 import {
+  WIDGET_PLAN_COUNT,
   assemblePlan,
   assembleTodoSnapshot,
   isValidPlan,
@@ -48,8 +49,8 @@ import {
   orderTimedForWidget,
   orderTodosForWidget,
   orderUntimedForWidget,
-  planDayStarts,
   shouldResync,
+  startOfDayTs,
   toTimeText,
   toTimedRangeText,
 } from '@/utils/widgetPlan';
@@ -71,6 +72,11 @@ interface YiyanWidgetPlugin {
   getTodo(): Promise<{ snapshot: string | null }>;
   /** 查询桌面上的橱窗实例数量 */
   getStatus(): Promise<{ baseCount: number; refreshCount: number; todoCount: number }>;
+  /**
+   * 写入各组件背景样式（JSON 字符串，键见 WidgetStyleTarget），触发全部橱窗重绘（v2.15.0）。
+   * v2.16.0 追加 nikoClock：niko 挂件是否在底层叠一个数字时钟。
+   */
+  setStyles(options: { styles: string; nikoClock?: boolean }): Promise<void>;
   /** 触发全部橱窗立即重绘（不改数据） */
   refreshAll(): Promise<void>;
 }
@@ -92,14 +98,15 @@ export function isWidgetSupported(): boolean {
 export interface WidgetSyncReport {
   ok: boolean;
   message: string;
-  /** 本次生成的计划天数（余量充足跳过时为 0） */
+  /** 本次生成的计划条数（跳过时为 0） */
   scheduled: number;
 }
 
 /**
- * 同步展示计划：生成/续排未来 14 天，写入原生。
+ * 同步展示计划（v2.16.0）：生成「今天」的 10 条候选，写入原生。
  *
- * - 默认增量：计划余量充足（≥ WIDGET_RESYNC_THRESHOLD 天）时跳过；
+ * - 每次重排生成 WIDGET_PLAN_COUNT 条，全部今天生效（默认显示第 1 条，「换一张」循环）；
+ * - 默认增量：计划是「今天」生成的则跳过（与每日自动备份同口径，每天只排一次）；
  * - force=true（面板「立即同步」）时无条件重排。
  */
 export async function syncWidgetPlan(force = false): Promise<WidgetSyncReport> {
@@ -120,7 +127,7 @@ export async function syncWidgetPlan(force = false): Promise<WidgetSyncReport> {
     }
     const now = Date.now();
     if (!force && !shouldResync(existing, now)) {
-      return { ok: true, message: '计划仍有余量', scheduled: 0 };
+      return { ok: true, message: '今日计划已排好', scheduled: 0 };
     }
 
     // 2. 候选池（store 优先、数据库兜底）+ 筛选 + 曝光去重
@@ -136,7 +143,8 @@ export async function syncWidgetPlan(force = false): Promise<WidgetSyncReport> {
     let pool = entries.filter(e => !exposed.has(e.id));
     if (pool.length === 0) pool = entries;
 
-    // 3. 每天一张；选卡复用加权随机（本轮不重复，池子不足时循环复用）
+    // 3. 今天 10 条候选；选卡复用加权随机（本轮不重复，池子不足时循环复用）
+    const dayStart = startOfDayTs(now);
     const usedThisRun = new Set<string>();
     const pickFor = (): Entry | null => {
       let candidates = pool.filter(e => !usedThisRun.has(e.id));
@@ -151,7 +159,7 @@ export async function syncWidgetPlan(force = false): Promise<WidgetSyncReport> {
     };
 
     const items: WidgetPlanItem[] = [];
-    for (const dayStart of planDayStarts(now)) {
+    for (let i = 0; i < WIDGET_PLAN_COUNT; i++) {
       const picked = pickFor();
       if (!picked) break;
       items.push({
@@ -171,7 +179,7 @@ export async function syncWidgetPlan(force = false): Promise<WidgetSyncReport> {
     const exposure: ExposureItem[] = items.map(it => ({ id: it.entryId, at: it.at, source: 'widget' }));
     appendExposure(exposure);
 
-    return { ok: true, message: `已安排未来 ${items.length} 天的橱窗`, scheduled: items.length };
+    return { ok: true, message: `已安排今日 ${items.length} 张橱窗`, scheduled: items.length };
   } catch (e) {
     console.warn('[widget] 同步失败:', e);
     return { ok: false, message: '同步失败，请稍后重试', scheduled: 0 };
@@ -302,10 +310,31 @@ export function initTodoAutoSync(): void {
 }
 
 /**
+ * 下发各组件背景样式到原生（v2.15.0）。
+ *
+ * 样式存 settings.widget.styles，由「桌面组件样式」面板改动时调用；
+ * 同时挂在 syncAll 开头 —— 保证 App 启动 / 「立即同步」都会把当前样式推给原生
+ * （原生渲染时按组件切背景层，不需要 App 常驻）。
+ */
+export async function applyWidgetStyles(): Promise<void> {
+  if (!isWidgetSupported()) return;
+  try {
+    const widget = useSettingsStore.getState().settings.widget;
+    await YiyanWidget.setStyles({
+      styles: JSON.stringify(widget.styles),
+      nikoClock: widget.nikoClock,
+    });
+  } catch (e) {
+    console.warn('[widget] 样式下发失败:', e);
+  }
+}
+
+/**
  * 一键同步两类橱窗数据：待办快照（每次都刷新）+ 记忆卡片计划（余量判断）。
  * App 启动与面板「立即同步」均走这里。
  */
 export async function syncAll(force = false): Promise<WidgetSyncReport> {
+  await applyWidgetStyles();
   const todoRes = await syncTodoSnapshot();
   const planRes = await syncWidgetPlan(force);
   const parts: string[] = [todoRes.message];

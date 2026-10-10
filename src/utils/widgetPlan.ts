@@ -10,11 +10,12 @@
  *   WidgetPlanItem = { at: number, entryId: string, title: string, body: string }
  *   —— 修改结构时必须同步 Kotlin 侧解析逻辑。
  */
-/** 计划覆盖天数（生成一次管 N 天） */
-export const WIDGET_PLAN_DAYS = 14;
-
-/** 剩余有效天数低于此值 → 触发重新生成 */
-export const WIDGET_RESYNC_THRESHOLD = 7;
+/**
+ * 计划候选条数（v2.16.0）
+ * 每天生成一次，一次 N 条候选，全部「今天」生效；桌面默认显示第 1 条，
+ * 点「换一张」在这 N 条里循环。跨天重排见 shouldResync。
+ */
+export const WIDGET_PLAN_COUNT = 10;
 
 /** 单条摘要最大字数（软限制；v2.13.2 放宽到 3000——9×6 满屏约需 600~900 字，任意尺寸都铺得满） */
 export const WIDGET_BODY_MAX = 3000;
@@ -37,29 +38,26 @@ export interface WidgetPlan {
   items: WidgetPlanItem[];
 }
 
-/** 生成从今天起的 N 个「当天 00:00」时间戳（本地时区，升序） */
-export function planDayStarts(now: number, days: number = WIDGET_PLAN_DAYS): number[] {
-  const base = new Date(now);
-  base.setHours(0, 0, 0, 0);
-  const out: number[] = [];
-  for (let i = 0; i < days; i++) {
-    const d = new Date(base);
-    d.setDate(base.getDate() + i);
-    out.push(d.getTime());
-  }
-  return out;
+/** 某时刻所在「本地日」的 00:00 时间戳 */
+export function startOfDayTs(now: number): number {
+  const d = new Date(now);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
 }
 
-/** 计划剩余有效天数（生效时间在未来的项数） */
-export function remainingDays(plan: WidgetPlan | null, now: number): number {
-  if (!plan || !Array.isArray(plan.items)) return 0;
-  return plan.items.filter(it => it.at > now).length;
+/** 两个时间戳是否落在同一「本地日」 */
+export function isSameLocalDay(a: number, b: number): boolean {
+  return startOfDayTs(a) === startOfDayTs(b);
 }
 
-/** 是否需要重新生成计划（无计划 / 结构非法 / 余量不足） */
+/**
+ * 是否需要重新生成计划（v2.16.0）：
+ * 无计划 / 结构非法 / 不是「今天」生成的 → 需要重排。
+ * 与每日自动备份同口径：每天只在打开 App 时排一次。
+ */
 export function shouldResync(plan: WidgetPlan | null, now: number): boolean {
   if (!isValidPlan(plan)) return true;
-  return remainingDays(plan, now) < WIDGET_RESYNC_THRESHOLD;
+  return !isSameLocalDay(plan.generatedAt, now);
 }
 
 /** 计划结构校验（JS 与调试共用） */

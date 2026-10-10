@@ -1,8 +1,16 @@
-﻿/**
+/**
  * 设置状态管理
  */
 import { create } from 'zustand';
-import type { CloudConfig, NotifySettings, Settings, WidgetSettings } from '@/types';
+import type {
+  CloudConfig,
+  NotifySettings,
+  Settings,
+  WidgetSettings,
+  WidgetStyle,
+  WidgetStyleMap,
+  WidgetStyleTarget,
+} from '@/types';
 import { DEFAULT_SETTINGS, migrateAIConfig } from '@/types';
 import { getDatabase } from '@/services/database';
 import { sanitizeEntryFilter } from '@/utils/entryFilterState';
@@ -73,15 +81,30 @@ function sanitizeNotify(raw: Partial<NotifySettings> | undefined): NotifySetting
   };
 }
 
+/** 组件样式键（与 types 的 WidgetStyleTarget 对齐） */
+const WIDGET_STYLE_TARGETS: WidgetStyleTarget[] = ['memory', 'memoryRefresh', 'todo', 'niko', 'wheel', 'clock'];
+
+/** 单个样式值兜底：只认 'blend' / 'ultra'，其余一律 'default' */
+function sanitizeWidgetStyle(raw: unknown): WidgetStyle {
+  return raw === 'blend' || raw === 'ultra' ? raw : 'default';
+}
+
 /**
  * 桌面橱窗配置兜底（v2.14.0）
- * 旧配置无 widget → 校验后回退「不限筛选」
+ * 旧配置无 widget → 校验后回退「不限筛选」+ 全组件默认样式
  */
 function sanitizeWidget(raw: Partial<WidgetSettings> | undefined): WidgetSettings {
-  const dft = DEFAULT_SETTINGS.widget;
   const r = raw || {};
+  const rs = (r.styles || {}) as Partial<Record<WidgetStyleTarget, unknown>>;
+  const styles = {} as WidgetStyleMap;
+  for (const key of WIDGET_STYLE_TARGETS) {
+    styles[key] = sanitizeWidgetStyle(rs[key]);
+  }
   return {
     filter: sanitizeEntryFilter(r.filter),
+    styles,
+    // v2.16.0：niko 底层时钟开关（非布尔一律回退 false）
+    nikoClock: typeof r.nikoClock === 'boolean' ? r.nikoClock : false,
   };
 }
 

@@ -72,6 +72,7 @@ import { PromptsPanel } from './panels/PromptsPanel';
 import { GlmPanel } from './panels/GlmPanel';
 import { NotifyPanel } from './panels/NotifyPanel';
 import { WidgetPanel } from './panels/WidgetPanel';
+import { WidgetStylePanel } from './panels/WidgetStylePanel';
 import './SettingsPage.css';
 
 /** 设置面板类型 */
@@ -81,6 +82,7 @@ type SettingsTab =
   | 'random'
   | 'notify'
   | 'widget'
+  | 'widgetStyle'
   | 'dataManager'
   | 'import'
   | 'export'
@@ -98,6 +100,7 @@ const TAB_LIST: { key: SettingsTab; label: string }[] = [
   { key: 'random', label: '随机浏览' },
   { key: 'notify', label: '记忆来信' },
   { key: 'widget', label: '桌面橱窗' },
+  { key: 'widgetStyle', label: '桌面组件样式' },
   { key: 'dataManager', label: '数据管理' },
   { key: 'import', label: '导入' },
   { key: 'export', label: '导出' },
@@ -696,6 +699,9 @@ export function SettingsPage() {
 
       case 'widget':
         return <WidgetPanel markDirty={markDirty} />;
+
+      case 'widgetStyle':
+        return <WidgetStylePanel />;
 
       case 'dataManager':
         return <DataManagerPanel />;
