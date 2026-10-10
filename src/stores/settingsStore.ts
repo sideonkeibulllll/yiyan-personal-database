@@ -4,6 +4,7 @@
 import { create } from 'zustand';
 import type {
   CloudConfig,
+  FixedTimeSlot,
   NotifySettings,
   Settings,
   WidgetSettings,
@@ -57,16 +58,41 @@ const STORAGE_KEY = 'yiyan_settings';
  * 否则老配置会被误判为「已有 providers」而丢失 apiKey/model。
  */
 /**
+ * 数值兜底工具（全局复用）：防手改 localStorage / 旧版本数据带来越界值。
+ */
+function clampNum(v: unknown, min: number, max: number, d: number): number {
+  return typeof v === 'number' && Number.isFinite(v)
+    ? Math.min(max, Math.max(min, Math.round(v)))
+    : d;
+}
+
+/**
+ * 定时投递列表兜底（v3.1.0）：过滤无效时间格式、截断上限 20 条
+ */
+function sanitizeFixedTimes(raw: unknown): FixedTimeSlot[] {
+  if (!Array.isArray(raw)) return [];
+  const result: FixedTimeSlot[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const obj = item as Record<string, unknown>;
+    const id = typeof obj.id === 'string' && obj.id ? obj.id : `ft_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const time = typeof obj.time === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(obj.time) ? obj.time : null;
+    if (!time) continue;
+    const enabled = typeof obj.enabled === 'boolean' ? obj.enabled : true;
+    result.push({ id, time, enabled });
+    if (result.length >= 20) break;
+  }
+  return result;
+}
+
+/**
  * 记忆来信配置的数值兜底（防手改 localStorage / 旧版本数据带来越界值，
  * 越界窗口会导致排程时刻计算出错）。
  */
 function sanitizeNotify(raw: Partial<NotifySettings> | undefined): NotifySettings {
   const dft = DEFAULT_SETTINGS.notify;
   const r = raw || {};
-  const clamp = (v: unknown, min: number, max: number, d: number): number =>
-    typeof v === 'number' && Number.isFinite(v)
-      ? Math.min(max, Math.max(min, Math.round(v)))
-      : d;
+  const clamp = clampNum;
   const windowStart = clamp(r.windowStart, 0, 23, dft.windowStart);
   const windowEndRaw = clamp(r.windowEnd, 1, 24, dft.windowEnd);
   // v2.14.0：来信候选筛选（标签 / 星标 / 时间）；旧配置无 filter → 校验后回退「不限」
@@ -78,6 +104,7 @@ function sanitizeNotify(raw: Partial<NotifySettings> | undefined): NotifySetting
     windowEnd: windowEndRaw > windowStart ? windowEndRaw : Math.min(24, windowStart + 1),
     dailyCount: clamp(r.dailyCount, 1, 3, dft.dailyCount),
     filter,
+    fixedTimes: sanitizeFixedTimes(r.fixedTimes),
   };
 }
 
@@ -105,6 +132,8 @@ function sanitizeWidget(raw: Partial<WidgetSettings> | undefined): WidgetSetting
     styles,
     // v2.16.0：niko 底层时钟开关（非布尔一律回退 false）
     nikoClock: typeof r.nikoClock === 'boolean' ? r.nikoClock : false,
+    // v3.1.0：每天自动刷新次数（1-10，默认 3）
+    dailyAutoRefresh: clampNum(r.dailyAutoRefresh, 1, 10, 3),
   };
 }
 

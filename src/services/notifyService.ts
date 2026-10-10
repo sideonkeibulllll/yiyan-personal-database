@@ -46,7 +46,7 @@ import {
 // 共享曝光池（v2.13.0）：与桌面橱窗共用，防止同一张卡在两个渠道被反复推
 import { appendExposure, migrateLegacyNotifyHistory, recentlyExposedIds } from '@/utils/exposurePool';
 import type { ExposureItem } from '@/utils/exposurePool';
-import type { Entry, NotifySettings } from '@/types';
+import type { Entry, FixedTimeSlot, NotifySettings } from '@/types';
 
 /* ═══════════════ 模块常量（集中声明；调用方禁止重复定义） ═══════════════ */
 
@@ -147,6 +147,7 @@ export async function ensureScheduled(): Promise<void> {
   if (perm !== 'granted') return;
   try {
     await scheduleUpcoming(cfg, false);
+    await scheduleFixedTimes(cfg, false);
   } catch (e) {
     console.warn('[notify] 续排失败:', e);
   }
@@ -179,6 +180,7 @@ export async function applySettings(): Promise<{ ok: boolean; message: string }>
 
   try {
     const report = await scheduleUpcoming(cfg, true);
+    await scheduleFixedTimes(cfg, true);
     if (report.poolFilteredEmpty) {
       return { ok: false, message: '「来信候选范围」筛得太窄了，没有一张卡符合条件' };
     }
@@ -372,11 +374,13 @@ async function scheduleUpcoming(
     await LocalNotifications.cancel({ notifications: pending.map(n => ({ id: n.id })) });
   }
 
-  // 已排程的日期集合（按天粒度补缺）
+  // 已排程的日期集合（按天粒度补缺）—— 只统计随机投递，固定时间走独立通道
   const pendingDays = new Set<string>();
   if (!replaceAll) {
     for (const n of pending) {
-      const dayKey = (n.extra as { dayKey?: unknown } | undefined)?.dayKey;
+      const extra = (n.extra as { kind?: string; dayKey?: unknown } | undefined);
+      if (extra?.kind === 'fixed') continue; // 固定时间投递不算入随机补缺
+      const dayKey = extra?.dayKey;
       if (typeof dayKey === 'string' && dayKey) pendingDays.add(dayKey);
     }
   }
@@ -431,4 +435,97 @@ async function scheduleUpcoming(
   appendExposure(newExposure);
 
   return { scheduled: notifications.length, poolSize: pool.length };
+}
+
+/* ═══════════════ 定时投递（v3.1.0） ═══════════════ */
+
+/**
+ * 定时投递排程：未来 N 天，每天在每个启用的时间点各投一条。
+ * 与随机投递（scheduleUpcoming）完全独立：
+ * - 不同的 extra.kind（'fixed' vs 'reunion'），补缺时互不干扰
+ * - 不同的 slotIndex 段（100+ 避开 0/1/2）
+ * - 同一套选卡规则（加权随机 + 曝光去重），确保同一天不会推重复的卡
+ */
+async function scheduleFixedTimes(
+  cfg: NotifySettings,
+  replaceAll: boolean,
+): Promise<void> {
+  const enabledSlots = (cfg.fixedTimes ?? []).filter(t => t.enabled);
+  if (enabledSlots.length === 0) return;
+
+  const pendingRes = await LocalNotifications.getPending();
+  const pending = pendingRes.notifications || [];
+
+  // 全清模式：只取消 kind='fixed' 的通知
+  if (replaceAll) {
+    const fixedIds = pending
+      .filter(n => (n.extra as { kind?: string } | undefined)?.kind === 'fixed')
+      .map(n => n.id);
+    if (fixedIds.length > 0) {
+      await LocalNotifications.cancel({ notifications: fixedIds.map(id => ({ id })) });
+    }
+  }
+
+  // 补缺：只统计 kind='fixed' 的天
+  const fixedPendingDays = new Set<string>();
+  for (const n of pending) {
+    const extra = (n.extra as { kind?: string; dayKey?: string } | undefined);
+    if (extra?.kind === 'fixed' && typeof extra.dayKey === 'string') {
+      fixedPendingDays.add(extra.dayKey);
+    }
+  }
+
+  const now = Date.now();
+  const missingDays = computeMissingDays(now, fixedPendingDays);
+  if (missingDays.length === 0) return;
+
+  // 候选池
+  const filteredPool = await loadFilteredPool();
+  if (filteredPool === null || filteredPool.length === 0) return;
+
+  const exposed = recentlyExposedIds(now);
+  let pool = filteredPool.filter(e => !exposed.has(e.id));
+  if (pool.length === 0) pool = filteredPool;
+
+  // 选卡（与随机通道共享曝光池，但本轮内独立去重）
+  const usedThisRun = new Set<string>();
+  const pickFor = (): Entry | null => {
+    let candidates = pool.filter(e => !usedThisRun.has(e.id));
+    if (candidates.length === 0) {
+      usedThisRun.clear();
+      candidates = pool;
+    }
+    if (candidates.length === 0) return null;
+    const picked = weightedRandomSelect(candidates);
+    if (picked) usedThisRun.add(picked.id);
+    return picked;
+  };
+
+  const notifications: LocalNotificationSchema[] = [];
+  const newExposure: ExposureItem[] = [];
+
+  for (const day of missingDays) {
+    for (let s = 0; s < enabledSlots.length; s++) {
+      const [h, m] = enabledSlots[s].time.split(':').map(Number);
+      const at = day.dayStart + h * 3_600_000 + m * 60_000;
+      if (at < now + 60_000) continue;
+      const entry = pickFor();
+      if (!entry) break;
+      notifications.push({
+        id: makeNotificationId(entry.id, day.dayKey, 100 + s),
+        title: makeReunionTitle(entry.createdAt, at),
+        body: makeBody(entry),
+        schedule: { at: new Date(at), allowWhileIdle: true },
+        channelId: NOTIFY_CHANNEL_ID,
+        extra: { kind: 'fixed', entryId: entry.id, dayKey: day.dayKey },
+      });
+      newExposure.push({ id: entry.id, at, source: 'notify' });
+    }
+  }
+
+  if (notifications.length === 0) return;
+
+  await ensureChannel();
+  await LocalNotifications.schedule({ notifications });
+  appendExposure(newExposure);
 }

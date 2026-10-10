@@ -88,6 +88,16 @@ export interface RandomConfig {
  * 未来扩展方向（AI 写信人格、时间胶囊、待办提醒开关等）：向此结构**追加可选字段**，
  * 由 DEFAULT_SETTINGS / settingsStore 的 sanitizeNotify 兜底，保证旧配置向后兼容。
  */
+/** 定时投递时间点（v3.1.0）：每天在指定时刻额外投一条，与 dailyCount 互相独立 */
+export interface FixedTimeSlot {
+  /** 唯一 id（用于 React key 和操作） */
+  id: string;
+  /** "HH:mm" 24 小时制 */
+  time: string;
+  /** 是否启用（关闭后不投递但保留配置） */
+  enabled: boolean;
+}
+
 export interface NotifySettings {
   /** 总开关（默认关；开启时才申请系统通知权限） */
   enabled: boolean;
@@ -95,7 +105,7 @@ export interface NotifySettings {
   windowStart: number;
   /** 投递窗口 · 结束小时（1-24，不含，22 表示「22:00 前」） */
   windowEnd: number;
-  /** 每天投递条数（1-3） */
+  /** 每天不定时投递条数（1-3），在窗口内随机时刻投递 */
   dailyCount: number;
   /**
    * 来信候选筛选（v2.14.0）：限定「哪些卡可以被选为来信」。
@@ -111,6 +121,11 @@ export interface NotifySettings {
     /** 时间范围（按修改时间；无 preset = 不限） */
     timeRange: { preset?: '1d' | '3d' | '7d' | 'custom'; from?: string; to?: string };
   };
+  /**
+   * 定时投递列表（v3.1.0）：每天在指定时间点各投一条通知，
+   * 与 dailyCount 完全独立（不会导致 dailyCount 减少）。
+   */
+  fixedTimes?: FixedTimeSlot[];
 }
 
 /**
@@ -163,6 +178,12 @@ export interface WidgetSettings {
    *    （时钟是数字层、样式是背景层，两者互不影响）。
    */
   nikoClock: boolean;
+  /**
+   * 每天自动刷新次数（v3.1.0，1-10）。
+   * 把全天均分 N 段，每段一个时间点；到点后原生 baseIndex 自动推进到下一组候选。
+   * 「换一张」按钮仍可手动翻看全部 N 条候选。
+   */
+  dailyAutoRefresh: number;
 }
 
 // ==================== 待办相关类型 ====================
@@ -700,6 +721,7 @@ export const DEFAULT_SETTINGS: Settings = {
     windowStart: 10,
     windowEnd: 22,
     dailyCount: 1,
+    fixedTimes: [],
   },
   /** 桌面橱窗（v2.14.0）：默认不筛选（全部卡片都可能被选到）+ 全部组件默认样式 */
   widget: {
@@ -713,6 +735,7 @@ export const DEFAULT_SETTINGS: Settings = {
       clock: 'default',
     },
     nikoClock: false,
+    dailyAutoRefresh: 3,
   },
   todo: DEFAULT_TODO_CONFIG,
   // Cloudflare 中转站（v2.7.0）：密钥由用户手填，这里默认全空

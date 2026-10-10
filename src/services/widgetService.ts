@@ -144,7 +144,10 @@ export async function syncWidgetPlan(force = false): Promise<WidgetSyncReport> {
     if (pool.length === 0) pool = entries;
 
     // 3. 今天 10 条候选；选卡复用加权随机（本轮不重复，池子不足时循环复用）
+    // v3.1.0：at 按每天自动刷新次数均分全天 → 到点原生 baseIndex 自动推进
     const dayStart = startOfDayTs(now);
+    const dayMs = 86_400_000;
+    const refreshCount = useSettingsStore.getState().settings.widget.dailyAutoRefresh ?? 3;
     const usedThisRun = new Set<string>();
     const pickFor = (): Entry | null => {
       let candidates = pool.filter(e => !usedThisRun.has(e.id));
@@ -162,8 +165,12 @@ export async function syncWidgetPlan(force = false): Promise<WidgetSyncReport> {
     for (let i = 0; i < WIDGET_PLAN_COUNT; i++) {
       const picked = pickFor();
       if (!picked) break;
+      // 均分全天 N 段，第 i 条落在第 floor(i*N/10) 段的中点时刻
+      const slot = Math.floor(i * refreshCount / WIDGET_PLAN_COUNT);
+      const fraction = (slot + 0.5) / refreshCount;
+      const at = dayStart + Math.floor(fraction * dayMs);
       items.push({
-        at: dayStart,
+        at,
         entryId: picked.id,
         title: makeReunionTitle(picked.createdAt, dayStart),
         body: makeWidgetBody(picked.content, picked.attachments?.length ?? 0),

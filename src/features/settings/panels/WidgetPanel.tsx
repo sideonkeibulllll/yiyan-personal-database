@@ -243,6 +243,26 @@ export function WidgetPanel({ markDirty }: WidgetPanelProps) {
         {filterBusy && <span className="form-hint">正在按新范围重排…</span>}
       </div>
 
+      {/* 自动刷新设置 */}
+      <div className="form-group">
+        <label className="form-label">每天自动刷新次数</label>
+        <input
+          type="number"
+          className="form-input glass notify-window-input"
+          min={1}
+          max={10}
+          step={1}
+          value={settings.widget.dailyAutoRefresh ?? 3}
+          onChange={e => {
+            const v = parseInt(e.target.value);
+            if (!Number.isNaN(v)) updateWidgetConfig({ dailyAutoRefresh: Math.max(1, Math.min(10, v)) });
+          }}
+        />
+        <span className="form-hint">
+          1 ~ 10 次；把全天均分 N 段，到点后桌面卡片自动换到下一张（系统每 30 分钟检查一次）。手动点「换一张」仍可随时翻看。
+        </span>
+      </div>
+
       {/* 轻提示 */}
       {toast && <div className="widget-toast">{toast}</div>}
     </div>

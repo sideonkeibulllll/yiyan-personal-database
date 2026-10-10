@@ -104,7 +104,7 @@ export function WidgetStylePanel() {
             checked={nikoClock}
             onChange={toggleNikoClock}
           />
-          <span>在 niko 背后显示一个放大的时钟（HH : mm）</span>
+          <span>在 niko 背后显示一个放大的时钟（HH : mm : ss）</span>
         </label>
         <span className="form-hint">
           时钟画在 niko 下方，会有种「niko 在前、时钟在后」的感觉。

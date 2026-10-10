@@ -256,9 +256,9 @@ export function NotifyPanel({ markDirty }: NotifyPanelProps) {
             )}
           </div>
 
-          {/* 每天条数 */}
+          {/* 每天不定时条数 */}
           <div className="form-group">
-            <label className="form-label">每天投递条数</label>
+            <label className="form-label">每天不定时投递条数</label>
             <input
               type="number"
               className="form-input glass notify-window-input"
@@ -271,7 +271,69 @@ export function NotifyPanel({ markDirty }: NotifyPanelProps) {
                 if (!Number.isNaN(v)) patchConfig({ dailyCount: Math.max(1, Math.min(3, v)) }, 'notify.dailyCount');
               }}
             />
-            <span className="form-hint">1 ~ 3 条；同一天出的卡不会重复，最近通知过的卡也会优先避开。</span>
+            <span className="form-hint">1 ~ 3 条；在时间窗口内随机挑时刻，和下面的「定时投递」互相独立。</span>
+          </div>
+
+          {/* 定时投递 */}
+          <div className="form-group">
+            <div className="notify-fixed-head">
+              <label className="form-label">定时投递</label>
+              <button
+                type="button"
+                className="notify-fixed-add"
+                onClick={() => {
+                  const cur = [...(cfg.fixedTimes ?? [])];
+                  cur.push({ id: `ft_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, time: '12:00', enabled: true });
+                  patchConfig({ fixedTimes: cur }, 'notify.fixedTimes');
+                }}
+              >
+                + 添加
+              </button>
+            </div>
+            {(cfg.fixedTimes ?? []).length === 0 ? (
+              <span className="form-hint">在每天固定时间点再投一条；和上面的不定时投递完全独立。</span>
+            ) : (
+              <div className="notify-fixed-list">
+                {(cfg.fixedTimes ?? []).map(slot => (
+                  <div key={slot.id} className="notify-fixed-item">
+                    <input
+                      type="time"
+                      className="notify-fixed-time"
+                      value={slot.time}
+                      onChange={e => {
+                        const cur = (cfg.fixedTimes ?? []).map(t =>
+                          t.id === slot.id ? { ...t, time: e.target.value } : t,
+                        );
+                        patchConfig({ fixedTimes: cur }, 'notify.fixedTimes');
+                      }}
+                    />
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={slot.enabled}
+                        onChange={e => {
+                          const cur = (cfg.fixedTimes ?? []).map(t =>
+                            t.id === slot.id ? { ...t, enabled: e.target.checked } : t,
+                          );
+                          patchConfig({ fixedTimes: cur }, 'notify.fixedTimes');
+                        }}
+                      />
+                      启用
+                    </label>
+                    <button
+                      type="button"
+                      className="notify-fixed-delete"
+                      onClick={() => {
+                        const cur = (cfg.fixedTimes ?? []).filter(t => t.id !== slot.id);
+                        patchConfig({ fixedTimes: cur }, 'notify.fixedTimes');
+                      }}
+                    >
+                      删除
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* 试一发 */}
