@@ -527,3 +527,45 @@
   z-index: 200;
   box-shadow: 0 4px 20px rgba(247, 103, 7, 0.15);
 }
+
+/* ===== v2.12.0: 记忆来信 / 卡片浏览入口 ===== */
+
+/* 卡片右下角的「浏览」右箭头 */
+.card-view-btn {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-full);
+  color: var(--color-text-tertiary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.card-view-btn:active {
+  background: rgba(247, 103, 7, 0.1);
+  color: var(--color-accent-primary);
+  transform: scale(0.94);
+}
+
+/* ?focus= 直达卡片：约 2.6 秒的高亮呼吸，然后自然消退 */
+.card-item.focus-highlight .entry-card {
+  animation: focusHighlight 2.6s var(--ease-out);
+}
+
+@keyframes focusHighlight {
+  0% {
+    box-shadow: 0 0 0 2px rgba(247, 103, 7, 0.55), 0 0 24px rgba(247, 103, 7, 0.25);
+  }
+  60% {
+    box-shadow: 0 0 0 2px rgba(247, 103, 7, 0.45), 0 0 18px rgba(247, 103, 7, 0.18);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(247, 103, 7, 0);
+  }
+}

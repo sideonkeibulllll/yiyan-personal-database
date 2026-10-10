@@ -70,6 +70,7 @@ import { CloudPanel } from './panels/CloudPanel';
 import { SyncPanel } from './panels/SyncPanel';
 import { PromptsPanel } from './panels/PromptsPanel';
 import { GlmPanel } from './panels/GlmPanel';
+import { NotifyPanel } from './panels/NotifyPanel';
 import './SettingsPage.css';
 
 /** 设置面板类型 */
@@ -77,6 +78,7 @@ type SettingsTab =
   | 'ai'
   | 'todo'
   | 'random'
+  | 'notify'
   | 'dataManager'
   | 'import'
   | 'export'
@@ -92,6 +94,7 @@ const TAB_LIST: { key: SettingsTab; label: string }[] = [
   { key: 'ai', label: 'AI 配置' },
   { key: 'todo', label: '待办配置' },
   { key: 'random', label: '随机浏览' },
+  { key: 'notify', label: '记忆来信' },
   { key: 'dataManager', label: '数据管理' },
   { key: 'import', label: '导入' },
   { key: 'export', label: '导出' },
@@ -684,6 +687,9 @@ export function SettingsPage() {
 
       case 'random':
         return <RandomPanel markDirty={markDirty} />;
+
+      case 'notify':
+        return <NotifyPanel markDirty={markDirty} />;
 
       case 'dataManager':
         return <DataManagerPanel />;

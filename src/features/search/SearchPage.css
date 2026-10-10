@@ -490,3 +490,28 @@
 .confirm-actions button.primary:disabled {
   opacity: 0.5;
 }
+
+/* ===== v2.12.0: 记忆来信 / 卡片浏览入口 ===== */
+
+/* 结果卡片右下角的「浏览」右箭头 */
+.result-view-btn {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-full);
+  color: var(--color-text-tertiary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.result-view-btn:active {
+  background: rgba(247, 103, 7, 0.1);
+  color: var(--color-accent-primary);
+  transform: scale(0.94);
+}

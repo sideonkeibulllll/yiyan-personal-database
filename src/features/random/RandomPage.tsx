@@ -3,7 +3,7 @@
  * 卡片堆叠流式排列，自动填屏 + 分页刷新
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useEntryStore } from '@/stores/entryStore';
 import { useTagStore } from '@/stores/tagStore';
 import { useSettingsStore } from '@/stores/settingsStore';
@@ -76,6 +76,13 @@ const PaperclipIcon = () => (
   </svg>
 );
 
+/** v2.12.0: 浏览卡片入口右箭头 */
+const ChevronRightIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="m9 18 6-6-6-6" />
+  </svg>
+);
+
 export function RandomPage() {
   const navigate = useNavigate();
   const entries = useEntryStore(state => state.entries);
@@ -96,6 +103,12 @@ export function RandomPage() {
   const cardsStackRef = useRef<HTMLDivElement>(null);
   // 上次抽取的 id 列表，用于避免连续两屏重复
   const lastIdsRef = useRef<Set<string>>(new Set());
+
+  // v2.12.0: 「直达卡片」——通知点击 / 外部跳转（?focus=<id>）时置顶并短暂高亮
+  const [searchParams, setSearchParams] = useSearchParams();
+  const focusId = searchParams.get('focus');
+  const [focusHighlightId, setFocusHighlightId] = useState<string | null>(null);
+  const focusTimerRef = useRef<ReturnType<typeof setTimeout>>();
 
   // a: 快照持久化 — 保存最近一次刷新的 entry id 列表到 localStorage
   const SNAPSHOT_KEY = '__yiyan_random_snapshot_ids__';
@@ -257,6 +270,29 @@ export function RandomPage() {
       setIsLoading(false);
     }
   }, [entries, getRandomEntries, restoreSnapshot]);
+
+  // v2.12.0: ?focus=<id> 直达——把目标卡片置顶并短暂高亮（记忆来信通知的落点）
+  // 执行顺序说明：本 effect 声明在「初始加载」之后，同一次提交中先恢复快照、再插入目标卡，
+  // 函数式 setState 保证基于前一步结果。卡片已被删除时静默兜底为正常随机展示。
+  // 刻意不做「每实例一次」拦截：hash 变化不重挂载组件，同一会话内多次点通知都必须生效；
+  // 置顶（去重前插）/清理参数本身幂等，重复执行无副作用。
+  useEffect(() => {
+    if (!focusId) return;
+    if (entries.length === 0) return; // 等数据就绪再消费
+    const target = entries.find(e => e.id === focusId);
+    // 无论是否找到都清除参数（replace，防刷新重复触发）
+    setSearchParams({}, { replace: true });
+    if (!target) return;
+
+    setCurrentEntries(prev => {
+      const rest = prev.filter(e => e.id !== target.id);
+      return [target, ...rest];
+    });
+    setFocusHighlightId(target.id);
+    if (focusTimerRef.current) clearTimeout(focusTimerRef.current);
+    focusTimerRef.current = setTimeout(() => setFocusHighlightId(null), 2600);
+    cardsStackRef.current?.scrollTo?.({ top: 0 });
+  }, [focusId, entries, setSearchParams]);
 
   // 加载当前批次的缩略图
   useEffect(() => {
@@ -582,7 +618,7 @@ export function RandomPage() {
                 return (
                   <div
                     key={entry.id}
-                    className={`card-item ${pressedId === entry.id ? 'pressed' : ''}`}
+                    className={`card-item ${pressedId === entry.id ? 'pressed' : ''} ${focusHighlightId === entry.id ? 'focus-highlight' : ''}`}
                     onClick={() => handleCopy(entry)}
                     onMouseDown={(e) => handlePressStart(entry.id, e.clientX, e.clientY)}
                     onMouseUp={() => handlePressEnd(entry.id)}
@@ -671,6 +707,22 @@ export function RandomPage() {
                         <span className="meta-time">
                           {new Date(entry.createdAt).toLocaleDateString('zh-CN')}
                         </span>
+                        {/* v2.12.0: 直达卡片浏览页（不触发卡片复制/长按） */}
+                        <button
+                          className="card-view-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigate(`/entry/${entry.id}`);
+                          }}
+                          onMouseDown={stopPropagation}
+                          onMouseUp={stopPropagation}
+                          onTouchStart={stopPropagation}
+                          onTouchEnd={stopPropagation}
+                          title="浏览卡片"
+                          aria-label="浏览卡片"
+                        >
+                          <ChevronRightIcon />
+                        </button>
                       </div>
                     </div>
                   </div>

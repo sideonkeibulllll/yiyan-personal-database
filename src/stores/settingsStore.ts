@@ -2,7 +2,7 @@
  * 设置状态管理
  */
 import { create } from 'zustand';
-import type { CloudConfig, Settings } from '@/types';
+import type { CloudConfig, NotifySettings, Settings } from '@/types';
 import { DEFAULT_SETTINGS, migrateAIConfig } from '@/types';
 import { getDatabase } from '@/services/database';
 import { setTransferConfig } from '@/config/cloudflare';
@@ -29,6 +29,8 @@ interface SettingsStore {
   updatePushConfig: (config: Partial<Settings['push']>) => void;
   updateRandomConfig: (config: Partial<Settings['random']>) => void;
   updateTodoConfig: (config: Partial<Settings['todo']>) => void;
+  /** 记忆来信（v2.12.0，主动触达） */
+  updateNotifyConfig: (config: Partial<Settings['notify']>) => void;
   /** Cloudflare 中转站配置（v2.7.0：密钥手填） */
   updateCloudConfig: (config: Partial<CloudConfig>) => void;
   resetSettings: () => void;
@@ -43,6 +45,28 @@ const STORAGE_KEY = 'yiyan_settings';
  * 注意：合并时**不能**把 DEFAULT_SETTINGS.ai.providers 带入，
  * 否则老配置会被误判为「已有 providers」而丢失 apiKey/model。
  */
+/**
+ * 记忆来信配置的数值兜底（防手改 localStorage / 旧版本数据带来越界值，
+ * 越界窗口会导致排程时刻计算出错）。
+ */
+function sanitizeNotify(raw: Partial<NotifySettings> | undefined): NotifySettings {
+  const dft = DEFAULT_SETTINGS.notify;
+  const r = raw || {};
+  const clamp = (v: unknown, min: number, max: number, d: number): number =>
+    typeof v === 'number' && Number.isFinite(v)
+      ? Math.min(max, Math.max(min, Math.round(v)))
+      : d;
+  const windowStart = clamp(r.windowStart, 0, 23, dft.windowStart);
+  const windowEndRaw = clamp(r.windowEnd, 1, 24, dft.windowEnd);
+  return {
+    enabled: typeof r.enabled === 'boolean' ? r.enabled : dft.enabled,
+    windowStart,
+    // 保证窗口宽度 ≥ 1 小时（end 必须大于 start）
+    windowEnd: windowEndRaw > windowStart ? windowEndRaw : Math.min(24, windowStart + 1),
+    dailyCount: clamp(r.dailyCount, 1, 3, dft.dailyCount),
+  };
+}
+
 function normalizeSettings(raw: Partial<Settings>): Settings {
   const rawAi: Partial<Settings['ai']> = raw.ai || {};
   const merged: Settings = {
@@ -62,6 +86,8 @@ function normalizeSettings(raw: Partial<Settings>): Settings {
       // 只有原始数据真的带了 providers 才保留，否则交由 migrateAIConfig 从扁平字段推导
       providers: rawAi.providers,
     },
+    // 记忆来信：数值级兜底（旧配置无此块时给默认值）
+    notify: sanitizeNotify(raw.notify),
   };
   merged.ai = migrateAIConfig(merged.ai);
   merged.cloud = {
@@ -182,6 +208,17 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     const settings = {
       ...get().settings,
       todo: { ...get().settings.todo, ...config },
+    };
+    saveToLocalStorage(settings);
+    saveToDatabase(settings);
+    set({ settings });
+  },
+
+  updateNotifyConfig: (config) => {
+    const settings = {
+      ...get().settings,
+      // 走 sanitize：防止 UI 层传入越界值破坏排程计算
+      notify: sanitizeNotify({ ...get().settings.notify, ...config }),
     };
     saveToLocalStorage(settings);
     saveToDatabase(settings);

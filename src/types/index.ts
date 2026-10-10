@@ -77,6 +77,28 @@ export interface RandomConfig {
   contentCollapseLength: number;
 }
 
+/**
+ * 「记忆来信」配置（v2.12.0，主动触达模块）
+ *
+ * ⚠️ 归属声明：本配置属于「通知体验」模块（见 services/notifyService.ts，
+ * 该文件是唯一消费门面）。写入只允许走 settingsStore.updateNotifyConfig，
+ * 读取渲染由 NotifyPanel 负责；任何其他位置引用本配置前先读 notifyService
+ * 顶部的「对外契约」注释，避免散落式引用。
+ *
+ * 未来扩展方向（AI 写信人格、时间胶囊、待办提醒开关等）：向此结构**追加可选字段**，
+ * 由 DEFAULT_SETTINGS / settingsStore 的 sanitizeNotify 兜底，保证旧配置向后兼容。
+ */
+export interface NotifySettings {
+  /** 总开关（默认关；开启时才申请系统通知权限） */
+  enabled: boolean;
+  /** 投递窗口 · 起始小时（0-23，含） */
+  windowStart: number;
+  /** 投递窗口 · 结束小时（1-24，不含，22 表示「22:00 前」） */
+  windowEnd: number;
+  /** 每天投递条数（1-3） */
+  dailyCount: number;
+}
+
 // ==================== 待办相关类型 ====================
 
 /** 待办状态 */
@@ -217,6 +239,8 @@ export interface Settings {
   random: RandomConfig;
   /** 待办配置 */
   todo: TodoConfig;
+  /** 记忆来信（主动触达，v2.12.0） */
+  notify: NotifySettings;
   /** Cloudflare 中转站配置（密钥手填） */
   cloud?: CloudConfig;
 }
@@ -601,6 +625,13 @@ export const DEFAULT_SETTINGS: Settings = {
     cardsPerPage: 7,
     attachmentDisplayMode: 'inline',
     contentCollapseLength: 300,
+  },
+  /** 记忆来信（v2.12.0）：默认关闭，由用户在设置页主动开启（开启时才申请系统权限） */
+  notify: {
+    enabled: false,
+    windowStart: 10,
+    windowEnd: 22,
+    dailyCount: 1,
   },
   todo: DEFAULT_TODO_CONFIG,
   // Cloudflare 中转站（v2.7.0）：密钥由用户手填，这里默认全空

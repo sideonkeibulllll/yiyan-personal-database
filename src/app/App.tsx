@@ -59,6 +59,24 @@ function scheduleAutoBackup(): void {
 }
 
 /**
+ * 记忆来信（v2.12.0）：数据就绪后延迟补缺续排。
+ * - 在 entries 全量加载完成后调用（保证选卡池完整）
+ * - 再延迟 15 秒执行，避开启动高峰（与 60 秒后的自动备份错开）
+ */
+function scheduleNotifyRefresh(): void {
+  setTimeout(() => {
+    void (async () => {
+      try {
+        const { ensureScheduled } = await import('@/services/notifyService');
+        await ensureScheduled();
+      } catch (e) {
+        console.warn('记忆来信续排失败:', e);
+      }
+    })();
+  }, 15_000);
+}
+
+/**
  * 后台维护任务：过期归档
  * 不阻塞界面显示，启动关键路径之外执行
  */
@@ -111,9 +129,12 @@ export function App() {
         // 重量数据与维护任务全部移出关键路径
         // v2.4.3：entries 走「渐进式加载」——先拿最近 50 条让页面立刻有内容，
         //         剩余全量在后台静默补齐；todos 全量并行。
-        Promise.all([loadEntriesProgressive(50), loadAllTodos()]).catch(e =>
-          console.warn('后台数据加载失败:', e)
-        );
+        Promise.all([loadEntriesProgressive(50), loadAllTodos()])
+          .catch(e => console.warn('后台数据加载失败:', e))
+          .then(() => {
+            // v2.12.0: 数据就绪后，延迟补缺续排「记忆来信」
+            scheduleNotifyRefresh();
+          });
 
         if (!backgroundTasksStarted) {
           backgroundTasksStarted = true;
@@ -128,6 +149,26 @@ export function App() {
 
     init();
   }, [loadEntriesProgressive, loadTags, loadSettings, loadAllTodos]);
+
+  // v2.12.0: 记忆来信——点击通知直达卡片浏览页。
+  // 冷启动可靠：框架在 onCreate 即把启动意图递给插件，事件保留至监听注册后重放。
+  useEffect(() => {
+    let cancelled = false;
+    let dispose: (() => void) | undefined;
+    void (async () => {
+      const { subscribeTap } = await import('@/services/notifyService');
+      const off = await subscribeTap((entryId) => {
+        // hash 路由直接赋值即可导航（App 未就绪时，router 挂载后会按当前 hash 渲染）
+        window.location.hash = `#/entry/${entryId}`;
+      });
+      if (cancelled) off();
+      else dispose = off;
+    })();
+    return () => {
+      cancelled = true;
+      dispose?.();
+    };
+  }, []);
 
   if (!isReady) {
     return <Loading />;

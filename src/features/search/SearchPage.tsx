@@ -67,6 +67,13 @@ const ClockIcon = () => (
   </svg>
 );
 
+/** v2.12.0: 浏览卡片入口右箭头 */
+const ChevronRightIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="m9 18 6-6-6-6"/>
+  </svg>
+);
+
 /* === v2.10.0: 时间范围筛选（修改时间；换算逻辑见 utils/timeRangeFilter 共享模块） === */
 
 /** 时间筛选记忆键：缓存上次选择的 N（下次进入自动恢复） */
@@ -600,6 +607,22 @@ export function SearchPage() {
                   <span className="meta-time">
                     {new Date(entry.createdAt).toLocaleDateString('zh-CN')}
                   </span>
+                  {/* v2.12.0: 直达卡片浏览页（不触发复制/长按） */}
+                  <button
+                    className="result-view-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      navigate(`/entry/${entry.id}`);
+                    }}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onMouseUp={(e) => e.stopPropagation()}
+                    onTouchStart={(e) => e.stopPropagation()}
+                    onTouchEnd={(e) => e.stopPropagation()}
+                    title="浏览卡片"
+                    aria-label="浏览卡片"
+                  >
+                    <ChevronRightIcon />
+                  </button>
                 </div>
               </div>
             ))
