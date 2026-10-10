@@ -1,17 +1,19 @@
 /**
- * 桌面橱窗 · 服务门面（v2.13.0）
+ * 桌面橱窗 · 服务门面（v2.13.2）
  *
  * ═══════════════════════════════════════════════════════════════════
  *  对外契约（所有外部引用必须从本文件走，禁止绕过门面直连插件或内部函数）
  * ═══════════════════════════════════════════════════════════════════
  *
  * 被引用的位置与用途：
- *  - App.tsx      → syncAll()           启动后台同步（数据就绪后延迟触发）
+ *  - App.tsx      → syncAll() / initTodoAutoSync()
+ *                   启动后台同步 + 注册「待办变动即时同步」订阅
  *  - WidgetPanel  → getWidgetStatus() / syncAll(true) / refreshWidgetViews()
  *
  * 两类橱窗数据（均写入原生 SharedPreferences，由 Provider 渲染）：
  *  - 记忆卡片计划（14 天）：setPlan / getPlan（余量充足时跳过重排）
- *  - 待办快照（1 大 + 5 小）：setTodo / getTodo（每次打开 App 都刷新）
+ *  - 待办快照（三视图：today / timed / untimed，各 1 大 + 5 小）：setTodo / getTodo
+ *    v2.13.2：三视图预生成 + 待办变动防抖 2.5s 即时推送（切后台立即 flush）
  *
  * 模块边界：
  *  - 依赖：registerPlugin('YiyanWidget')、entryStore、database、
@@ -40,10 +42,13 @@ import {
   isValidTodoSnapshot,
   makeTodoNote,
   makeWidgetBody,
+  orderTimedForWidget,
   orderTodosForWidget,
+  orderUntimedForWidget,
   planDayStarts,
   shouldResync,
   toTimeText,
+  toTimedRangeText,
 } from '@/utils/widgetPlan';
 import type { TodoSnapshot, WidgetPlan, WidgetPlanItem } from '@/utils/widgetPlan';
 import { appendExposure, recentlyExposedIds } from '@/utils/exposurePool';
@@ -167,10 +172,11 @@ export async function syncWidgetPlan(force = false): Promise<WidgetSyncReport> {
 }
 
 /**
- * 同步待办快照（1 大 + 5 小，v2.13.1）：
- * - 每次打开 App 都写（待办变化频繁，不做余量跳过）
- * - 候选 = 今天文件夹 ∪ 「今日处理」标记的 pending 待办
- * - 排序：用户手动拖拽排序优先；否则到期近优先 → 创建先后
+ * 同步待办快照（v2.13.2：三视图，各 1 大 + 5 小）：
+ * - 每次打开 App 都写；App 内待办变动由 initTodoAutoSync 防抖触发（不做余量跳过）
+ * - today 视图：今天文件夹 ∪ 「今日处理」；个人拖拽排序优先 → 到期近 → 创建先后
+ * - timed 视图：主页 timed 卡口径（进行中 → 未来，见 widgetPlan.orderTimedForWidget）
+ * - untimed 视图：主页 untimed 卡口径（无时间、创建最早在前）
  */
 export async function syncTodoSnapshot(): Promise<WidgetSyncReport> {
   if (!isWidgetSupported()) {
@@ -180,23 +186,112 @@ export async function syncTodoSnapshot(): Promise<WidgetSyncReport> {
     const todos = await loadTodoPool();
     const now = Date.now();
     const todayKey = toDayKey(now);
-    const candidates = todos.filter(
+
+    // 今天视图（个人排序优先，沿用 v2.13.1 口径）
+    const todayCand = todos.filter(
       t => t.status === 'pending' && !t.deletedAt && (t.folderDate === todayKey || t.isToday),
     );
-    const ordered = orderTodosForWidget(candidates, getSortOrder(todayKey));
-    const items = ordered.map(t => ({
+    const todayOrdered = orderTodosForWidget(todayCand, getSortOrder(todayKey));
+    const todayItems = todayOrdered.map(t => ({
       id: t.id,
       title: t.title,
       note: makeTodoNote(t.note),
       timeText: toTimeText(t.endTime, now),
     }));
-    const snapshot = assembleTodoSnapshot(todayKey, now, candidates.length, items);
+
+    // 有期视图（主页 timed 卡口径，完整列表）
+    const timedOrdered = orderTimedForWidget(todos, now);
+    const timedItems = timedOrdered.map(t => ({
+      id: t.id,
+      title: t.title,
+      note: makeTodoNote(t.note),
+      timeText: toTimedRangeText(t.startTime, t.endTime, now),
+    }));
+
+    // 无期视图（主页 untimed 卡口径，完整列表）
+    const untimedOrdered = orderUntimedForWidget(todos);
+    const untimedItems = untimedOrdered.map(t => ({
+      id: t.id,
+      title: t.title,
+      note: makeTodoNote(t.note),
+      timeText: '',
+    }));
+
+    const snapshot = assembleTodoSnapshot(todayKey, now, {
+      today: { total: todayCand.length, items: todayItems },
+      timed: { total: timedOrdered.length, items: timedItems },
+      untimed: { total: untimedOrdered.length, items: untimedItems },
+    });
     await YiyanWidget.setTodo({ snapshot: JSON.stringify(snapshot) });
-    return { ok: true, message: `今日待办 ${candidates.length} 条`, scheduled: items.length };
+    return {
+      ok: true,
+      message: `待办快照：今天 ${todayCand.length} · 有期 ${timedOrdered.length} · 无期 ${untimedOrdered.length}`,
+      scheduled: todayItems.length + timedItems.length + untimedItems.length,
+    };
   } catch (e) {
     console.warn('[widget] 待办快照同步失败:', e);
     return { ok: false, message: '待办同步失败', scheduled: 0 };
   }
+}
+
+/* ═══════════════ 待办变动即时同步（v2.13.2） ═══════════════ */
+
+/** 防抖延迟（ms）：连续操作合并为一次写入 */
+const AUTO_SYNC_DEBOUNCE_MS = 2500;
+
+/** 待办指纹（id/status/标题/备注/时间/日期/标记/删除 全量拼接哈希，顺序无关） */
+function todoSignature(todos: Todo[]): string {
+  let h = 5381;
+  for (const t of todos) {
+    const s = `${t.id}|${t.status}|${t.title}|${t.note ?? ''}|${t.startTime ?? ''}|${t.endTime ?? ''}|${t.folderDate ?? ''}|${t.isToday ? 1 : 0}|${t.deletedAt ?? ''}#`;
+    for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
+  }
+  return `${todos.length}_${h.toString(36)}`;
+}
+
+/** 幂等注册标记（App 重复挂载/热更新时防重复订阅） */
+let autoSyncInited = false;
+
+/**
+ * 待办变动即时同步（v2.13.2）：
+ * 订阅 todoStore → 快照相关字段指纹变化 → 防抖 2.5s 推送最新快照到桌面组件；
+ * 页面切到后台（visibilitychange → hidden）时若仍有待处理变动则立即 flush，
+ * 保证「在 App 里完成/新增待办 → 切回桌面，组件已是最新」。
+ * 仅安卓原生端注册（Web / Electron 直接返回）。幂等：重复调用只注册一次。
+ */
+export function initTodoAutoSync(): void {
+  if (autoSyncInited || !isWidgetSupported()) return;
+  autoSyncInited = true;
+
+  let lastSig = todoSignature(useTodoStore.getState().todos);
+  let dirty = false;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+
+  const flush = (): void => {
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    if (!dirty) return;
+    dirty = false;
+    void syncTodoSnapshot();
+  };
+
+  useTodoStore.subscribe(state => {
+    const sig = todoSignature(state.todos);
+    if (sig === lastSig) return;
+    lastSig = sig;
+    dirty = true;
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      timer = null;
+      flush();
+    }, AUTO_SYNC_DEBOUNCE_MS);
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flush();
+  });
 }
 
 /**

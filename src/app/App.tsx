@@ -95,6 +95,22 @@ function scheduleWidgetSync(): void {
 }
 
 /**
+ * 待办变动即时同步（v2.13.2）：订阅 todoStore，App 内完成 / 新增 / 编辑待办后
+ * 防抖 2.5s 自动推送到桌面组件；切后台立即 flush。
+ * 仅安卓原生端生效（内部判断），幂等注册。
+ */
+function initTodoAutoSyncSafe(): void {
+  void (async () => {
+    try {
+      const { initTodoAutoSync } = await import('@/services/widgetService');
+      initTodoAutoSync();
+    } catch (e) {
+      console.warn('待办自动同步初始化失败:', e);
+    }
+  })();
+}
+
+/**
  * 后台维护任务：过期归档
  * 不阻塞界面显示，启动关键路径之外执行
  */
@@ -154,6 +170,8 @@ export function App() {
             scheduleNotifyRefresh();
             // v2.13.0: 同步「桌面橱窗」展示计划
             scheduleWidgetSync();
+            // v2.13.2: 待办变动即刻同步（订阅 todoStore，防抖推送）
+            initTodoAutoSyncSafe();
           });
 
         if (!backgroundTasksStarted) {

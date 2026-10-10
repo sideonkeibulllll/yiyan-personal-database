@@ -132,10 +132,10 @@ export function WidgetPanel({ markDirty }: WidgetPanelProps) {
             </span>
           </div>
           <div className="widget-status-row">
-            <span>今日待办快照</span>
+            <span>待办快照</span>
             <span>
               {todoSnapshot
-                ? `${todoSnapshot.total} 条 · 生成于 ${formatTime(todoSnapshot.generatedAt)}`
+                ? `今天 ${todoSnapshot.views.today.total} · 有期 ${todoSnapshot.views.timed.total} · 无期 ${todoSnapshot.views.untimed.total} · ${formatTime(todoSnapshot.generatedAt)}`
                 : '暂无（打开应用会自动同步）'}
             </span>
           </div>
@@ -150,7 +150,7 @@ export function WidgetPanel({ markDirty }: WidgetPanelProps) {
           onClick={() => { void handleSync(); }}
           disabled={busy}
         >
-          {busy ? '同步中…' : `立即同步计划（重排 ${WIDGET_PLAN_DAYS} 天）`}
+          {busy ? '同步中…' : `立即同步（重排 ${WIDGET_PLAN_DAYS} 天计划 + 待办快照）`}
         </button>
         {totalWidgets > 0 && (
           <button

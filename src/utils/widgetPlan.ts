@@ -16,8 +16,8 @@ export const WIDGET_PLAN_DAYS = 14;
 /** 剩余有效天数低于此值 → 触发重新生成 */
 export const WIDGET_RESYNC_THRESHOLD = 7;
 
-/** 单条摘要最大字数（软限制） */
-export const WIDGET_BODY_MAX = 240;
+/** 单条摘要最大字数（软限制；v2.13.2 放宽到 3000——9×6 满屏约需 600~900 字，任意尺寸都铺得满） */
+export const WIDGET_BODY_MAX = 3000;
 
 /** 一条展示计划项（title/body 为快照文本，原生直接渲染，不查数据库） */
 export interface WidgetPlanItem {
@@ -103,10 +103,13 @@ export function makeWidgetBody(content: string, attachmentCount: number = 0): st
   return compact.length > WIDGET_BODY_MAX ? `${compact.slice(0, WIDGET_BODY_MAX)}…` : compact;
 }
 
-/* ═══════════════ 待办快照（v2.13.1：待办橱窗，1 大 + 5 小） ═══════════════ */
+/* ═══════════════ 待办快照（v2.13.2：三视图，1 大 + 5 小直铺） ═══════════════ */
 
-/** 待办快照最大条数（第一条放大展示） */
+/** 每视图快照条数上限（第一条放大 hero，其余 5 条小列表直铺；「写死 5 条」口径） */
 export const TODO_SNAPSHOT_MAX = 6;
+
+/** 视图 id（与原生 todo_view_<id> 的循环顺序对齐：今天 → 有期 → 无期） */
+export type TodoViewId = 'today' | 'timed' | 'untimed';
 
 /** 待办快照 · 单条 */
 export interface TodoSnapshotItem {
@@ -118,15 +121,20 @@ export interface TodoSnapshotItem {
   timeText: string;
 }
 
-/** 待办快照（结构与原生 WidgetShared.readTodoSnapshot 对齐，改结构必须两边同步） */
+/** 单视图数据（快照内三份：today / timed / untimed） */
+export interface TodoView {
+  /** 该视图总条数（截断前） */
+  total: number;
+  items: TodoSnapshotItem[];
+}
+
+/** 待办快照 v2（结构与原生 WidgetShared.readTodoSnapshot 对齐，改结构必须两边同步） */
 export interface TodoSnapshot {
-  version: 1;
+  version: 2;
   generatedAt: number;
   /** 生成日（YYYY-MM-DD，本地时区）——原生跨天检测：不等于今天即显示「打开应用」态 */
   dateKey: string;
-  /** 今日待办总数（含未展示的） */
-  total: number;
-  items: TodoSnapshotItem[];
+  views: Record<TodoViewId, TodoView>;
 }
 
 /** 时间文案：「今天 18:00」「明天 9:00」「10-15 18:00」（无 endTime → 空串） */
@@ -144,6 +152,40 @@ export function toTimeText(endTime: number | undefined | null, now: number): str
   if (dayDiff === 1) return `明天 ${hm}`;
   if (dayDiff === -1) return `昨天 ${hm}`;
   return `${d.getMonth() + 1}-${String(d.getDate()).padStart(2, '0')} ${hm}`;
+}
+
+/**
+ * 有期视图 · 时段文案（主页 timed 卡同款信息密度）：
+ * - 同天且今天 → 「14:00-16:00」；明天 → 「明天 9:00-11:00」；更远 → 「10-15 14:00-16:00」
+ * - 跨天时段 → 两端都带日期「10-15 23:00-10-16 1:00」
+ */
+export function toTimedRangeText(
+  startTime: number | undefined | null,
+  endTime: number | undefined | null,
+  now: number,
+): string {
+  if (!startTime || !endTime) return '';
+  const fmtHM = (ts: number): string => {
+    const d = new Date(ts);
+    return `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+  };
+  const startOfDay = (ts: number): number => {
+    const x = new Date(ts);
+    x.setHours(0, 0, 0, 0);
+    return x.getTime();
+  };
+  const fmtMD = (ts: number): string => {
+    const d = new Date(ts);
+    return `${d.getMonth() + 1}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+  if (startOfDay(startTime) !== startOfDay(endTime)) {
+    return `${fmtMD(startTime)} ${fmtHM(startTime)}-${fmtMD(endTime)} ${fmtHM(endTime)}`;
+  }
+  const range = `${fmtHM(startTime)}-${fmtHM(endTime)}`;
+  const dayDiff = Math.round((startOfDay(startTime) - startOfDay(now)) / 86_400_000);
+  if (dayDiff === 0) return range;
+  if (dayDiff === 1) return `明天 ${range}`;
+  return `${fmtMD(startTime)} ${range}`;
 }
 
 /**
@@ -174,6 +216,54 @@ export function orderTodosForWidget<
   return [...known, ...unknown];
 }
 
+/** 三视图排序共用的最小待办形状（与 types/index.ts 的 Todo 结构对齐的子集） */
+export interface WidgetTodoLike {
+  id: string;
+  title: string;
+  status?: string;
+  deletedAt?: number;
+  startTime?: number;
+  endTime?: number;
+  createdAt: number;
+}
+
+/**
+ * 有期视图（口径逐行对照主页 timed 卡，完整列表版）：
+ * - 候选：pending 未删除、有起止时间、且未过期（endTime > now）
+ * - 排序：进行中（start ≤ now ≤ end）按结束近的优先 → 未来按开始早的优先（同开始 → 时长短优先）
+ */
+export function orderTimedForWidget<T extends WidgetTodoLike>(todos: T[], now: number): T[] {
+  const candidates = todos.filter(
+    t =>
+      t.status === 'pending' &&
+      !t.deletedAt &&
+      typeof t.startTime === 'number' &&
+      typeof t.endTime === 'number' &&
+      t.endTime > now,
+  );
+  const inPeriod = candidates
+    .filter(t => t.startTime! <= now && t.endTime! >= now)
+    .sort((a, b) => a.endTime! - b.endTime!);
+  const future = candidates
+    .filter(t => t.startTime! > now)
+    .sort((a, b) => {
+      if (a.startTime !== b.startTime) return a.startTime! - b.startTime!;
+      return a.endTime! - a.startTime! - (b.endTime! - b.startTime!);
+    });
+  return [...inPeriod, ...future];
+}
+
+/**
+ * 无期视图（口径逐行对照主页 untimed 卡，完整列表版）：
+ * - 候选：pending 未删除、无起止时间
+ * - 排序：创建时间最早的在前
+ */
+export function orderUntimedForWidget<T extends WidgetTodoLike>(todos: T[]): T[] {
+  return todos
+    .filter(t => t.status === 'pending' && !t.deletedAt && !t.startTime && !t.endTime)
+    .sort((a, b) => a.createdAt - b.createdAt);
+}
+
 /** 备注摘要（大卡第二行；压空白 + 截断 30 字） */
 export function makeTodoNote(note: string | undefined): string {
   const raw = (note || '').replace(/\s+/g, ' ').trim();
@@ -181,19 +271,25 @@ export function makeTodoNote(note: string | undefined): string {
   return raw.length > MAX ? `${raw.slice(0, MAX)}…` : raw;
 }
 
-/** 组装待办快照（items 需已按展示顺序排好；本函数只做裁剪与包装） */
+/** 组装待办快照（各视图 items 需已按展示顺序排好；本函数只做裁剪与包装） */
 export function assembleTodoSnapshot(
   dateKey: string,
   generatedAt: number,
-  total: number,
-  items: TodoSnapshotItem[],
+  views: Record<TodoViewId, { total: number; items: TodoSnapshotItem[] }>,
 ): TodoSnapshot {
+  const clip = (v: { total: number; items: TodoSnapshotItem[] }): TodoView => ({
+    total: v.total,
+    items: v.items.slice(0, TODO_SNAPSHOT_MAX),
+  });
   return {
-    version: 1,
+    version: 2,
     generatedAt,
     dateKey,
-    total,
-    items: items.slice(0, TODO_SNAPSHOT_MAX),
+    views: {
+      today: clip(views.today),
+      timed: clip(views.timed),
+      untimed: clip(views.untimed),
+    },
   };
 }
 
@@ -201,14 +297,17 @@ export function assembleTodoSnapshot(
 export function isValidTodoSnapshot(v: unknown): v is TodoSnapshot {
   if (!v || typeof v !== 'object') return false;
   const s = v as TodoSnapshot;
-  return (
-    s.version === 1 &&
-    typeof s.generatedAt === 'number' &&
-    typeof s.dateKey === 'string' &&
-    typeof s.total === 'number' &&
-    Array.isArray(s.items) &&
-    s.items.every(
-      it => !!it && typeof (it as TodoSnapshotItem).id === 'string' && typeof (it as TodoSnapshotItem).title === 'string',
-    )
-  );
+  if (s.version !== 2 || typeof s.generatedAt !== 'number' || typeof s.dateKey !== 'string') return false;
+  const views = s.views as Record<string, TodoView> | undefined;
+  if (!views || typeof views !== 'object') return false;
+  return (['today', 'timed', 'untimed'] as const).every(k => {
+    const view = views[k];
+    return (
+      !!view &&
+      typeof view === 'object' &&
+      typeof view.total === 'number' &&
+      Array.isArray(view.items) &&
+      view.items.every(it => !!it && typeof it.id === 'string' && typeof it.title === 'string')
+    );
+  });
 }
