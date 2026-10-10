@@ -248,6 +248,84 @@
   cursor: not-allowed;
 }
 
+/* === v2.10.0: 标签 chip + 编辑按钮组合 === */
+.tag-chip-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.tag-chip-edit {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: transparent;
+  border: none;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.tag-chip-edit:active {
+  transform: scale(0.88);
+  color: var(--color-accent-primary);
+  background: var(--color-bg-elevated);
+}
+
+/* === v2.10.0: 已有标签编辑面板 === */
+.tag-editor-title {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+}
+
+.tag-editor-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.tag-editor-actions .tag-editor-confirm {
+  padding: var(--space-2) var(--space-4);
+}
+
+.tag-editor-delete {
+  margin-right: auto;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-xs);
+  background: transparent;
+  border: 1px solid var(--color-border-primary);
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.tag-editor-delete:active {
+  opacity: 0.7;
+  background: var(--color-danger);
+  color: var(--color-text-white);
+}
+
+.tag-editor-cancel {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-xs);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-primary);
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.tag-editor-cancel:active {
+  transform: scale(0.96);
+}
+
 /* === 修复3：已选标签列表 === */
 .selected-tags-list {
   display: flex;

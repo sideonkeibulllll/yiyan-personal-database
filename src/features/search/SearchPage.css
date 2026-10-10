@@ -113,6 +113,90 @@
   border-color: var(--color-border-accent);
 }
 
+/* === v2.10.0: 时间范围筛选面板 === */
+.time-filter-panel {
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  animation: slideUp var(--duration-fast) var(--ease-out);
+  flex-shrink: 0;
+}
+
+.time-filter-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.time-filter-chip {
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-primary);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.time-filter-chip.active {
+  color: var(--color-accent-primary);
+  background: var(--color-accent-subtle);
+  border-color: var(--color-border-accent);
+}
+
+.time-filter-chip:active {
+  transform: scale(0.96);
+}
+
+.time-filter-clear {
+  margin-left: auto;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.time-filter-custom {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.time-filter-date {
+  flex: 1;
+  min-width: 0;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-primary);
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+  outline: none;
+}
+
+.time-filter-date:focus {
+  border-color: var(--color-border-accent);
+}
+
+.time-filter-sep {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  flex-shrink: 0;
+}
+
+.time-filter-hint {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+}
+
 /* === 修复7：标签搜索结果 === */
 .tag-search-results {
   padding: var(--space-2) 0;

@@ -198,6 +198,8 @@ class NativeDatabaseService implements IDatabaseService {
       // getLinksByEntryId 双向查询
       `CREATE INDEX IF NOT EXISTS idx_links_source ON links(source_id)`,
       `CREATE INDEX IF NOT EXISTS idx_links_target ON links(target_id)`,
+      // v2.10.0：搜索页「修改时间」范围筛选走 updated_at
+      `CREATE INDEX IF NOT EXISTS idx_entries_updated ON entries(updated_at DESC)`,
     ];
 
     // 批量执行：一次跨桥提交全部 DDL，替代原来 12 次串行 db.run()
@@ -261,7 +263,7 @@ class NativeDatabaseService implements IDatabaseService {
     await this.db.run('DELETE FROM entries WHERE id = ?', [id]);
   }
 
-  async searchEntries(keyword: string, options?: { tagIds?: string[]; isStarred?: boolean; hasAttachment?: boolean }): Promise<Entry[]> {
+  async searchEntries(keyword: string, options?: { tagIds?: string[]; isStarred?: boolean; hasAttachment?: boolean; modifiedAfter?: number; modifiedBefore?: number }): Promise<Entry[]> {
     if (!this.db) throw new Error('Database not initialized');
     let sql = 'SELECT DISTINCT e.* FROM entries e';
     const conditions: string[] = [];
@@ -273,6 +275,9 @@ class NativeDatabaseService implements IDatabaseService {
     }
     if (keyword) { conditions.push('e.content LIKE ?'); values.push(`%${keyword}%`); }
     if (options?.isStarred !== undefined) { conditions.push('e.is_starred = ?'); values.push(options.isStarred ? 1 : 0); }
+    // v2.10.0: 「修改时间」范围筛选（按 updated_at，闭区间）
+    if (options?.modifiedAfter !== undefined) { conditions.push('e.updated_at >= ?'); values.push(options.modifiedAfter); }
+    if (options?.modifiedBefore !== undefined) { conditions.push('e.updated_at <= ?'); values.push(options.modifiedBefore); }
     if (options?.hasAttachment !== undefined) {
       if (options.hasAttachment) {
         conditions.push('EXISTS (SELECT 1 FROM attachments a WHERE a.entry_id = e.id)');

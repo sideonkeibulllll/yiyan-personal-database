@@ -10,6 +10,8 @@ import { useSettingsStore } from '@/stores/settingsStore';
 import { useTodoStore } from '@/stores/todoStore';
 import { getDatabase } from '@/services/database';
 import { weightedRandomSelect, filterEntries } from '@/services/random';
+import { TIME_RANGE_PRESETS, resolveTimeRange, timeRangeLabel, sanitizeTimeRangeState } from '@/utils/timeRangeFilter';
+import type { TimeRangePreset, TimeRangeState } from '@/utils/timeRangeFilter';
 import { BottomNav } from '@/components/BottomNav';
 import { QuickMenu } from './QuickMenu';
 import { TagSelector } from '@/components/TagSelector';
@@ -153,24 +155,28 @@ export function RandomPage() {
 
   // 筛选条件（持久化：切到其他页面再回来不丢失，存 localStorage）
   const FILTER_STORAGE_KEY = 'yiyan_random_filter_v1';
-  const loadPersistedFilter = (): { tagIds: string[]; starred: boolean | undefined } => {
+  const loadPersistedFilter = (): { tagIds: string[]; starred: boolean | undefined; timeRange: TimeRangeState } => {
     try {
       const raw = localStorage.getItem(FILTER_STORAGE_KEY);
-      if (!raw) return { tagIds: [], starred: undefined };
+      if (!raw) return { tagIds: [], starred: undefined, timeRange: {} };
       const parsed = JSON.parse(raw);
       return {
         tagIds: Array.isArray(parsed.tagIds) ? parsed.tagIds.filter((id: unknown) => typeof id === 'string') : [],
         starred: typeof parsed.starred === 'boolean' ? parsed.starred : undefined,
+        // v2.10.0: 时间范围（旧数据没有该字段 → 校验后返回空对象，向后兼容）
+        timeRange: sanitizeTimeRangeState(parsed.timeRange),
       };
     } catch {
-      return { tagIds: [], starred: undefined };
+      return { tagIds: [], starred: undefined, timeRange: {} };
     }
   };
   const [filterTagIds, setFilterTagIds] = useState<string[]>(() => loadPersistedFilter().tagIds);
   const [filterStarred, setFilterStarred] = useState<boolean | undefined>(() => loadPersistedFilter().starred);
-  const persistFilter = useCallback((tagIds: string[], starred: boolean | undefined) => {
+  // v2.10.0: 时间范围筛选（按修改时间，缓存上次选择）
+  const [filterTimeRange, setFilterTimeRange] = useState<TimeRangeState>(() => loadPersistedFilter().timeRange);
+  const persistFilter = useCallback((tagIds: string[], starred: boolean | undefined, timeRange: TimeRangeState) => {
     try {
-      localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify({ tagIds, starred: starred ?? null }));
+      localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify({ tagIds, starred: starred ?? null, timeRange }));
     } catch { /* 忽略存储失败 */ }
   }, []);
 
@@ -179,6 +185,7 @@ export function RandomPage() {
     const filtered = filterEntries(entries, {
       tagIds: filterTagIds.length > 0 ? filterTagIds : undefined,
       isStarred: filterStarred,
+      ...resolveTimeRange(filterTimeRange),
     });
 
     if (filtered.length === 0) {
@@ -228,7 +235,7 @@ export function RandomPage() {
     // a: 保存快照
     saveSnapshot(result);
     setIsLoading(false);
-  }, [entries, filterTagIds, filterStarred, cardsPerPage]);
+  }, [entries, filterTagIds, filterStarred, filterTimeRange, cardsPerPage, saveSnapshot]);
 
   // 初始加载 — a: 优先从快照恢复，避免重新进入页面时内容变换
   useEffect(() => {
@@ -440,11 +447,12 @@ export function RandomPage() {
     document.body.scrollTop = 0;
   }, [getRandomEntries]);
 
-  // 应用筛选并重新抽卡（不关面板 —— 供筛选面板内连续操作用：选标签/反选即时生效）
-  const applyFilter = useCallback((tagIds: string[], starred?: boolean) => {
+  // 应用筛选并重新抽卡（不关面板 —— 供筛选面板内连续操作用：选标签/反选/时间即时生效）
+  const applyFilter = useCallback((tagIds: string[], starred: boolean | undefined, timeRange: TimeRangeState) => {
     setFilterTagIds(tagIds);
     setFilterStarred(starred);
-    persistFilter(tagIds, starred);
+    setFilterTimeRange(timeRange);
+    persistFilter(tagIds, starred, timeRange);
     lastIdsRef.current = new Set();
     setIsLoading(true);
 
@@ -452,6 +460,7 @@ export function RandomPage() {
     const filtered = filterEntries(entries, {
       tagIds: tagIds.length > 0 ? tagIds : undefined,
       isStarred: starred,
+      ...resolveTimeRange(timeRange),
     });
 
     if (filtered.length === 0) {
@@ -484,16 +493,31 @@ export function RandomPage() {
 
   // 筛选变更（星标按钮等点完即关面板的入口）
   const handleFilterChange = useCallback((tagIds: string[], starred?: boolean) => {
-    applyFilter(tagIds, starred);
+    applyFilter(tagIds, starred, filterTimeRange);
     setShowFilter(false);
-  }, [applyFilter]);
+  }, [applyFilter, filterTimeRange]);
 
   // 反选：全部标签中未选中的变成选中（在面板内连续操作，不关面板）
   const handleInvertTags = useCallback(() => {
     const allTagIds = tags.map(t => t.id);
     const inverted = allTagIds.filter(id => !filterTagIds.includes(id));
-    applyFilter(inverted, filterStarred);
-  }, [tags, filterTagIds, filterStarred, applyFilter]);
+    applyFilter(inverted, filterStarred, filterTimeRange);
+  }, [tags, filterTagIds, filterStarred, filterTimeRange, applyFilter]);
+
+  // v2.10.0: 时间预设（点已激活的项 = 取消；面板内即时生效，不关面板）
+  const handleTimePresetClick = useCallback((preset: TimeRangePreset) => {
+    applyFilter(filterTagIds, filterStarred, filterTimeRange.preset === preset ? {} : { preset });
+  }, [applyFilter, filterTagIds, filterStarred, filterTimeRange]);
+
+  // v2.10.0: 自定义日期变更（即改即生效）
+  const handleCustomDateChange = useCallback((field: 'from' | 'to', value: string) => {
+    applyFilter(filterTagIds, filterStarred, { ...filterTimeRange, preset: 'custom', [field]: value || undefined });
+  }, [applyFilter, filterTagIds, filterStarred, filterTimeRange]);
+
+  // v2.10.0: 清除时间筛选
+  const handleClearTimeRange = useCallback(() => {
+    applyFilter(filterTagIds, filterStarred, {});
+  }, [applyFilter, filterTagIds, filterStarred]);
 
   // 清理长按计时器
   useEffect(() => {
@@ -522,12 +546,18 @@ export function RandomPage() {
       </button>
 
       {/* 筛选标签显示 */}
-      {(filterTagIds.length > 0 || filterStarred !== undefined) && (
+      {(filterTagIds.length > 0 || filterStarred !== undefined || filterTimeRange.preset) && (
         <div className="active-filters">
           {filterStarred !== undefined && (
             <span className="filter-badge">
               {filterStarred ? <><StarFilledIcon /> 已星标</> : <><StarOutlineIcon /> 未星标</>}
               <button onClick={() => handleFilterChange(filterTagIds, undefined)}><CloseIcon /></button>
+            </span>
+          )}
+          {filterTimeRange.preset && (
+            <span className="filter-badge">
+              {timeRangeLabel(filterTimeRange)}
+              <button onClick={handleClearTimeRange}><CloseIcon /></button>
             </span>
           )}
           {filterTagIds.map(tagId => {
@@ -726,6 +756,50 @@ export function RandomPage() {
               </div>
             </div>
 
+            {/* 时间范围（按修改时间，v2.10.0） */}
+            <div className="filter-section">
+              <label className="filter-label">时间范围（修改时间）</label>
+              <div className="time-range-row">
+                {TIME_RANGE_PRESETS.map(p => (
+                  <button
+                    key={p.key}
+                    className={filterTimeRange.preset === p.key ? 'active' : ''}
+                    onClick={() => handleTimePresetClick(p.key)}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+                <button
+                  className={filterTimeRange.preset === 'custom' ? 'active' : ''}
+                  onClick={() => applyFilter(filterTagIds, filterStarred, { ...filterTimeRange, preset: 'custom' })}
+                >
+                  自由选择
+                </button>
+              </div>
+              {filterTimeRange.preset === 'custom' && (
+                <div className="time-range-custom">
+                  <input
+                    type="date"
+                    className="time-range-date"
+                    value={filterTimeRange.from || ''}
+                    onChange={e => handleCustomDateChange('from', e.target.value)}
+                  />
+                  <span className="time-range-sep">至</span>
+                  <input
+                    type="date"
+                    className="time-range-date"
+                    value={filterTimeRange.to || ''}
+                    onChange={e => handleCustomDateChange('to', e.target.value)}
+                  />
+                </div>
+              )}
+              {filterTimeRange.preset && (
+                <button className="time-range-clear" onClick={handleClearTimeRange}>
+                  清除时间筛选
+                </button>
+              )}
+            </div>
+
             {/* 标签筛选 */}
             <div className="filter-section">
               <div className="filter-label-row">
@@ -742,7 +816,7 @@ export function RandomPage() {
               </div>
               <TagSelector
                 selectedTagIds={filterTagIds}
-                onSelectionChange={(tagIds) => applyFilter(tagIds, filterStarred)}
+                onSelectionChange={(tagIds) => applyFilter(tagIds, filterStarred, filterTimeRange)}
               />
             </div>
           </div>

@@ -5,7 +5,8 @@
  * - 创建/搜索/编辑/星标/删除 卡片（条目）— 支持内容/来源/补充/标签/组/星标
  * - 列出现有标签/分组（帮助 AI 复用而非新建）
  * - 编辑组 / 编辑标签（支持批量）
- * - 创建/搜索/编辑/完成/删除 待办
+ * - 创建/搜索/编辑/完成/删除 待办（编辑支持改标题/备注/起止时间/日期/今日标记/标签）
+ * - 待办标签：列出/创建/改名/改色/删除（独立标签池，颜色可自定义）
  * - 备忘录：搜索/读取/新建/追加/覆写/删除
  * - 数据连线
  *
@@ -33,13 +34,37 @@ import { broadcastMemosChanged } from '@/services/memoEvents';
 import { useEntryStore } from '@/stores/entryStore';
 import { useTagStore } from '@/stores/tagStore';
 import { useTodoStore } from '@/stores/todoStore';
-import type { Entry, Todo, Link } from '@/types';
+import { useTodoTagStore } from '@/stores/todoTagStore';
+import type { Entry, Todo, Link, TodoTag } from '@/types';
 
 /** 把单值 / 数组参数统一成字符串数组 */
 function toStringArray(value: unknown): string[] {
   if (Array.isArray(value)) return value.filter((v): v is string => typeof v === 'string' && v.length > 0);
   if (typeof value === 'string' && value.length > 0) return [value];
   return [];
+}
+
+/** 
+ * 待办标签默认颜色（与待办编辑页「+ 新标签」的默认色一致）。
+ * v2.10.0 前此处硬编码 '#4dabf7'，导致 AI 创建的标签全是蓝色。
+ */
+const DEFAULT_TODO_TAG_COLOR = '#f76707';
+
+/** 校验十六进制颜色（#RGB / #RRGGBB），非法返回错误文案 */
+function validateHexColor(color: string): string | null {
+  if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(color)) return null;
+  return `颜色格式无效："${color}"。请使用十六进制格式，如 #f76707（橙）、#4dabf7（蓝）、#fa5252（红）`;
+}
+
+/** 解析 ISO 8601 时间字符串，失败返回错误文案（不再静默忽略） */
+function parseIsoTime(value: unknown, fieldName: string): { ts?: number; error?: string } {
+  const str = typeof value === 'string' ? value.trim() : '';
+  if (!str) return {};
+  const parsed = Date.parse(str);
+  if (isNaN(parsed)) {
+    return { error: `${fieldName} 无法解析："${str}"。请使用 ISO 8601 格式（如 2026-10-11T15:00:00+08:00）` };
+  }
+  return { ts: parsed };
 }
 
 /** 工具元数据（仅用于内部描述，传给 API 时由 buildToolsPayload 转换） */
@@ -203,9 +228,9 @@ export const BRIDGE_TOOLS: BridgeTool[] = [
       properties: {
         title: { type: 'string', description: '待办标题（必填）' },
         note: { type: 'string', description: '待办备注（可选）' },
-        time: { type: 'string', description: '待办时间，ISO 8601 格式或自然语言如"明天下午3点"（可选）' },
+        time: { type: 'string', description: '待办开始时间，ISO 8601 格式（如 2026-10-11T15:00:00+08:00；请先换算好再传入）（可选）' },
         folderDate: { type: 'string', description: '所在日期文件夹，YYYY-MM-DD 格式（可选，默认今天）' },
-        tags: { type: 'array', items: { type: 'string' }, description: '标签名列表（可选）' },
+        tags: { type: 'array', items: { type: 'string' }, description: '标签名列表（可选；不存在的标签会自动创建，颜色默认橙色，可用 create_todo_tag 指定颜色）' },
       },
       required: ['title'],
     },
@@ -250,17 +275,68 @@ export const BRIDGE_TOOLS: BridgeTool[] = [
   },
   {
     name: 'edit_todo',
-    description: '编辑一条或多条待办的标题/备注/时间/日期（支持批量）。未提供的字段保持不变。',
+    description: '编辑一条或多条待办的标题/备注/开始时间/结束时间/日期/今日标记/标签（支持批量）。未提供的字段保持不变。给待办改标签用 addTags/removeTags，改完无需删除重建。',
     parameters: {
       type: 'object',
       properties: {
         todoIds: { type: 'array', items: { type: 'string' }, description: '待办ID列表（至少1个）' },
         title: { type: 'string', description: '新的标题（可选）' },
         note: { type: 'string', description: '新的备注（可选）' },
-        time: { type: 'string', description: '新的开始时间，ISO 8601 或自然语言如"明天下午3点"（可选）' },
+        time: { type: 'string', description: '新的开始时间，ISO 8601 格式（如 2026-10-11T15:00:00+08:00；请先换算好再传入）（可选）' },
+        endTime: { type: 'string', description: '新的结束时间，ISO 8601 格式（可选）' },
         folderDate: { type: 'string', description: '新的日期文件夹，YYYY-MM-DD 格式（可选）' },
+        isToday: { type: 'boolean', description: '是否标记为「今日处理」（可选）' },
+        addTags: { type: 'array', items: { type: 'string' }, description: '要添加的标签名列表（不存在的会自动创建）（可选）' },
+        removeTags: { type: 'array', items: { type: 'string' }, description: '要移除的标签名列表（可选）' },
       },
       required: ['todoIds'],
+    },
+  },
+  {
+    name: 'list_todo_tags',
+    description: '列出待办标签池中的所有标签（名称 + 颜色 + 使用数量）。给待办打标签、改标签颜色、删除标签前，先调用此工具查看已有标签，优先复用。注意：待办标签与卡片标签是两套独立系统。',
+    parameters: {
+      type: 'object',
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: 'create_todo_tag',
+    description: '创建一个待办标签（可指定颜色）。同名标签会直接复用已有记录，不会重复创建。用户说"新建一个XX颜色的XX标签"时使用。',
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: '标签名称（必填）' },
+        color: { type: 'string', description: '标签颜色，十六进制格式如 #f76707（可选；不传则用默认橙色）' },
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'update_todo_tag',
+    description: '修改一个待办标签的名称或颜色（至少提供一项）。用 tagId 或 tagName 指定要改的标签。改颜色示例：color="#f76707"。',
+    parameters: {
+      type: 'object',
+      properties: {
+        tagId: { type: 'string', description: '要修改的标签ID（与 tagName 二选一）' },
+        tagName: { type: 'string', description: '要修改的标签名（与 tagId 二选一）' },
+        name: { type: 'string', description: '新的标签名称（可选）' },
+        color: { type: 'string', description: '新的标签颜色，十六进制格式如 #fa5252（可选）' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'delete_todo_tag',
+    description: '删除一个或多个待办标签（从标签池中彻底移除，待办上的该标签会被解除，但待办本身保留）。这是危险操作，执行前系统会自动向用户弹出确认按钮。',
+    parameters: {
+      type: 'object',
+      properties: {
+        tagIds: { type: 'array', items: { type: 'string' }, description: '要删除的标签ID列表' },
+        tagNames: { type: 'array', items: { type: 'string' }, description: '要删除的标签名列表（与 tagIds 可混用）' },
+      },
+      required: [],
     },
   },
   {
@@ -399,6 +475,7 @@ export const ENTRY_TOOLS = [
 export const TODO_TOOLS = [
   'create_todo', 'search_todos', 'get_today_todos',
   'complete_todo', 'edit_todo', 'delete_todo',
+  'list_todo_tags', 'create_todo_tag', 'update_todo_tag', 'delete_todo_tag',
 ];
 export const MEMO_TOOLS = [
   'search_memos', 'read_memo', 'create_memo',
@@ -406,7 +483,7 @@ export const MEMO_TOOLS = [
 ];
 
 /** 需要用户确认后才执行的危险工具（删除类） */
-export const DANGEROUS_TOOLS = new Set(['delete_card', 'delete_todo', 'delete_memo']);
+export const DANGEROUS_TOOLS = new Set(['delete_card', 'delete_todo', 'delete_memo', 'delete_todo_tag']);
 
 /** 工具名 → 中文显示名（用于确认弹窗） */
 export const TOOL_DISPLAY_NAMES: Record<string, string> = {
@@ -415,6 +492,8 @@ export const TOOL_DISPLAY_NAMES: Record<string, string> = {
   link_cards: '连接卡片', get_card_links: '查询连线', delete_card: '删除卡片',
   create_todo: '创建待办', search_todos: '搜索待办', get_today_todos: '今日待办',
   complete_todo: '完成待办', edit_todo: '编辑待办', delete_todo: '删除待办',
+  list_todo_tags: '列出待办标签', create_todo_tag: '创建待办标签',
+  update_todo_tag: '修改待办标签', delete_todo_tag: '删除待办标签',
   search_memos: '搜索备忘录', read_memo: '读取备忘录', create_memo: '新建备忘录',
   append_memo: '追加备忘录', update_memo: '覆写备忘录', delete_memo: '删除备忘录',
 };
@@ -428,6 +507,15 @@ export function describeToolAction(toolName: string, args: Record<string, unknow
     case 'delete_card': return `删除 ${count(args.entryIds)} 条数据卡片`;
     case 'delete_todo': return `删除 ${count(args.todoIds)} 条待办`;
     case 'delete_memo': return `删除 ${count(args.memoIds)} 篇备忘录`;
+    case 'delete_todo_tag': {
+      const names = [
+        ...toStringArray(args.tagNames),
+        ...toStringArray(args.tagIds),
+      ];
+      return names.length > 0
+        ? `删除待办标签：${names.join('、')}`
+        : '删除待办标签';
+    }
     default: return `执行 ${TOOL_DISPLAY_NAMES[toolName] || toolName}`;
   }
 }
@@ -914,12 +1002,31 @@ export async function executeToolCall(
         if (typeof args.title === 'string') updates.title = args.title;
         if (typeof args.note === 'string') updates.note = args.note;
         if (typeof args.folderDate === 'string' && args.folderDate) updates.folderDate = args.folderDate;
-        if (typeof args.time === 'string' && args.time) {
-          const parsed = Date.parse(args.time);
-          if (!isNaN(parsed)) updates.startTime = parsed;
+        if (typeof args.isToday === 'boolean') updates.isToday = args.isToday;
+
+        const timeParsed = parseIsoTime(args.time, 'time');
+        if (timeParsed.error) return { success: false, error: timeParsed.error };
+        if (timeParsed.ts !== undefined) updates.startTime = timeParsed.ts;
+
+        const endTimeParsed = parseIsoTime(args.endTime, 'endTime');
+        if (endTimeParsed.error) return { success: false, error: endTimeParsed.error };
+        if (endTimeParsed.ts !== undefined) updates.endTime = endTimeParsed.ts;
+
+        const addTags = toStringArray(args.addTags);
+        const removeTags = toStringArray(args.removeTags);
+
+        if (Object.keys(updates).length === 0 && addTags.length === 0 && removeTags.length === 0) {
+          return { success: false, error: '至少要提供 title / note / time / endTime / folderDate / isToday / addTags / removeTags 之一' };
         }
-        if (Object.keys(updates).length === 0) {
-          return { success: false, error: '至少要提供 title / note / time / folderDate 之一' };
+
+        // 预创建 addTags 中不存在的标签（避免每条待办重复创建）
+        if (addTags.length > 0) {
+          const allTags = await todoDb.getAllTodoTags();
+          for (const tagName of addTags) {
+            if (!allTags.find((t: TodoTag) => t.name === tagName)) {
+              await todoDb.createTodoTag(tagName, DEFAULT_TODO_TAG_COLOR);
+            }
+          }
         }
 
         const updated: string[] = [];
@@ -927,18 +1034,194 @@ export async function executeToolCall(
         for (const todoId of todoIds) {
           const todo = await todoDb.getTodoById(todoId);
           if (!todo) { notFound.push(todoId); continue; }
-          await todoDb.updateTodo(todoId, updates);
+
+          const payload: Partial<Todo> = { ...updates };
+
+          // 标签增删（v2.10.0）：取当前标签集，运算后整体回写；新添加的追加到末尾
+          if (addTags.length > 0 || removeTags.length > 0) {
+            const allTags = await todoDb.getAllTodoTags();
+            const nameToId = new Map(allTags.map((t: TodoTag) => [t.name, t.id]));
+            const removedIds = new Set(
+              removeTags.map(n => nameToId.get(n)).filter((v): v is string => Boolean(v))
+            );
+            const nextIds = (todo.tagIds || []).filter(id => !removedIds.has(id));
+            for (const tagName of addTags) {
+              const id = nameToId.get(tagName);
+              if (id && !nextIds.includes(id)) nextIds.push(id);
+            }
+            payload.tagIds = nextIds;
+          }
+
+          await todoDb.updateTodo(todoId, payload);
           updated.push(todoId);
         }
         await useTodoStore.getState().loadAllTodos();
+        await useTodoTagStore.getState().loadTags();
 
         return {
           success: updated.length > 0,
           error: updated.length === 0 ? '没有找到对应待办' : undefined,
           data: {
             updatedCount: updated.length,
+            addedTags: addTags.length > 0 ? addTags : undefined,
+            removedTags: removeTags.length > 0 ? removeTags : undefined,
             notFoundIds: notFound.length > 0 ? notFound : undefined,
             message: `已更新 ${updated.length} 条待办`,
+          },
+        };
+      }
+
+      case 'list_todo_tags': {
+        const allTags = await todoDb.getAllTodoTags();
+        const allTodos = await todoDb.getAllTodos();
+        // 内存统计使用数量（避免循环内逐标签查库）
+        const usage = new Map<string, number>();
+        for (const t of allTodos) {
+          for (const tagId of (t.tagIds || [])) {
+            usage.set(tagId, (usage.get(tagId) || 0) + 1);
+          }
+        }
+        const tags = allTags.map((t: TodoTag) => ({
+          id: t.id,
+          name: t.name,
+          color: t.color || null,
+          todoCount: usage.get(t.id) || 0,
+        }));
+        tags.sort((a, b) => b.todoCount - a.todoCount);
+        return {
+          success: true,
+          data: {
+            total: tags.length,
+            tags,
+            message: tags.length > 0
+              ? `共 ${tags.length} 个待办标签。给待办打标签时优先复用这些名称。`
+              : '当前没有任何待办标签。',
+          },
+        };
+      }
+
+      case 'create_todo_tag': {
+        const name = String(args.name || '').trim();
+        if (!name) return { success: false, error: 'name 不能为空' };
+
+        let color: string | undefined;
+        if (typeof args.color === 'string' && args.color.trim()) {
+          const colorErr = validateHexColor(args.color.trim());
+          if (colorErr) return { success: false, error: colorErr };
+          color = args.color.trim();
+        }
+
+        // 同名复用（createTodoTag 内部已有查重，这里显式处理以便告知 AI）
+        const existing = (await todoDb.getAllTodoTags()).find((t: TodoTag) => t.name === name);
+        if (existing) {
+          return {
+            success: true,
+            data: {
+              id: existing.id,
+              name: existing.name,
+              color: existing.color || null,
+              existed: true,
+              message: `标签"${name}"已存在（颜色：${existing.color || '未设置'}），已复用，未重复创建`,
+            },
+          };
+        }
+
+        const tag = await todoDb.createTodoTag(name, color || DEFAULT_TODO_TAG_COLOR);
+        await useTodoTagStore.getState().loadTags();
+
+        return {
+          success: true,
+          data: {
+            id: tag.id,
+            name: tag.name,
+            color: tag.color || null,
+            existed: false,
+            message: `待办标签"${name}"已创建（颜色：${tag.color}）`,
+          },
+        };
+      }
+
+      case 'update_todo_tag': {
+        const tagId = String(args.tagId || '');
+        const tagName = String(args.tagName || '');
+        if (!tagId && !tagName) return { success: false, error: '需要提供 tagId 或 tagName 来定位标签' };
+
+        const allTags = await todoDb.getAllTodoTags();
+        const target = tagId
+          ? allTags.find((t: TodoTag) => t.id === tagId)
+          : allTags.find((t: TodoTag) => t.name === tagName);
+        if (!target) {
+          return { success: false, error: `未找到待办标签：${tagId || tagName}` };
+        }
+
+        const tagUpdates: Partial<TodoTag> = {};
+        if (typeof args.name === 'string' && args.name.trim()) {
+          const newName = args.name.trim();
+          if (newName !== target.name && allTags.some((t: TodoTag) => t.id !== target.id && t.name === newName)) {
+            return { success: false, error: `已存在同名标签"${newName}"，不能重命名为重复名称（可用 delete_todo_tag 先删除或改用其他名称）` };
+          }
+          tagUpdates.name = newName;
+        }
+        if (typeof args.color === 'string' && args.color.trim()) {
+          const colorErr = validateHexColor(args.color.trim());
+          if (colorErr) return { success: false, error: colorErr };
+          tagUpdates.color = args.color.trim();
+        }
+        if (Object.keys(tagUpdates).length === 0) {
+          return { success: false, error: '至少要提供 name 或 color 之一' };
+        }
+
+        await todoDb.updateTodoTag(target.id, tagUpdates);
+        await useTodoTagStore.getState().loadTags();
+
+        const changed: string[] = [];
+        if (tagUpdates.name) changed.push(`名称 → ${tagUpdates.name}`);
+        if (tagUpdates.color) changed.push(`颜色 → ${tagUpdates.color}`);
+        return {
+          success: true,
+          data: {
+            id: target.id,
+            name: tagUpdates.name || target.name,
+            color: tagUpdates.color || target.color || null,
+            message: `标签"${target.name}"已更新（${changed.join('，')}）`,
+          },
+        };
+      }
+
+      case 'delete_todo_tag': {
+        const targetIds = toStringArray(args.tagIds);
+        const targetNames = toStringArray(args.tagNames);
+        if (targetIds.length === 0 && targetNames.length === 0) {
+          return { success: false, error: '需要提供 tagIds 或 tagNames' };
+        }
+
+        const allTags = await todoDb.getAllTodoTags();
+        const targets = new Map<string, TodoTag>();
+        for (const id of targetIds) {
+          const t = allTags.find((x: TodoTag) => x.id === id);
+          if (t) targets.set(t.id, t);
+        }
+        for (const name of targetNames) {
+          const t = allTags.find((x: TodoTag) => x.name === name);
+          if (t) targets.set(t.id, t);
+        }
+        if (targets.size === 0) {
+          return { success: false, error: `未找到要删除的标签：${[...targetNames, ...targetIds].join('、')}` };
+        }
+
+        const deletedNames: string[] = [];
+        for (const t of targets.values()) {
+          await todoDb.deleteTodoTag(t.id);
+          deletedNames.push(t.name);
+        }
+        await useTodoTagStore.getState().loadTags();
+
+        return {
+          success: true,
+          data: {
+            deletedCount: deletedNames.length,
+            deletedNames,
+            message: `已删除待办标签：${deletedNames.join('、')}（相关待办上的该标签已解除，待办本身保留）`,
           },
         };
       }
@@ -1110,12 +1393,11 @@ export async function executeToolCall(
         const now = Date.now();
         const folderDate = String(args.folderDate || new Date().toISOString().slice(0, 10));
         const note = String(args.note || '');
-        const timeStr = String(args.time || '');
-        let startTime: number | undefined;
-        if (timeStr) {
-          const parsed = Date.parse(timeStr);
-          if (!isNaN(parsed)) startTime = parsed;
+        const timeParsed = parseIsoTime(args.time, 'time');
+        if (timeParsed.error) {
+          return { success: false, error: timeParsed.error };
         }
+        const startTime = timeParsed.ts;
 
         const newTodo = await todoDb.createTodo({
           title,
@@ -1136,7 +1418,7 @@ export async function executeToolCall(
           for (const tagName of tags) {
             let tag = allTags.find((t: any) => t.name === tagName);
             if (!tag) {
-              tag = await todoDb.createTodoTag(tagName, '#4dabf7');
+              tag = await todoDb.createTodoTag(tagName, DEFAULT_TODO_TAG_COLOR);
             }
             tagIds.push(tag.id);
           }
@@ -1146,6 +1428,7 @@ export async function executeToolCall(
         }
 
         await useTodoStore.getState().loadAllTodos();
+        await useTodoTagStore.getState().loadTags();
 
         return {
           success: true,

@@ -54,6 +54,9 @@ export function filterEntries(
   options?: {
     tagIds?: string[];
     isStarred?: boolean;
+    /** v2.10.0: 「修改时间」范围（按 updatedAt，闭区间，时间戳） */
+    modifiedAfter?: number;
+    modifiedBefore?: number;
   }
 ): Entry[] {
   let filtered = [...entries];
@@ -66,6 +69,14 @@ export function filterEntries(
 
   if (options?.isStarred !== undefined) {
     filtered = filtered.filter(entry => entry.isStarred === options.isStarred);
+  }
+
+  if (options?.modifiedAfter !== undefined) {
+    filtered = filtered.filter(entry => (entry.updatedAt || entry.createdAt) >= options.modifiedAfter!);
+  }
+
+  if (options?.modifiedBefore !== undefined) {
+    filtered = filtered.filter(entry => (entry.updatedAt || entry.createdAt) <= options.modifiedBefore!);
   }
 
   return filtered;

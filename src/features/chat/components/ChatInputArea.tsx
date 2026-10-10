@@ -44,7 +44,7 @@ interface ChatInputAreaProps {
 /** MCP 工具分组（面板上按组多选，勾选即启用整组工具） */
 const MCP_GROUPS: { key: string; icon: string; title: string; desc: string; tools: string[] }[] = [
   { key: 'entry', icon: '📊', title: '数据卡片', desc: '搜索 / 创建 / 编辑 / 标签 / 星标 / 删除', tools: ENTRY_TOOLS },
-  { key: 'todo', icon: '✅', title: '待办事项', desc: '搜索 / 创建 / 编辑 / 完成 / 删除', tools: TODO_TOOLS },
+  { key: 'todo', icon: '✅', title: '待办事项', desc: '搜索 / 创建 / 编辑 / 完成 / 删除 / 标签管理', tools: TODO_TOOLS },
   { key: 'memo', icon: '📝', title: '备忘录', desc: '搜索 / 读取 / 新建 / 追加 / 删除', tools: MEMO_TOOLS },
 ];
 

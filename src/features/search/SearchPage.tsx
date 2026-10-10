@@ -11,6 +11,8 @@ import { getDatabase } from '@/services/database';
 import { BottomNav } from '@/components/BottomNav';
 import { QuickMenu } from '@/features/random/QuickMenu';
 import { TagSelector } from '@/components/TagSelector';
+import { TIME_RANGE_PRESETS, resolveTimeRange, timeRangeLabel, sanitizeTimeRangeState } from '@/utils/timeRangeFilter';
+import type { TimeRangePreset, TimeRangeState } from '@/utils/timeRangeFilter';
 import type { Entry, Todo, TodoSearchTimeFilter, Tag } from '@/types';
 import './SearchPage.css';
 
@@ -59,6 +61,39 @@ const LightbulbIcon = () => (
   </svg>
 );
 
+const ClockIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>
+  </svg>
+);
+
+/* === v2.10.0: 时间范围筛选（修改时间；换算逻辑见 utils/timeRangeFilter 共享模块） === */
+
+/** 时间筛选记忆键：缓存上次选择的 N（下次进入自动恢复） */
+const TIME_RANGE_STORAGE_KEY = 'yiyan_search_time_filter_v1';
+
+function loadTimeFilter(): TimeRangeState {
+  try {
+    const raw = localStorage.getItem(TIME_RANGE_STORAGE_KEY);
+    if (!raw) return {};
+    return sanitizeTimeRangeState(JSON.parse(raw));
+  } catch {
+    return {};
+  }
+}
+
+function persistTimeFilter(state: TimeRangeState): void {
+  try {
+    if (!state.preset) {
+      localStorage.removeItem(TIME_RANGE_STORAGE_KEY);
+    } else {
+      localStorage.setItem(TIME_RANGE_STORAGE_KEY, JSON.stringify(state));
+    }
+  } catch {
+    /* 忽略存储失败 */
+  }
+}
+
 export function SearchPage() {
   const [keyword, setKeyword] = useState('');
   const [results, setResults] = useState<Entry[]>([]);
@@ -74,6 +109,9 @@ export function SearchPage() {
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [filterStarred, setFilterStarred] = useState<boolean | undefined>(undefined);
   const [filterHasAttachment, setFilterHasAttachment] = useState<boolean | undefined>(undefined);
+  // v2.10.0: 时间范围筛选（缓存上次选择：「近N天」的 N 会被记住）
+  const [timeFilter, setTimeFilter] = useState<TimeRangeState>(() => loadTimeFilter());
+  const [showTimePanel, setShowTimePanel] = useState(false);
   const [todoMode, setTodoMode] = useState(false);
   const [todoResults, setTodoResults] = useState<Todo[]>([]);
   const [todoTimeFilter, setTodoTimeFilter] = useState<TodoSearchTimeFilter>('future');
@@ -181,7 +219,7 @@ export function SearchPage() {
       return;
     }
 
-    if (!keyword.trim() && selectedTagIds.length === 0 && filterStarred === undefined && filterHasAttachment === undefined) {
+    if (!keyword.trim() && selectedTagIds.length === 0 && filterStarred === undefined && filterHasAttachment === undefined && !timeFilter.preset) {
       setResults([]);
       return;
     }
@@ -192,12 +230,14 @@ export function SearchPage() {
         tagIds: selectedTagIds.length > 0 ? selectedTagIds : undefined,
         isStarred: filterStarred,
         hasAttachment: filterHasAttachment,
+        // v2.10.0: 修改时间范围（近1/3/7天 或 自定义日期）
+        ...resolveTimeRange(timeFilter),
       });
       setResults(searchResults);
     } finally {
       setIsSearching(false);
     }
-  }, [keyword, selectedTagIds, filterStarred, filterHasAttachment, search, todoMode, todoTimeFilter, searchTodos]);
+  }, [keyword, selectedTagIds, filterStarred, filterHasAttachment, timeFilter, search, todoMode, todoTimeFilter, searchTodos]);
 
   // 防抖搜索
   useEffect(() => {
@@ -242,6 +282,22 @@ export function SearchPage() {
   const toggleAttachmentFilter = useCallback(() => {
     setFilterHasAttachment(prev => prev === undefined ? true : prev === true ? false : undefined);
   }, []);
+
+  // v2.10.0: 应用时间筛选（并缓存为下次记忆）
+  const applyTimeFilter = useCallback((next: TimeRangeState) => {
+    setTimeFilter(next);
+    persistTimeFilter(next);
+  }, []);
+
+  // 时间预设：点已激活的项 = 取消
+  const handleTimePresetClick = useCallback((preset: TimeRangePreset) => {
+    applyTimeFilter(timeFilter.preset === preset ? {} : { preset });
+  }, [timeFilter.preset, applyTimeFilter]);
+
+  // 自定义日期变更（即改即搜）
+  const handleCustomDateChange = useCallback((field: 'from' | 'to', value: string) => {
+    applyTimeFilter({ ...timeFilter, preset: 'custom', [field]: value || undefined });
+  }, [timeFilter, applyTimeFilter]);
 
   // 长按结果项
   const handlePressStart = useCallback((entry: Entry) => {
@@ -404,6 +460,15 @@ export function SearchPage() {
               <span>{filterHasAttachment === false ? '无附件' : filterHasAttachment ? '有附件' : '附件'}</span>
             </button>
 
+            {/* v2.10.0: 时间范围筛选（点击展开） */}
+            <button
+              className={`filter-chip ${timeFilter.preset ? 'active' : ''}`}
+              onClick={() => setShowTimePanel(v => !v)}
+            >
+              <span><ClockIcon /></span>
+              <span>{timeRangeLabel(timeFilter)}</span>
+            </button>
+
             {tags.map(tag => (
               <button
                 key={tag.id}
@@ -413,6 +478,52 @@ export function SearchPage() {
                 #{tag.name}
               </button>
             ))}
+          </div>
+        )}
+
+        {/* v2.10.0: 时间范围筛选面板（近1/3/7天 / 自定义日期；选择会被缓存） */}
+        {!todoMode && showTimePanel && (
+          <div className="time-filter-panel glass">
+            <div className="time-filter-presets">
+              {TIME_RANGE_PRESETS.map(p => (
+                <button
+                  key={p.key}
+                  className={`time-filter-chip ${timeFilter.preset === p.key ? 'active' : ''}`}
+                  onClick={() => handleTimePresetClick(p.key)}
+                >
+                  {p.label}
+                </button>
+              ))}
+              <button
+                className={`time-filter-chip ${timeFilter.preset === 'custom' ? 'active' : ''}`}
+                onClick={() => applyTimeFilter({ ...timeFilter, preset: 'custom' })}
+              >
+                自由选择
+              </button>
+              {timeFilter.preset && (
+                <button className="time-filter-clear" onClick={() => applyTimeFilter({})}>
+                  清除
+                </button>
+              )}
+            </div>
+            {timeFilter.preset === 'custom' && (
+              <div className="time-filter-custom">
+                <input
+                  type="date"
+                  className="time-filter-date"
+                  value={timeFilter.from || ''}
+                  onChange={e => handleCustomDateChange('from', e.target.value)}
+                />
+                <span className="time-filter-sep">至</span>
+                <input
+                  type="date"
+                  className="time-filter-date"
+                  value={timeFilter.to || ''}
+                  onChange={e => handleCustomDateChange('to', e.target.value)}
+                />
+              </div>
+            )}
+            <div className="time-filter-hint">按「修改时间」筛选（编辑 / 星标 / 复制过的都算）</div>
           </div>
         )}
 
@@ -492,7 +603,7 @@ export function SearchPage() {
                 </div>
               </div>
             ))
-          ) : keyword || selectedTagIds.length > 0 || filterStarred !== undefined || filterHasAttachment !== undefined ? (
+          ) : keyword || selectedTagIds.length > 0 || filterStarred !== undefined || filterHasAttachment !== undefined || timeFilter.preset ? (
             <div className="empty-results">
               <span className="empty-icon"><SearchIcon /></span>
               <p className="empty-text">没有找到相关内容</p>

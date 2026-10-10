@@ -53,7 +53,10 @@ class WebDatabaseService implements IDatabaseService {
     const entries = this.getEntriesFromStorage();
     const index = entries.findIndex(e => e.id === id);
     if (index !== -1) {
-      entries[index] = { ...entries[index], ...updates };
+      // v2.10.0: 对齐原生端语义 —— 任何更新都刷新 updated_at。
+      // 云端增量备份（updatedAt > lastBackupTs）与搜索页「修改时间」筛选都依赖它；
+      // 此前不刷新会导致 web 端改过的旧条目在两端行为不一致。
+      entries[index] = { ...entries[index], ...updates, updatedAt: Date.now() };
       this.saveEntriesToStorage(entries);
     }
   }
@@ -67,7 +70,7 @@ class WebDatabaseService implements IDatabaseService {
     this.saveAttachmentsToStorage(attachments.filter(a => a.entryId !== id));
   }
 
-  async searchEntries(keyword: string, options?: { tagIds?: string[]; isStarred?: boolean; hasAttachment?: boolean }): Promise<Entry[]> {
+  async searchEntries(keyword: string, options?: { tagIds?: string[]; isStarred?: boolean; hasAttachment?: boolean; modifiedAfter?: number; modifiedBefore?: number }): Promise<Entry[]> {
     let entries = this.getEntriesFromStorage();
 
     if (keyword) {
@@ -80,6 +83,14 @@ class WebDatabaseService implements IDatabaseService {
 
     if (options?.isStarred !== undefined) {
       entries = entries.filter(e => e.isStarred === options.isStarred);
+    }
+
+    // v2.10.0: 「修改时间」范围筛选（按 updatedAt，闭区间）
+    if (options?.modifiedAfter !== undefined) {
+      entries = entries.filter(e => (e.updatedAt || e.createdAt) >= options.modifiedAfter!);
+    }
+    if (options?.modifiedBefore !== undefined) {
+      entries = entries.filter(e => (e.updatedAt || e.createdAt) <= options.modifiedBefore!);
     }
 
     this.fillAttachmentsForEntries(entries);

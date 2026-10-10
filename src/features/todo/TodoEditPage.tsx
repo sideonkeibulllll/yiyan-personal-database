@@ -5,7 +5,7 @@
  * - c: 支持添加图片附件
  * - c: 待办删除时图片附件不保留
  */
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTodoStore } from '@/stores/todoStore';
 import { useTodoTagStore } from '@/stores/todoTagStore';
@@ -13,6 +13,7 @@ import { BottomNav } from '@/components/BottomNav';
 import { getTodoDatabase } from '@/services/todoDatabase';
 import { pickImages, saveImageForTodo, readTodoThumbAsSrc, deleteTodoAttachmentFiles, deleteAllTodoAttachments } from '@/services/todoAttachmentService';
 import { getTodoAttachments as loadTodoAttachmentsMeta, appendTodoAttachment, removeTodoAttachment, clearTodoAttachments } from '@/services/todoAttachmentsMeta';
+import { markTodoTagClicked, sortTodoTagsByRecent, clearTodoTagRecent } from '@/utils/todoTagRecent';
 import type { Todo, TodoAttachment } from '@/types';
 import './TodoEditPage.css';
 
@@ -62,6 +63,10 @@ export function TodoEditPage() {
   const [showTagEditor, setShowTagEditor] = useState(false);
   const [newTagName, setNewTagName] = useState('');
   const [newTagColor, setNewTagColor] = useState('#f76707');
+  // v2.10.0: 已有标签的编辑状态（改名 / 改色 / 删除）
+  const [editingTagId, setEditingTagId] = useState<string | null>(null);
+  const [editTagName, setEditTagName] = useState('');
+  const [editTagColor, setEditTagColor] = useState('#f76707');
   // c: 图片附件状态
   const [attachments, setAttachments] = useState<TodoAttachment[]>([]);
   const [thumbSrcs, setThumbSrcs] = useState<Record<string, string>>({});
@@ -74,6 +79,11 @@ export function TodoEditPage() {
   const tags = useTodoTagStore(state => state.tags);
   const loadTags = useTodoTagStore(state => state.loadTags);
   const createTag = useTodoTagStore(state => state.createTag);
+  const updateTag = useTodoTagStore(state => state.updateTag);
+  const deleteTag = useTodoTagStore(state => state.deleteTag);
+
+  // v2.10.0: 标签排序 —— 最近点击过的浮到最前（记录在进入页面时读取，编辑中不跳位）
+  const sortedTags = useMemo(() => sortTodoTagsByRecent(tags), [tags]);
 
   // 加载标签列表
   useEffect(() => {
@@ -256,6 +266,49 @@ export function TodoEditPage() {
     setShowTagEditor(false);
   }, [newTagName, newTagColor, createTag]);
 
+  // v2.10.0: 打开已有标签的编辑面板（改名 / 改色 / 删除）
+  const handleOpenTagEdit = useCallback((tag: { id: string; name: string; color?: string }) => {
+    setShowTagEditor(false);
+    setEditingTagId(tag.id);
+    setEditTagName(tag.name);
+    setEditTagColor(tag.color || '#f76707');
+  }, []);
+
+  // v2.10.0: 保存标签编辑（改名 / 改色）
+  const handleSaveTagEdit = useCallback(async () => {
+    if (!editingTagId) return;
+    const name = editTagName.trim();
+    if (!name) return;
+    // 重名检查（排除自己；标签池 name 有 UNIQUE 约束，撞名会直接写库失败）
+    if (tags.some(t => t.id !== editingTagId && t.name === name)) {
+      alert(`已存在同名标签"${name}"，请换一个名称`);
+      return;
+    }
+    try {
+      await updateTag(editingTagId, { name, color: editTagColor });
+    } catch (err) {
+      alert('保存失败：' + (err instanceof Error ? err.message : '未知错误'));
+      return;
+    }
+    setEditingTagId(null);
+  }, [editingTagId, editTagName, editTagColor, tags, updateTag]);
+
+  // v2.10.0: 从编辑面板删除标签（从标签池移除，待办上的关联由数据层清理）
+  const handleDeleteTagFromEditor = useCallback(async () => {
+    if (!editingTagId) return;
+    const tag = tags.find(t => t.id === editingTagId);
+    if (!tag) return;
+    if (!confirm(`确定删除标签 "${tag.name}" 吗？删除后无法恢复`)) return;
+    try {
+      await deleteTag(editingTagId);
+      clearTodoTagRecent(editingTagId);
+      setSelectedTagIds(prev => prev.filter(t => t !== editingTagId));
+    } catch (err) {
+      alert('删除失败：' + (err instanceof Error ? err.message : '未知错误'));
+    }
+    setEditingTagId(null);
+  }, [editingTagId, tags, deleteTag]);
+
   if (loading) {
     return (
       <div className="todo-edit-page">
@@ -396,38 +449,51 @@ export function TodoEditPage() {
                 })}
               </div>
             )}
-            {/* 可选标签列表（单击选中，双击删除整个标签） */}
+            {/* 可选标签列表（单击选中；右侧 ✎ 编辑；v2.10.0 按最近点击排序） */}
             <div className="tag-list">
-              {tags.map(tag => (
-                <button
-                  key={tag.id}
-                  className={`tag-chip ${selectedTagIds.includes(tag.id) ? 'active' : ''}`}
-                  style={tag.color ? { borderColor: selectedTagIds.includes(tag.id) ? tag.color : undefined } : undefined}
-                  onClick={() => {
-                    setSelectedTagIds(prev =>
-                      prev.includes(tag.id)
-                        ? prev.filter(t => t !== tag.id)
-                        : [...prev, tag.id] // 追加到末尾：最近添加的在右侧
-                    );
-                  }}
-                  onDoubleClick={() => {
-                    // 双击删除整个标签（从标签池中删除）
-                    if (confirm(`确定删除标签 "${tag.name}" 吗？`)) {
-                      useTodoTagStore.getState().deleteTag(tag.id);
-                      setSelectedTagIds(prev => prev.filter(t => t !== tag.id));
-                    }
-                  }}
-                >
-                  <span
-                    className="tag-color-dot"
-                    style={{ background: tag.color || 'var(--color-text-tertiary)' }}
-                  />
-                  {tag.name}
-                </button>
+              {sortedTags.map(tag => (
+                <span key={tag.id} className="tag-chip-wrap">
+                  <button
+                    className={`tag-chip ${selectedTagIds.includes(tag.id) ? 'active' : ''}`}
+                    style={tag.color ? { borderColor: selectedTagIds.includes(tag.id) ? tag.color : undefined } : undefined}
+                    onClick={() => {
+                      // v2.10.0: 记录点击，下次进入编辑页时该标签排到最前
+                      markTodoTagClicked(tag.id);
+                      setSelectedTagIds(prev =>
+                        prev.includes(tag.id)
+                          ? prev.filter(t => t !== tag.id)
+                          : [...prev, tag.id] // 追加到末尾：最近添加的在右侧
+                      );
+                    }}
+                    onDoubleClick={() => {
+                      // 双击删除整个标签（保留快捷方式；也可用右侧 ✎ 打开编辑面板）
+                      if (confirm(`确定删除标签 "${tag.name}" 吗？`)) {
+                        deleteTag(tag.id);
+                        clearTodoTagRecent(tag.id);
+                        setSelectedTagIds(prev => prev.filter(t => t !== tag.id));
+                      }
+                    }}
+                  >
+                    <span
+                      className="tag-color-dot"
+                      style={{ background: tag.color || 'var(--color-text-tertiary)' }}
+                    />
+                    {tag.name}
+                  </button>
+                  <button
+                    className="tag-chip-edit"
+                    title="编辑标签（改名 / 改色 / 删除）"
+                    onClick={() => handleOpenTagEdit(tag)}
+                  >
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+                    </svg>
+                  </button>
+                </span>
               ))}
               <button
                 className="tag-add-btn"
-                onClick={() => setShowTagEditor(!showTagEditor)}
+                onClick={() => { setShowTagEditor(!showTagEditor); setEditingTagId(null); }}
               >
                 + 新标签
               </button>
@@ -457,6 +523,45 @@ export function TodoEditPage() {
                 >
                   创建
                 </button>
+              </div>
+            )}
+
+            {/* v2.10.0: 已有标签编辑面板（改名 / 改色 / 删除） */}
+            {editingTagId && (
+              <div className="tag-editor glass">
+                <div className="tag-editor-title">
+                  编辑标签「{tags.find(t => t.id === editingTagId)?.name || ''}」
+                </div>
+                <input
+                  type="text"
+                  className="form-input glass"
+                  value={editTagName}
+                  onChange={e => setEditTagName(e.target.value)}
+                  placeholder="标签名..."
+                />
+                <div className="color-picker">
+                  <input
+                    type="color"
+                    value={editTagColor}
+                    onChange={e => setEditTagColor(e.target.value)}
+                  />
+                  <span className="color-hint">标签颜色</span>
+                </div>
+                <div className="tag-editor-actions">
+                  <button className="tag-editor-delete" onClick={handleDeleteTagFromEditor}>
+                    删除标签
+                  </button>
+                  <button className="tag-editor-cancel" onClick={() => setEditingTagId(null)}>
+                    取消
+                  </button>
+                  <button
+                    className="tag-editor-confirm"
+                    onClick={handleSaveTagEdit}
+                    disabled={!editTagName.trim()}
+                  >
+                    保存
+                  </button>
+                </div>
               </div>
             )}
           </div>

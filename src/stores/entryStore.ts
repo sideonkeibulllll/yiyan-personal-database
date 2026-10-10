@@ -21,7 +21,7 @@ interface EntryStore {
   toggleStar: (id: string) => Promise<void>;
   markAsUsed: (id: string) => Promise<void>;
   setCurrentEntry: (entry: Entry | null) => void;
-  search: (keyword: string, options?: { tagIds?: string[]; isStarred?: boolean; hasAttachment?: boolean }) => Promise<Entry[]>;
+  search: (keyword: string, options?: { tagIds?: string[]; isStarred?: boolean; hasAttachment?: boolean; modifiedAfter?: number; modifiedBefore?: number }) => Promise<Entry[]>;
   importEntries: (jsonText: string) => Promise<{ imported: number; skipped: number; total: number; errors: string[] }>;
 }
 

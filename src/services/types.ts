@@ -24,7 +24,7 @@ export interface IDatabaseService {
   getEntryById(id: string): Promise<Entry | null>;
   updateEntry(id: string, updates: Partial<Entry>): Promise<void>;
   deleteEntry(id: string): Promise<void>;
-  searchEntries(keyword: string, options?: { tagIds?: string[]; isStarred?: boolean; hasAttachment?: boolean }): Promise<Entry[]>;
+  searchEntries(keyword: string, options?: { tagIds?: string[]; isStarred?: boolean; hasAttachment?: boolean; modifiedAfter?: number; modifiedBefore?: number }): Promise<Entry[]>;
   getRecentEntries(limit: number): Promise<Entry[]>;
 
   // 标签操作
