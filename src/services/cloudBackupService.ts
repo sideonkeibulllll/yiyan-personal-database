@@ -44,7 +44,7 @@ import type {
   CloudRestoreResult,
 } from './cloudBackupTypes';
 
-const APP_VERSION = '2.14.0';
+const APP_VERSION = '2.14.1';
 const SYNC_STATE_KEY = 'last_backup_ts';
 
 /** 并发批处理（限制并发数，避免一次性发起过多 I/O） */
