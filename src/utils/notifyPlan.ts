@@ -128,3 +128,14 @@ export function makeNotificationId(entryId: string, dayKey: string, slotIndex: n
 export function daysSince(ts: number, now: number): number {
   return Math.max(0, Math.floor((now - ts) / 86_400_000));
 }
+
+/**
+ * 生成「X 天前的记忆来信」标题。
+ *
+ * ⚠️ 通知（notifyService）与桌面橱窗（widgetService）共用同一口径 ——
+ * 天数以「投递/展示时刻」为基准计算（排程时该时刻已知，故无快照误差）。
+ */
+export function makeReunionTitle(createdAt: number, deliverAt: number): string {
+  const days = daysSince(createdAt, deliverAt);
+  return days > 0 ? `${days} 天前的记忆来信` : '今天的记忆来信';
+}

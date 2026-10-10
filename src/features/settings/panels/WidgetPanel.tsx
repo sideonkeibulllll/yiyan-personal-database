@@ -1,0 +1,186 @@
+/**
+ * 设置面板 - 桌面橱窗（v2.13.0）
+ *
+ * 独立性声明：本面板是 services/widgetService 门面在 UI 层的唯一消费方；
+ * 同步 / 重绘 / 状态查询全部经 widgetService 导出函数完成，不直接触碰原生插件。
+ * 本面板无持久化配置项（形态由「桌面上添加哪一个小组件」决定）；样式一律进 WidgetPanel.css。
+ */
+import { useEffect, useState, useCallback, useRef } from 'react';
+import {
+  isWidgetSupported,
+  syncAll,
+  getWidgetStatus,
+  refreshWidgetViews,
+} from '@/services/widgetService';
+import { WIDGET_PLAN_DAYS, remainingDays } from '@/utils/widgetPlan';
+import type { TodoSnapshot, WidgetPlan } from '@/utils/widgetPlan';
+import './WidgetPanel.css';
+
+interface WidgetPanelProps {
+  markDirty: (field: string) => void;
+}
+
+/** 时间格式化 YYYY-MM-DD HH:mm */
+function formatTime(ts: number): string {
+  const d = new Date(ts);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+export function WidgetPanel({ markDirty }: WidgetPanelProps) {
+  // 本面板没有需要「保存」的配置项；保留接口以对齐其他面板
+  void markDirty;
+  const supported = isWidgetSupported();
+
+  const [busy, setBusy] = useState(false);
+  const [toast, setToast] = useState('');
+  const [baseCount, setBaseCount] = useState(0);
+  const [refreshCount, setRefreshCount] = useState(0);
+  const [todoCount, setTodoCount] = useState(0);
+  const [plan, setPlan] = useState<WidgetPlan | null>(null);
+  const [todoSnapshot, setTodoSnapshot] = useState<TodoSnapshot | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
+
+  const showToast = useCallback((msg: string) => {
+    setToast(msg);
+    if (toastTimerRef.current !== null) window.clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = window.setTimeout(() => setToast(''), 2600);
+  }, []);
+
+  const refreshStatus = useCallback(async () => {
+    const st = await getWidgetStatus();
+    setBaseCount(st.baseCount);
+    setRefreshCount(st.refreshCount);
+    setTodoCount(st.todoCount);
+    setPlan(st.plan);
+    setTodoSnapshot(st.todoSnapshot);
+  }, []);
+
+  useEffect(() => {
+    void refreshStatus();
+  }, [refreshStatus]);
+
+  useEffect(() => () => {
+    if (toastTimerRef.current !== null) window.clearTimeout(toastTimerRef.current);
+  }, []);
+
+  const handleSync = useCallback(async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const res = await syncAll(true);
+      showToast(res.message);
+      await refreshStatus();
+    } finally {
+      setBusy(false);
+    }
+  }, [busy, showToast, refreshStatus]);
+
+  const handleRefreshViews = useCallback(async () => {
+    if (busy) return;
+    await refreshWidgetViews();
+    showToast('已通知橱窗重绘');
+  }, [busy, showToast]);
+
+  /* ── 非安卓端降级 ── */
+  if (!supported) {
+    return (
+      <div className="settings-panel-content">
+        <h2 className="panel-title">桌面橱窗</h2>
+        <div className="form-hint">
+          把一张记忆卡片放到主屏幕——不打开应用，也能瞥见过去存下的东西。
+        </div>
+        <div className="widget-unsupported">
+          当前设备不支持桌面橱窗（仅安卓手机可用）。
+          <br />
+          在电脑端或网页端，它会安静地待命。
+        </div>
+      </div>
+    );
+  }
+
+  const totalWidgets = baseCount + refreshCount + todoCount;
+  const planDays = plan ? plan.items.length : 0;
+  const planRemaining = plan ? remainingDays(plan, Date.now()) : 0;
+
+  return (
+    <div className="settings-panel-content">
+      <h2 className="panel-title">桌面橱窗</h2>
+      <div className="form-hint">
+        把一张记忆卡片放到主屏幕——不打开应用，也能瞥见过去存下的东西。
+        卡片每天自动换一张；点一下直达那张卡的浏览页。
+      </div>
+
+      {/* 当前状态 */}
+      <div className="form-group">
+        <label className="form-label">当前状态</label>
+        <div className="widget-status">
+          <div className="widget-status-row">
+            <span>桌面上的橱窗</span>
+            <span>
+              {totalWidgets > 0
+                ? `${totalWidgets} 个（卡片 ${baseCount} · 换一张 ${refreshCount} · 待办 ${todoCount}）`
+                : '还没有添加'}
+            </span>
+          </div>
+          <div className="widget-status-row">
+            <span>展示计划</span>
+            <span>
+              {plan
+                ? `共 ${planDays} 天 · 剩余 ${planRemaining} 天 · 生成于 ${formatTime(plan.generatedAt)}`
+                : '暂无（打开应用会自动生成）'}
+            </span>
+          </div>
+          <div className="widget-status-row">
+            <span>今日待办快照</span>
+            <span>
+              {todoSnapshot
+                ? `${todoSnapshot.total} 条 · 生成于 ${formatTime(todoSnapshot.generatedAt)}`
+                : '暂无（打开应用会自动同步）'}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* 操作 */}
+      <div className="form-group">
+        <button
+          type="button"
+          className="settings-link-btn"
+          onClick={() => { void handleSync(); }}
+          disabled={busy}
+        >
+          {busy ? '同步中…' : `立即同步计划（重排 ${WIDGET_PLAN_DAYS} 天）`}
+        </button>
+        {totalWidgets > 0 && (
+          <button
+            type="button"
+            className="settings-link-btn widget-btn-gap"
+            onClick={() => { void handleRefreshViews(); }}
+            disabled={busy}
+          >
+            通知橱窗立即重绘
+          </button>
+        )}
+        <span className="form-hint">打开应用时会自动补排（余量充足时跳过，避免无谓改写）。</span>
+      </div>
+
+      {/* 添加引导 */}
+      <div className="form-group">
+        <label className="form-label">把它摆上桌面</label>
+        <ol className="widget-guide">
+          <li>长按桌面空白处，选择「卡片」（部分机型叫「小组件」）</li>
+          <li>找到「记忆库」，选择「记忆卡片」「记忆卡片 · 换一张」或「待办清单」</li>
+          <li>拖到桌面合适的位置即可</li>
+        </ol>
+        <span className="form-hint">
+          卡片不刷新？到 设置 → 应用管理 → 记忆库，允许「自启动 / 后台运行」，
+          并把电池策略设为「无限制」（部分手机需要）。
+        </span>
+      </div>
+
+      {/* 轻提示 */}
+      {toast && <div className="widget-toast">{toast}</div>}
+    </div>
+  );
+}

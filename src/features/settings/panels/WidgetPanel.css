@@ -1,0 +1,68 @@
+/**
+ * 桌面橱窗设置面板样式（v2.13.0）
+ * 仅本面板使用；不要往 SettingsPage.css 里塞本模块样式。
+ */
+
+/* 不支持提示卡（Web / Electron） */
+.widget-unsupported {
+  margin-top: var(--space-3);
+  padding: var(--space-4);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-primary);
+  color: var(--color-text-tertiary);
+  font-size: var(--text-sm);
+  line-height: 1.7;
+}
+
+/* 状态卡 */
+.widget-status {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-primary);
+}
+
+.widget-status-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+}
+
+.widget-status-row span:last-child {
+  color: var(--color-text-primary);
+  text-align: right;
+}
+
+.widget-btn-gap {
+  margin-top: var(--space-2);
+}
+
+/* 添加步骤 */
+.widget-guide {
+  margin: 0;
+  padding-left: 1.2em;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.7;
+}
+
+/* 面板内轻提示 */
+.widget-toast {
+  margin-top: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-accent-subtle);
+  border: 1px solid var(--color-border-accent);
+  color: var(--color-accent-primary);
+  font-size: var(--text-sm);
+}

@@ -77,6 +77,24 @@ function scheduleNotifyRefresh(): void {
 }
 
 /**
+ * 桌面橱窗（v2.13.0）：数据就绪后延迟同步展示计划。
+ * - 生成 14 天计划写入原生（余量充足时自动跳过，避免无谓改写）
+ * - 与记忆来信续排同样延后 15 秒，避开启动高峰
+ */
+function scheduleWidgetSync(): void {
+  setTimeout(() => {
+    void (async () => {
+      try {
+        const { syncAll } = await import('@/services/widgetService');
+        await syncAll();
+      } catch (e) {
+        console.warn('桌面橱窗同步失败:', e);
+      }
+    })();
+  }, 15_000);
+}
+
+/**
  * 后台维护任务：过期归档
  * 不阻塞界面显示，启动关键路径之外执行
  */
@@ -134,6 +152,8 @@ export function App() {
           .then(() => {
             // v2.12.0: 数据就绪后，延迟补缺续排「记忆来信」
             scheduleNotifyRefresh();
+            // v2.13.0: 同步「桌面橱窗」展示计划
+            scheduleWidgetSync();
           });
 
         if (!backgroundTasksStarted) {
@@ -163,6 +183,42 @@ export function App() {
       });
       if (cancelled) off();
       else dispose = off;
+    })();
+    return () => {
+      cancelled = true;
+      dispose?.();
+    };
+  }, []);
+
+  // v2.13.0: 桌面橱窗——深链（com.yiyan.memorydb://entry/<id>）直达卡片浏览页。
+  // 冷启动用 getLaunchUrl 兜底（appUrlOpen 只覆盖热启动）。
+  useEffect(() => {
+    let cancelled = false;
+    let dispose: (() => void) | undefined;
+    void (async () => {
+      const { App: CapApp } = await import('@capacitor/app');
+      const handleDeepLink = (url: string | null | undefined) => {
+        if (!url) return;
+        // 记忆卡片：com.yiyan.memorydb://entry/<id> → 卡片浏览页
+        const entryMatch = url.match(/\/\/entry\/([^/?#]+)/i);
+        if (entryMatch && entryMatch[1]) {
+          window.location.hash = `#/entry/${encodeURIComponent(entryMatch[1])}`;
+          return;
+        }
+        // 待办橱窗：com.yiyan.memorydb://todo → 待办页
+        if (/\/\/todo\b/i.test(url)) {
+          window.location.hash = '#/todo';
+        }
+      };
+      try {
+        const launch = await CapApp.getLaunchUrl();
+        if (!cancelled) handleDeepLink(launch?.url);
+      } catch { /* 忽略（web 等平台无此能力） */ }
+      try {
+        const h = await CapApp.addListener('appUrlOpen', ev => handleDeepLink(ev.url));
+        if (cancelled) void h.remove();
+        else dispose = () => { void h.remove(); };
+      } catch { /* 忽略 */ }
     })();
     return () => {
       cancelled = true;

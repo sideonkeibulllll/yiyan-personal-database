@@ -23,7 +23,8 @@
  *  - 预排未来 NOTIFY_PLAN_DAYS 天；日常打开 App 走「补缺」（只补没有排程的天）
  *  - 配置变更（开关 / 窗口 / 条数）走 applySettings → 全清重排
  *  - 选卡：复用随机页的加权随机（星标 / 近期使用加权）；
- *    并排除最近 HISTORY_DEDUP_DAYS 天内已通知过的卡（卡池不足时自动放宽）
+ *    并避开「共享曝光池」（utils/exposurePool.ts）中最近露面的卡
+ *    —— 该池与桌面橱窗（widgetService）共用，防止同一张卡在两个渠道被反复推
  *  - 通知标题的天数按「投递时刻」计算（排程时已知），因此不存在快照误差
  */
 import { Capacitor } from '@capacitor/core';
@@ -35,26 +36,20 @@ import { getDatabase } from '@/services/database';
 import { weightedRandomSelect } from '@/services/random';
 import {
   computeMissingDays,
-  daysSince,
   makeNotificationId,
+  makeReunionTitle,
   pickSlotsForDay,
   toDayKey,
 } from '@/utils/notifyPlan';
+// 共享曝光池（v2.13.0）：与桌面橱窗共用，防止同一张卡在两个渠道被反复推
+import { appendExposure, migrateLegacyNotifyHistory, recentlyExposedIds } from '@/utils/exposurePool';
+import type { ExposureItem } from '@/utils/exposurePool';
 import type { Entry, NotifySettings } from '@/types';
 
 /* ═══════════════ 模块常量（集中声明；调用方禁止重复定义） ═══════════════ */
 
 /** Android 通知渠道 id（「记忆来信」专用，用户可在系统里单独调它的打扰级别） */
 export const NOTIFY_CHANNEL_ID = 'yiyan_reunion';
-
-/** 投递历史 localStorage 键：记录最近「已安排投递」的卡片，用于选卡去重 */
-const HISTORY_KEY = 'yiyan_notify_history_v1';
-
-/** 投递历史保留条数上限 */
-const HISTORY_LIMIT = 30;
-
-/** 最近 N 天内通知过的卡不再重复推送（卡池不足时自动放宽为全量） */
-const HISTORY_DEDUP_DAYS = 14;
 
 /** 通知正文最大字数（超出以「…」截断；真机显示效果不佳时在此调整） */
 const BODY_MAX = 50;
@@ -272,33 +267,6 @@ export async function subscribeTap(handler: (entryId: string) => void): Promise<
 
 /* ═══════════════ 内部实现 ═══════════════ */
 
-interface HistoryItem {
-  id: string;
-  at: number;
-}
-
-function loadHistory(): HistoryItem[] {
-  try {
-    const raw = localStorage.getItem(HISTORY_KEY);
-    const arr = raw ? JSON.parse(raw) : [];
-    if (!Array.isArray(arr)) return [];
-    return arr.filter(
-      (x: unknown): x is HistoryItem =>
-        !!x && typeof (x as HistoryItem).id === 'string' && typeof (x as HistoryItem).at === 'number',
-    );
-  } catch {
-    return [];
-  }
-}
-
-function saveHistory(items: HistoryItem[]): void {
-  try {
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(items.slice(-HISTORY_LIMIT)));
-  } catch {
-    /* 存储失败忽略 */
-  }
-}
-
 /** 候选卡片池：优先用 store 已加载的条目；为空时从数据库全量兜底 */
 async function loadPoolEntries(): Promise<Entry[]> {
   const fromStore = useEntryStore.getState().entries;
@@ -327,15 +295,6 @@ async function ensureChannel(): Promise<void> {
   }
 }
 
-/**
- * 通知标题：「X 天前的记忆来信」。
- * 天数以「投递时刻」为基准计算——排程时投递时刻已知，故无快照误差。
- */
-function makeTitle(entry: Entry, deliverAt: number): string {
-  const days = daysSince(entry.createdAt, deliverAt);
-  return days > 0 ? `${days} 天前的记忆来信` : '今天的记忆来信';
-}
-
 /** 通知正文：卡片内容原文，超出截断加「…」；纯图片卡走兜底文案 */
 function makeBody(entry: Entry): string {
   const text = (entry.content || '').replace(/\s+/g, ' ').trim();
@@ -356,7 +315,7 @@ function buildNotification(
 ): LocalNotificationSchema {
   return {
     id: makeNotificationId(entry.id, dayKey, slotIndex),
-    title: makeTitle(entry, at),
+    title: makeReunionTitle(entry.createdAt, at),
     body: makeBody(entry),
     schedule: { at: new Date(at), allowWhileIdle: true },
     channelId: NOTIFY_CHANNEL_ID,
@@ -396,13 +355,10 @@ async function scheduleUpcoming(
   const entries = await loadPoolEntries();
   if (entries.length === 0) return empty;
 
-  // 去重：排除最近通知过的卡（池子不足时放宽）
-  const history = loadHistory();
-  const recentCutoff = now - HISTORY_DEDUP_DAYS * 86_400_000;
-  const recentlySent = new Set(
-    history.filter(h => h.at >= recentCutoff).map(h => h.id),
-  );
-  let pool = entries.filter(e => !recentlySent.has(e.id));
+  // 去重：避开曝光池中最近露面的卡（与桌面橱窗共享；池子不足时放宽为全量）
+  migrateLegacyNotifyHistory();
+  const recentlyExposed = recentlyExposedIds(now);
+  let pool = entries.filter(e => !recentlyExposed.has(e.id));
   if (pool.length === 0) pool = entries;
 
   // 选卡：复用加权随机；本轮内不重复（卡池不足时循环复用整池）
@@ -420,14 +376,14 @@ async function scheduleUpcoming(
   };
 
   const notifications: LocalNotificationSchema[] = [];
-  const newHistory: HistoryItem[] = [];
+  const newExposure: ExposureItem[] = [];
   for (const day of missingDays) {
     const slots = pickSlotsForDay(day.dayStart, cfg, now);
     for (let i = 0; i < slots.length; i++) {
       const entry = pickFor();
       if (!entry) break;
       notifications.push(buildNotification(entry, slots[i], day.dayKey, i));
-      newHistory.push({ id: entry.id, at: slots[i] });
+      newExposure.push({ id: entry.id, at: slots[i], source: 'notify' });
     }
   }
 
@@ -435,7 +391,7 @@ async function scheduleUpcoming(
 
   await ensureChannel();
   await LocalNotifications.schedule({ notifications });
-  saveHistory([...history, ...newHistory]);
+  appendExposure(newExposure);
 
   return { scheduled: notifications.length, poolSize: pool.length };
 }

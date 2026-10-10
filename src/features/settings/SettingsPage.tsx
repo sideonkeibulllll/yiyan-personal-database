@@ -71,6 +71,7 @@ import { SyncPanel } from './panels/SyncPanel';
 import { PromptsPanel } from './panels/PromptsPanel';
 import { GlmPanel } from './panels/GlmPanel';
 import { NotifyPanel } from './panels/NotifyPanel';
+import { WidgetPanel } from './panels/WidgetPanel';
 import './SettingsPage.css';
 
 /** 设置面板类型 */
@@ -79,6 +80,7 @@ type SettingsTab =
   | 'todo'
   | 'random'
   | 'notify'
+  | 'widget'
   | 'dataManager'
   | 'import'
   | 'export'
@@ -95,6 +97,7 @@ const TAB_LIST: { key: SettingsTab; label: string }[] = [
   { key: 'todo', label: '待办配置' },
   { key: 'random', label: '随机浏览' },
   { key: 'notify', label: '记忆来信' },
+  { key: 'widget', label: '桌面橱窗' },
   { key: 'dataManager', label: '数据管理' },
   { key: 'import', label: '导入' },
   { key: 'export', label: '导出' },
@@ -690,6 +693,9 @@ export function SettingsPage() {
 
       case 'notify':
         return <NotifyPanel markDirty={markDirty} />;
+
+      case 'widget':
+        return <WidgetPanel markDirty={markDirty} />;
 
       case 'dataManager':
         return <DataManagerPanel />;
