@@ -5,6 +5,7 @@ import { create } from 'zustand';
 import type { CloudConfig, NotifySettings, Settings } from '@/types';
 import { DEFAULT_SETTINGS, migrateAIConfig } from '@/types';
 import { getDatabase } from '@/services/database';
+import { sanitizeEntryFilter } from '@/utils/entryFilterState';
 import { setTransferConfig } from '@/config/cloudflare';
 
 /** 设置里存的中转站配置 → 注入到运行时的 Cloudflare 客户端 */
@@ -58,12 +59,15 @@ function sanitizeNotify(raw: Partial<NotifySettings> | undefined): NotifySetting
       : d;
   const windowStart = clamp(r.windowStart, 0, 23, dft.windowStart);
   const windowEndRaw = clamp(r.windowEnd, 1, 24, dft.windowEnd);
+  // v2.14.0：来信候选筛选（标签 / 星标 / 时间）；旧配置无 filter → 校验后回退「不限」
+  const filter = sanitizeEntryFilter(r.filter);
   return {
     enabled: typeof r.enabled === 'boolean' ? r.enabled : dft.enabled,
     windowStart,
     // 保证窗口宽度 ≥ 1 小时（end 必须大于 start）
     windowEnd: windowEndRaw > windowStart ? windowEndRaw : Math.min(24, windowStart + 1),
     dailyCount: clamp(r.dailyCount, 1, 3, dft.dailyCount),
+    filter,
   };
 }
 

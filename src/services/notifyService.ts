@@ -33,7 +33,9 @@ import type { LocalNotificationSchema } from '@capacitor/local-notifications';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useEntryStore } from '@/stores/entryStore';
 import { getDatabase } from '@/services/database';
-import { weightedRandomSelect } from '@/services/random';
+import { weightedRandomSelect, filterEntries } from '@/services/random';
+import { resolveTimeRange } from '@/utils/timeRangeFilter';
+import { isFilterActive } from '@/utils/entryFilterState';
 import {
   computeMissingDays,
   makeNotificationId,
@@ -65,6 +67,11 @@ export interface ScheduleReport {
   scheduled: number;
   /** 可投递的卡片池大小 */
   poolSize: number;
+  /**
+   * v2.14.0：筛选条件把候选池筛空了（有卡，但没有一张符合筛选）。
+   * 调用方据此给出明确提示，而不是「静默降级为全量投递」。
+   */
+  poolFilteredEmpty?: boolean;
 }
 
 /* ═══════════════ 平台判断 ═══════════════ */
@@ -172,6 +179,9 @@ export async function applySettings(): Promise<{ ok: boolean; message: string }>
 
   try {
     const report = await scheduleUpcoming(cfg, true);
+    if (report.poolFilteredEmpty) {
+      return { ok: false, message: '「来信候选范围」筛得太窄了，没有一张卡符合条件' };
+    }
     if (report.scheduled === 0) {
       return { ok: true, message: '已开启；今天的时间窗口已过，明天开始投递' };
     }
@@ -198,7 +208,10 @@ export async function testFireOnce(): Promise<{ ok: boolean; message: string }> 
     return { ok: false, message: '需要通知权限，请先在系统设置中允许' };
   }
 
-  const pool = await loadPoolEntries();
+  const pool = await loadFilteredPool();
+  if (pool === null) {
+    return { ok: false, message: '「来信候选范围」里没有符合条件的卡，先放宽筛选' };
+  }
   if (pool.length === 0) {
     return { ok: false, message: '抽屉里还没有卡片，先存一条再来试' };
   }
@@ -266,6 +279,26 @@ export async function subscribeTap(handler: (entryId: string) => void): Promise<
 }
 
 /* ═══════════════ 内部实现 ═══════════════ */
+
+/**
+ * 候选池 · 加「来信候选筛选」（v2.14.0）
+ *
+ * 语义与随机页筛选完全一致（services/random.filterEntries）：
+ * 标签（任一命中）/ 星标三态 / 时间（按修改时间闭区间）。
+ * ⚠️ 筛选后池空 → 返回 null（调用方给出明确提示，而不是静默退化为全量投递）。
+ */
+async function loadFilteredPool(): Promise<Entry[] | null> {
+  const all = await loadPoolEntries();
+  if (all.length === 0) return [];
+  const cfg = useSettingsStore.getState().settings.notify;
+  if (!cfg?.filter || !isFilterActive(cfg.filter)) return all;
+  const filtered = filterEntries(all, {
+    tagIds: cfg.filter.tagIds.length > 0 ? cfg.filter.tagIds : undefined,
+    isStarred: cfg.filter.starred,
+    ...resolveTimeRange(cfg.filter.timeRange),
+  });
+  return filtered.length > 0 ? filtered : null;
+}
 
 /** 候选卡片池：优先用 store 已加载的条目；为空时从数据库全量兜底 */
 async function loadPoolEntries(): Promise<Entry[]> {
@@ -351,8 +384,12 @@ async function scheduleUpcoming(
   const now = Date.now();
   const missingDays = computeMissingDays(now, pendingDays);
 
-  // 候选池
-  const entries = await loadPoolEntries();
+  // 候选池（v2.14.0：含「来信候选筛选」；筛空 → 明确回报，不静默退化）
+  const filteredPool = await loadFilteredPool();
+  if (filteredPool === null) {
+    return { ...empty, poolFilteredEmpty: true };
+  }
+  const entries = filteredPool;
   if (entries.length === 0) return empty;
 
   // 去重：避开曝光池中最近露面的卡（与桌面橱窗共享；池子不足时放宽为全量）

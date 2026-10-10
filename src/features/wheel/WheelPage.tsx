@@ -16,6 +16,8 @@ import {
   getWheel, getLastOrCreateWheel, saveWheel, deleteWheel, createWheel,
   getAllWheels, setLastWheelId,
 } from '@/services/wheelDatabase';
+import { pushWheelRecent, removeWheelRecent, sortWheelsByRecent } from '@/utils/wheelRecent';
+import { syncWheelWidgets } from '@/services/wheelWidgetService';
 import { WheelCanvas, pickWeightedIndex, computeTargetRotation } from './components/WheelCanvas';
 import { OptionList } from './components/OptionList';
 import { HistoryList } from './components/HistoryList';
@@ -67,7 +69,6 @@ export function WheelPage() {
       setLoading(false);
     }
   }, [id]);
-
   useEffect(() => { loadWheel(); }, [loadWheel]);
 
   useEffect(() => () => { if (spinTimerRef.current) clearTimeout(spinTimerRef.current); }, []);
@@ -115,6 +116,10 @@ export function WheelPage() {
       }
 
       await persist({ ...wheel, options: nextOptions, history: nextHistory });
+
+      // 「转动才算使用」：记录 MRU（插队首 + 去重 + 上限 5）→ 同步小组件盘序
+      pushWheelRecent(wheel.id);
+      void syncWheelWidgets();
     }, SPIN_DURATION);
   }, [wheel, spinning, options, rotation, persist]);
 
@@ -142,6 +147,7 @@ export function WheelPage() {
     setWheel(created);
     setLastWheelId(created.id);
     setShowMenu(false);
+    void syncWheelWidgets();
   }, [navigate]);
 
   const handleSwitchWheel = useCallback((targetId: string) => {
@@ -153,6 +159,7 @@ export function WheelPage() {
     if (!wheel) return;
     if (!confirm(`确定删除转盘「${wheel.name}」？`)) return;
     await deleteWheel(wheel.id);
+    removeWheelRecent(wheel.id);
     const rest = await getAllWheels();
     if (rest.length > 0) {
       navigate(`/wheel/${rest[0].id}`);
@@ -161,6 +168,7 @@ export function WheelPage() {
       navigate(`/wheel/${created.id}`);
     }
     setShowMenu(false);
+    void syncWheelWidgets();
   }, [wheel, navigate]);
 
   const handleRename = useCallback(async () => {
@@ -236,7 +244,7 @@ export function WheelPage() {
         <div className="wheel-menu-mask" onClick={() => setShowMenu(false)}>
           <div className="wheel-menu" onClick={e => e.stopPropagation()}>
             <div className="wheel-menu-label">切换转盘</div>
-            {allWheels.map(w => (
+            {sortWheelsByRecent(allWheels).map(w => (
               <button
                 key={w.id}
                 className={`wheel-menu-item ${w.id === wheel?.id ? 'active' : ''}`}

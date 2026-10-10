@@ -97,6 +97,20 @@ export interface NotifySettings {
   windowEnd: number;
   /** 每天投递条数（1-3） */
   dailyCount: number;
+  /**
+   * 来信候选筛选（v2.14.0）：限定「哪些卡可以被选为来信」。
+   * 与随机页筛选同语义（标签 / 时间 / 星标），不填 = 全部卡片。
+   * ⚠️ 与随机页的筛选**各自独立**（随机页存 localStorage，这里进设置/云备份）。
+   * 结构见 utils/entryFilterState.ts 的 EntryFilterState（此处内联，保持本文件零依赖）。
+   */
+  filter?: {
+    /** 选中的标签 id（空 = 不限标签） */
+    tagIds: string[];
+    /** 星标状态：undefined=全部 / true=仅星标 / false=仅未星标 */
+    starred?: boolean;
+    /** 时间范围（按修改时间；无 preset = 不限） */
+    timeRange: { preset?: '1d' | '3d' | '7d' | 'custom'; from?: string; to?: string };
+  };
 }
 
 // ==================== 待办相关类型 ====================

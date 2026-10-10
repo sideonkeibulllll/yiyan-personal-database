@@ -111,6 +111,23 @@ function initTodoAutoSyncSafe(): void {
 }
 
 /**
+ * 转盘小组件同步（v2.14.0）：
+ * - 启动时下发盘序（MRU + 其余按 updatedAt）
+ * - 消费原生「转动」结果 → 补写 history + MRU
+ */
+function scheduleWheelWidgetSync(): void {
+  void (async () => {
+    try {
+      const { syncWheelWidgets, consumePendingSpinResult } = await import('@/services/wheelWidgetService');
+      await consumePendingSpinResult();
+      await syncWheelWidgets();
+    } catch (e) {
+      console.warn('转盘小组件同步失败:', e);
+    }
+  })();
+}
+
+/**
  * 后台维护任务：过期归档
  * 不阻塞界面显示，启动关键路径之外执行
  */
@@ -172,6 +189,8 @@ export function App() {
             scheduleWidgetSync();
             // v2.13.2: 待办变动即刻同步（订阅 todoStore，防抖推送）
             initTodoAutoSyncSafe();
+            // v2.14.0: 转盘小组件盘序同步 + 消费原生转动结果
+            scheduleWheelWidgetSync();
           });
 
         if (!backgroundTasksStarted) {
@@ -226,6 +245,17 @@ export function App() {
         // 待办橱窗：com.yiyan.memorydb://todo → 待办页
         if (/\/\/todo\b/i.test(url)) {
           window.location.hash = '#/todo';
+          return;
+        }
+        // 转盘组件：com.yiyan.memorydb://wheel/<id> → 对应转盘页
+        const wheelMatch = url.match(/\/\/wheel\/([^/?#]+)/i);
+        if (wheelMatch && wheelMatch[1]) {
+          window.location.hash = `#/wheel/${encodeURIComponent(wheelMatch[1])}`;
+          return;
+        }
+        // 转盘组件（无 id）：打开首页转盘入口
+        if (/\/\/wheel\b/i.test(url)) {
+          window.location.hash = '#/wheel';
         }
       };
       try {

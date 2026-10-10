@@ -9,7 +9,7 @@
  * 未来扩展（AI 写信人格、时间胶囊等）：新配置字段加进 NotifySettings（types），
  * 本面板与 notifyService 同步消费；样式一律进 NotifyPanel.css。
  */
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useSettingsStore } from '@/stores/settingsStore';
 import {
   isNotifySupported,
@@ -22,11 +22,17 @@ import {
   openExactAlarmSetting,
 } from '@/services/notifyService';
 import type { NotifyPermission } from '@/services/notifyService';
+import { EntryFilterPanel } from '@/components/EntryFilterPanel/EntryFilterPanel';
+import { countActiveFilters, isFilterActive, sanitizeEntryFilter } from '@/utils/entryFilterState';
+import type { EntryFilterState } from '@/utils/entryFilterState';
 import './NotifyPanel.css';
 
 interface NotifyPanelProps {
   markDirty: (field: string) => void;
 }
+
+/** 空筛选（清除筛选时写入；与 utils/entryFilterState 的 EMPTY_ENTRY_FILTER 同值） */
+const EMPTY_FILTER: EntryFilterState = { tagIds: [], starred: undefined, timeRange: {} };
 
 export function NotifyPanel({ markDirty }: NotifyPanelProps) {
   const settings = useSettingsStore(state => state.settings);
@@ -109,6 +115,22 @@ export function NotifyPanel({ markDirty }: NotifyPanelProps) {
   ) => {
     updateNotifyConfig(patch);
     markDirty(field);
+    if (cfg.enabled) scheduleAutoReschedule();
+  }, [cfg.enabled, updateNotifyConfig, markDirty, scheduleAutoReschedule]);
+
+  /** 当前来信筛选（老配置无 filter → 校验后回退「不限」） */
+  const currentFilter: EntryFilterState = useMemo(
+    () => sanitizeEntryFilter(cfg.filter),
+    [cfg.filter],
+  );
+
+  /**
+   * 筛选变更：写配置 + （已开启时）自动重排。
+   * ⚠️ 与随机页筛选**各自独立**：这里进 settings（会云备份），随机页存 localStorage。
+   */
+  const patchFilter = useCallback((next: EntryFilterState) => {
+    updateNotifyConfig({ filter: next });
+    markDirty('notify.filter');
     if (cfg.enabled) scheduleAutoReschedule();
   }, [cfg.enabled, updateNotifyConfig, markDirty, scheduleAutoReschedule]);
 
@@ -290,6 +312,34 @@ export function NotifyPanel({ markDirty }: NotifyPanelProps) {
           </div>
         </>
       )}
+
+      {/* v2.14.0: 来信候选范围（标签 / 时间 / 星标，与随机页同一套 UI 与语义） */}
+      {/* ⚠️ 刻意放在总开关「之外」：可以先把范围配好，再打开开关（开关只管「要不要投递」） */}
+      <div className="form-group">
+        <div className="notify-filter-head">
+          <label className="form-label">来信候选范围</label>
+          {isFilterActive(currentFilter) && (
+            <span className="notify-filter-badge">
+              已筛选 {countActiveFilters(currentFilter)} 项
+              <button type="button" onClick={() => patchFilter({ ...EMPTY_FILTER })}>清除</button>
+            </span>
+          )}
+        </div>
+        <EntryFilterPanel
+          inline
+          value={currentFilter}
+          onChange={patchFilter}
+        />
+        <span className="form-hint">
+          限定哪些卡可以被选为来信；不筛选就是全部卡片都可能被选到。
+          {isFilterActive(currentFilter) && (
+            <>
+              <br />
+              <strong>注意</strong>：改完会立刻按新范围重排；若无卡符合条件，来信会暂停而不是退回全量。
+            </>
+          )}
+        </span>
+      </div>
 
       {/* 轻提示 */}
       {toast && <div className="notify-toast">{toast}</div>}
