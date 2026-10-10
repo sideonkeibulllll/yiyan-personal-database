@@ -956,3 +956,243 @@ select.form-input option {
     width: 200px;
   }
 }
+
+/* ====== v2.11.0: 长期记忆管理 ====== */
+
+/* 「管理记忆」入口按钮（挂在长期记忆开关下方） */
+.settings-link-btn {
+  align-self: flex-start;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-primary);
+  color: var(--color-accent-primary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.settings-link-btn:active {
+  transform: scale(0.97);
+  border-color: var(--color-border-accent);
+}
+
+/* 记忆管理弹层 */
+.memory-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 400;
+  padding: var(--space-4);
+  animation: fadeIn var(--duration-fast) var(--ease-out);
+}
+
+.memory-panel {
+  width: 100%;
+  max-width: 430px;
+  max-height: 78vh;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  animation: slideUp var(--duration-normal) var(--ease-out);
+}
+
+.memory-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.memory-header h3 {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  font-family: inherit;
+}
+
+.memory-close {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--color-bg-elevated);
+  color: var(--color-text-secondary);
+  border: none;
+  cursor: pointer;
+}
+
+.memory-hint {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  line-height: 1.6;
+}
+
+.memory-add {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.memory-add-input {
+  flex: 1;
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-primary);
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+  outline: none;
+}
+
+.memory-add-input:focus {
+  border-color: var(--color-border-accent);
+}
+
+.memory-add-btn {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-accent-primary);
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+  border: none;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.memory-add-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.memory-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-height: 80px;
+}
+
+.memory-empty {
+  padding: var(--space-6) var(--space-4);
+  text-align: center;
+  font-size: var(--text-sm);
+  color: var(--color-text-tertiary);
+  line-height: 1.8;
+}
+
+.memory-item {
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-primary);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.memory-item-content {
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.memory-item-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+}
+
+.memory-source {
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  border: 1px solid var(--color-border-primary);
+}
+
+.memory-source.user {
+  color: var(--color-accent-primary);
+  border-color: var(--color-border-accent);
+}
+
+.memory-source.ai {
+  color: var(--color-text-secondary);
+}
+
+.memory-item-time {
+  margin-right: auto;
+}
+
+.memory-item-actions {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.memory-btn {
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-xs);
+  background: none;
+  border: 1px solid var(--color-border-primary);
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.memory-btn:active {
+  transform: scale(0.95);
+}
+
+.memory-btn.primary {
+  background: var(--color-accent-primary);
+  color: var(--color-text-primary);
+  border-color: transparent;
+}
+
+.memory-btn.primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.memory-btn.danger {
+  color: var(--color-danger);
+}
+
+.memory-item-edit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.memory-edit-input {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-accent);
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+  outline: none;
+}
+
+.memory-item-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.memory-footer {
+  text-align: right;
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+}

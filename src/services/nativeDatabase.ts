@@ -38,6 +38,7 @@ class NativeDatabaseService implements IDatabaseService {
 
     await this.initConnection();
     await this.createTables();
+    await this.migrateSchema();
     this.isInitialized = true;
   }
 
@@ -178,7 +179,7 @@ class NativeDatabaseService implements IDatabaseService {
         FOREIGN KEY (entry_id) REFERENCES entries(id) ON DELETE CASCADE
       )`,
       `CREATE INDEX IF NOT EXISTS idx_attachments_entry ON attachments(entry_id)`,
-      // 对话历史表（v2.0.0 新增）
+      // 对话历史表（v2.0.0 新增；v2.11.0 增思考模式列）
       `CREATE TABLE IF NOT EXISTS chat_sessions (
         id TEXT PRIMARY KEY,
         title TEXT NOT NULL,
@@ -186,6 +187,8 @@ class NativeDatabaseService implements IDatabaseService {
         model TEXT,
         mcp_enabled_tools TEXT,
         mcp_search_results TEXT,
+        thinking_enabled INTEGER DEFAULT 0,
+        thinking_effort TEXT,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
       )`,
@@ -205,6 +208,28 @@ class NativeDatabaseService implements IDatabaseService {
     // 批量执行：一次跨桥提交全部 DDL，替代原来 12 次串行 db.run()
     // （Capacitor SQLite 的 execute 支持分号分隔的多语句）
     await this.db.execute(schemas.join(';\n') + ';');
+  }
+
+  /**
+   * v2.11.0: 轻量迁移 —— 给已有库补 chat_sessions 的思考模式列。
+   * SQLite 的 ALTER TABLE ADD COLUMN 不支持 IF NOT EXISTS，
+   * 先查 PRAGMA table_info 判断列是否已存在（幂等，可重复执行）。
+   */
+  private async migrateSchema(): Promise<void> {
+    if (!this.db) return;
+    try {
+      const info = await this.db.query('PRAGMA table_info(chat_sessions)');
+      const cols = new Set((info.values || []).map(r => String(r.name)));
+      if (!cols.has('thinking_enabled')) {
+        await this.db.run('ALTER TABLE chat_sessions ADD COLUMN thinking_enabled INTEGER DEFAULT 0');
+      }
+      if (!cols.has('thinking_effort')) {
+        await this.db.run('ALTER TABLE chat_sessions ADD COLUMN thinking_effort TEXT');
+      }
+    } catch (err) {
+      // 迁移失败不阻塞启动（字段缺失时读写会回落到默认值）
+      console.warn('[NativeDatabase] migrate chat_sessions failed:', err);
+    }
   }
 
   async createEntry(entry: Omit<Entry, 'tags'>): Promise<Entry> {
@@ -545,8 +570,8 @@ class NativeDatabaseService implements IDatabaseService {
   async saveChatSession(session: ChatSession): Promise<void> {
     if (!this.db) throw new Error('Database not initialized');
     await this.db.run(
-      `INSERT OR REPLACE INTO chat_sessions (id, title, messages, model, mcp_enabled_tools, mcp_search_results, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT OR REPLACE INTO chat_sessions (id, title, messages, model, mcp_enabled_tools, mcp_search_results, thinking_enabled, thinking_effort, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         session.id,
         session.title,
@@ -554,6 +579,8 @@ class NativeDatabaseService implements IDatabaseService {
         session.model || null,
         session.mcpEnabledTools ? JSON.stringify(session.mcpEnabledTools) : null,
         session.mcpSearchResults ? JSON.stringify(session.mcpSearchResults) : null,
+        session.thinkingEnabled ? 1 : 0,
+        session.thinkingEffort || null,
         session.createdAt,
         session.updatedAt,
       ],
@@ -587,6 +614,9 @@ class NativeDatabaseService implements IDatabaseService {
       model: (row.model as string) || undefined,
       mcpEnabledTools: row.mcp_enabled_tools ? JSON.parse(row.mcp_enabled_tools as string) : undefined,
       mcpSearchResults: row.mcp_search_results ? JSON.parse(row.mcp_search_results as string) : undefined,
+      // v2.11.0: 思考模式（旧数据无列时回落默认）
+      thinkingEnabled: Boolean(row.thinking_enabled),
+      thinkingEffort: (row.thinking_effort as ChatSession['thinkingEffort']) || undefined,
     };
   }
 

@@ -3,7 +3,7 @@
  */
 import type { Entry, Tag, Group, Link, Settings, Attachment, Todo, TodoTag, TodoTemplate, TodoTemplateItem, TodoSearchTimeFilter } from '@/types';
 
-/** 对话历史会话（v2.0.0 新增） */
+/** 对话历史会话（v2.0.0 新增；v2.11.0 增思考模式持久化字段） */
 export interface ChatSession {
   id: string;
   title: string;
@@ -13,6 +13,10 @@ export interface ChatSession {
   model?: string;
   mcpEnabledTools?: string[];
   mcpSearchResults?: { entryId: string; content: string; source?: string }[];
+  /** 该对话的深度思考开关（v2.11.0） */
+  thinkingEnabled?: boolean;
+  /** 该对话的思考强度（v2.11.0；避免循环依赖用字面量类型） */
+  thinkingEffort?: 'high' | 'max';
 }
 
 export interface IDatabaseService {

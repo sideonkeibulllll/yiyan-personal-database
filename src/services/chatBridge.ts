@@ -31,6 +31,7 @@ import { getDatabase } from '@/services/database';
 import { getTodoDatabase } from '@/services/todoDatabase';
 import { getAllMemos, getMemo, createMemo, saveMemo, deleteMemo } from '@/services/memoDatabase';
 import { broadcastMemosChanged } from '@/services/memoEvents';
+import { listMemories, saveMemory, updateMemory, deleteMemory } from '@/services/aiMemory';
 import { useEntryStore } from '@/stores/entryStore';
 import { useTagStore } from '@/stores/tagStore';
 import { useTodoStore } from '@/stores/todoStore';
@@ -461,6 +462,51 @@ export const BRIDGE_TOOLS: BridgeTool[] = [
       required: ['memoIds'],
     },
   },
+  // === 长期记忆 MCP 工具（v2.11.0）===
+  // 仅在 settings.context.enableLongTermMemory 打开时自动启用（不走 MCP 组勾选）。
+  {
+    name: 'save_ai_memory',
+    description: '把一条关于用户的长期信息写入「长期记忆」（跨对话永久保留）。只在发现值得长期记住的内容时使用：用户的偏好、习惯、重要事实、长期目标、反复出现的需求等。不要记录：一次性任务、临时状态、敏感隐私（除非用户明确要求记住）。保存前可先用 list_ai_memories 查看已有记忆避免重复（调用方会自动忽略完全相同的内容）。',
+    parameters: {
+      type: 'object',
+      properties: {
+        content: { type: 'string', description: '记忆内容，用一句简洁的话描述（例如：用户习惯在晚上整理当天的待办）' },
+      },
+      required: ['content'],
+    },
+  },
+  {
+    name: 'list_ai_memories',
+    description: '列出全部长期记忆（ID / 内容 / 来源 / 更新时间）。用户问"你记住了我什么"、或在保存/修改前查重时使用。',
+    parameters: {
+      type: 'object',
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: 'update_ai_memory',
+    description: '修改一条长期记忆的内容（用 memoryId 定位）。当记忆过时、不准确，或用户纠正你时使用。',
+    parameters: {
+      type: 'object',
+      properties: {
+        memoryId: { type: 'string', description: '要修改的记忆 ID（先用 list_ai_memories 获取）' },
+        content: { type: 'string', description: '新的记忆内容' },
+      },
+      required: ['memoryId', 'content'],
+    },
+  },
+  {
+    name: 'delete_ai_memory',
+    description: '删除一条或多条长期记忆（按 ID）。这是危险操作，执行前系统会自动向用户弹出确认按钮，用户确认后才会真正删除。',
+    parameters: {
+      type: 'object',
+      properties: {
+        memoryIds: { type: 'array', items: { type: 'string' }, description: '要删除的记忆 ID 列表' },
+      },
+      required: ['memoryIds'],
+    },
+  },
 ];
 
 /** 所有工具名称 */
@@ -481,9 +527,13 @@ export const MEMO_TOOLS = [
   'search_memos', 'read_memo', 'create_memo',
   'append_memo', 'update_memo', 'delete_memo',
 ];
+/** 长期记忆工具（v2.11.0）：跟随 enableLongTermMemory 开关自动启用，不走 MCP 组勾选 */
+export const MEMORY_TOOLS = [
+  'save_ai_memory', 'list_ai_memories', 'update_ai_memory', 'delete_ai_memory',
+];
 
 /** 需要用户确认后才执行的危险工具（删除类） */
-export const DANGEROUS_TOOLS = new Set(['delete_card', 'delete_todo', 'delete_memo', 'delete_todo_tag']);
+export const DANGEROUS_TOOLS = new Set(['delete_card', 'delete_todo', 'delete_memo', 'delete_todo_tag', 'delete_ai_memory']);
 
 /** 工具名 → 中文显示名（用于确认弹窗） */
 export const TOOL_DISPLAY_NAMES: Record<string, string> = {
@@ -496,6 +546,8 @@ export const TOOL_DISPLAY_NAMES: Record<string, string> = {
   update_todo_tag: '修改待办标签', delete_todo_tag: '删除待办标签',
   search_memos: '搜索备忘录', read_memo: '读取备忘录', create_memo: '新建备忘录',
   append_memo: '追加备忘录', update_memo: '覆写备忘录', delete_memo: '删除备忘录',
+  save_ai_memory: '记住一条信息', list_ai_memories: '查看长期记忆',
+  update_ai_memory: '修改长期记忆', delete_ai_memory: '删除长期记忆',
 };
 
 /**
@@ -507,6 +559,7 @@ export function describeToolAction(toolName: string, args: Record<string, unknow
     case 'delete_card': return `删除 ${count(args.entryIds)} 条数据卡片`;
     case 'delete_todo': return `删除 ${count(args.todoIds)} 条待办`;
     case 'delete_memo': return `删除 ${count(args.memoIds)} 篇备忘录`;
+    case 'delete_ai_memory': return `删除 ${count(args.memoryIds ?? args.memoryId)} 条长期记忆`;
     case 'delete_todo_tag': {
       const names = [
         ...toStringArray(args.tagNames),
@@ -1613,6 +1666,81 @@ export async function executeToolCall(
             deletedCount: deleted.length,
             notFoundIds: notFound.length > 0 ? notFound : undefined,
             message: `已删除 ${deleted.length} 篇备忘录`,
+          },
+        };
+      }
+
+      // ==================== 长期记忆（v2.11.0）====================
+
+      case 'save_ai_memory': {
+        const content = String(args.content || '');
+        const result = saveMemory(content, 'ai');
+        if (!result.success || !result.memory) {
+          return { success: false, error: result.error || '保存失败' };
+        }
+        return {
+          success: true,
+          data: {
+            id: result.memory.id,
+            content: result.memory.content,
+            message: `已记住：${result.memory.content}`,
+          },
+        };
+      }
+
+      case 'list_ai_memories': {
+        const memories = listMemories();
+        return {
+          success: true,
+          data: {
+            total: memories.length,
+            memories: memories.map(m => ({
+              id: m.id,
+              content: m.content,
+              source: m.source === 'user' ? '用户手动添加' : 'AI 保存',
+              updatedAt: m.updatedAt,
+            })),
+            message: memories.length > 0
+              ? `共 ${memories.length} 条长期记忆`
+              : '暂无长期记忆',
+          },
+        };
+      }
+
+      case 'update_ai_memory': {
+        const memoryId = String(args.memoryId || '');
+        if (!memoryId) return { success: false, error: 'memoryId 不能为空' };
+        const content = String(args.content || '');
+        const result = updateMemory(memoryId, content);
+        if (!result.success || !result.memory) {
+          return { success: false, error: result.error || '更新失败' };
+        }
+        return {
+          success: true,
+          data: {
+            id: result.memory.id,
+            content: result.memory.content,
+            message: `已更新记忆：${result.memory.content}`,
+          },
+        };
+      }
+
+      case 'delete_ai_memory': {
+        const memoryIds = toStringArray(args.memoryIds ?? args.memoryId);
+        if (memoryIds.length === 0) return { success: false, error: 'memoryIds 不能为空' };
+        const deleted: string[] = [];
+        const notFound: string[] = [];
+        for (const id of memoryIds) {
+          if (deleteMemory(id)) deleted.push(id);
+          else notFound.push(id);
+        }
+        return {
+          success: deleted.length > 0,
+          error: deleted.length === 0 ? '没有找到要删除的记忆' : undefined,
+          data: {
+            deletedCount: deleted.length,
+            notFoundIds: notFound.length > 0 ? notFound : undefined,
+            message: `已删除 ${deleted.length} 条长期记忆`,
           },
         };
       }

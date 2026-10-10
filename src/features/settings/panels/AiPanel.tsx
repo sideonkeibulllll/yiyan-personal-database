@@ -5,6 +5,8 @@
  */
 import { useState } from 'react';
 import { useSettingsStore } from '@/stores/settingsStore';
+import { MemoryManagerPanel } from './MemoryManagerPanel';
+import { listMemories } from '@/services/aiMemory';
 import type { AIProviderId, ProviderEntry } from '@/types';
 import { AI_PROVIDER_ORDER, PROVIDER_PRESETS, getProviderPreset } from '@/types';
 
@@ -18,6 +20,9 @@ export function AiPanel({ markDirty }: AiPanelProps) {
   const updateContextConfig = useSettingsStore(state => state.updateContextConfig);
   const updatePushConfig = useSettingsStore(state => state.updatePushConfig);
   const [newModel, setNewModel] = useState('');
+  // v2.11.0: 长期记忆管理面板
+  const [showMemoryManager, setShowMemoryManager] = useState(false);
+  const [memoryCount, setMemoryCount] = useState(() => listMemories().length);
 
   // v2.5.1: openai 已移除，兜底为 deepseek
   const providerId: AIProviderId = settings.ai.provider || 'deepseek';
@@ -373,7 +378,16 @@ export function AiPanel({ markDirty }: AiPanelProps) {
           />
           <span>启用长期记忆</span>
         </label>
-        <span className="form-hint">启用后 AI 会参考更多历史条目，耗 token 更多</span>
+        <span className="form-hint">
+          开启后 AI 会跨对话记住你的偏好和习惯，并在对话中自然运用（全本地存储，不上传）
+        </span>
+        <button
+          className="settings-link-btn"
+          type="button"
+          onClick={() => setShowMemoryManager(true)}
+        >
+          管理记忆（{memoryCount} 条）
+        </button>
       </div>
 
       {/* 主动推送配置 */}
@@ -401,6 +415,14 @@ export function AiPanel({ markDirty }: AiPanelProps) {
         />
         <span className="form-hint">值越高要求越严格（当前: {(settings.push?.similarityThreshold ?? 0.7).toFixed(2)}）</span>
       </div>
+
+      {/* v2.11.0: 长期记忆管理面板 */}
+      {showMemoryManager && (
+        <MemoryManagerPanel
+          onClose={() => { setShowMemoryManager(false); setMemoryCount(listMemories().length); }}
+          onChanged={() => setMemoryCount(listMemories().length)}
+        />
+      )}
     </div>
   );
 }

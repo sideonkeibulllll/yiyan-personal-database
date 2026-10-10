@@ -30,8 +30,10 @@ import {
   formatToolResultForUI,
   DANGEROUS_TOOLS,
   describeToolAction,
+  MEMORY_TOOLS,
   type ResolvedToolCall,
 } from '@/services/chatBridge';
+import { getMemoryPromptSection } from '@/services/aiMemory';
 import { getDatabase } from '@/services/database';
 import { getTodoDatabase } from '@/services/todoDatabase';
 import { EntryPickerPanel } from '@/components/EntryPickerPanel';
@@ -297,6 +299,9 @@ export function ChatPage() {
     setMcpActiveTools(s?.mcpEnabledTools ?? []);
     // 同时同步 MCP 开关状态：有启用工具则视为开
     setMcpEnabled((s?.mcpEnabledTools?.length ?? 0) > 0);
+    // v2.11.0: 思考模式同样对话级持久化（切走再切回不丢失）
+    setThinkingEnabled(s?.thinkingEnabled ?? false);
+    setThinkingEffort(s?.thinkingEffort ?? 'high');
   }, [currentSessionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 自动滚动
@@ -337,6 +342,8 @@ export function ChatPage() {
    */
   const handleSetSessionMcpTools = useCallback((toolNames: string[]) => {
     setMcpActiveTools(toolNames);
+    // v2.11.0: 按钮亮灭与工具数量自洽（面板里清空全部工具 → 按钮自动熄灭）
+    setMcpEnabled(toolNames.length > 0);
     if (!currentSessionId) return;
     persistSessions(sessions.map(s => s.id === currentSessionId
       ? { ...s, mcpEnabledTools: toolNames }
@@ -344,16 +351,27 @@ export function ChatPage() {
     ));
   }, [currentSessionId, sessions, persistSessions]);
 
+  /* === v2.11.0: 思考模式对话级持久化（与 mcpEnabledTools 同机制）=== */
+  const persistThinkingState = useCallback((patch: { thinkingEnabled?: boolean; thinkingEffort?: ThinkingEffort }) => {
+    if (!currentSessionId) return;
+    persistSessions(sessions.map(s => s.id === currentSessionId ? { ...s, ...patch } : s));
+  }, [currentSessionId, sessions, persistSessions]);
+
   /* === 新建对话 === */
   const handleNewChat = useCallback(() => {
     const emptySession = sessions.find(s => s.messages.length === 0);
     if (emptySession) {
+      // 复用已有空会话时，把当前思考模式同步过去（v2.11.0：新对话继承当前开关，避免"刚开了又关"）
+      persistSessions(sessions.map(s => s.id === emptySession.id ? { ...s, thinkingEnabled, thinkingEffort } : s));
       setCurrentSessionId(emptySession.id);
     } else {
       const newSession: ChatSession = {
         id: createId(),
         title: '新对话',
         messages: [],
+        // v2.11.0: 新建对话继承当前思考模式（MCP 工具保持从零开始）
+        thinkingEnabled,
+        thinkingEffort,
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
@@ -363,7 +381,7 @@ export function ChatPage() {
     setInput('');
     setMcpSelectedIds(new Set());
     if (isMobile) setSidebarOpen(false);
-  }, [sessions, persistSessions, isMobile]);
+  }, [sessions, persistSessions, isMobile, thinkingEnabled, thinkingEffort]);
 
   const handleSelectSession = useCallback((id: string) => {
     setCurrentSessionId(id);
@@ -405,6 +423,9 @@ export function ChatPage() {
       messages: source.messages.map(m => ({ ...m, id: createId() })),
       model: source.model,
       mcpEnabledTools: source.mcpEnabledTools,
+      // v2.11.0: 思考模式随对话一起复制
+      thinkingEnabled: source.thinkingEnabled,
+      thinkingEffort: source.thinkingEffort,
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -580,8 +601,12 @@ export function ChatPage() {
     consumedPreparedRef.current = preparedIds.length > 0;
 
     // 确保 session 存在
+    // v2.11.0 修复：无会话直接发送时的新建分支，后续更新必须基于「包含新会话」的数组。
+    // 旧代码新建后仍用 sessions 旧快照做 map —— 会把刚创建的会话从 state 覆盖掉，
+    // 导致首条消息不显示、messages/thinkingEnabled 等状态永远无法落库。
     let sessionId = currentSessionId ?? createId();
     let session = sessions.find(s => s.id === sessionId);
+    let baseSessions = sessions;
 
     if (!session) {
       session = {
@@ -591,8 +616,8 @@ export function ChatPage() {
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
-      const newSessions = [session, ...sessions];
-      persistSessions(newSessions);
+      baseSessions = [session, ...sessions];
+      persistSessions(baseSessions);
       setCurrentSessionId(sessionId);
     }
 
@@ -614,7 +639,7 @@ export function ChatPage() {
       messages: updatedMessages,
       updatedAt: Date.now(),
     };
-    persistSessions(sessions.map(s => s.id === sessionId ? updatedSession : s));
+    persistSessions(baseSessions.map(s => s.id === sessionId ? updatedSession : s));
     setInput('');
     setIsLoading(true);
 
@@ -639,6 +664,12 @@ export function ChatPage() {
       // 隐私说明：不再无条件注入最近条目。笔记内容只在用户显式勾选
       // 「发送最近条目」时，通过下方 context 注入流程加入，避免误发隐私数据。
       let systemPrompt = settings.ai.chatSoul || '你是一个友好的AI助手。';
+
+      // v2.11.0: 长期记忆注入（仅当开关打开；全本地数据、用户可在设置页管理）
+      if (settings.context.enableLongTermMemory) {
+        const memorySection = getMemoryPromptSection();
+        systemPrompt += `\n\n## 长期记忆\n以下是你此前记住的关于用户的信息（回答时自然运用，不必刻意提及）：\n${memorySection || '（暂无）'}\n\n如果在对话中发现值得长期记住的新信息（用户的偏好、习惯、重要事实等），可调用 save_ai_memory 保存；信息有变化时用 update_ai_memory 修正。不要记录无关紧要或一次性的内容。`;
+      }
 
       // 注意：MCP 工具已改为通过 OpenAI 原生 tools 字段下发，不再注入提示词。
       // 用户启用的工具在下方 buildToolsPayload() 中转为结构化 schema 传给 API。
@@ -757,7 +788,12 @@ export function ChatPage() {
       ];
 
       // 工具 schema（替代旧的提示词注入）
-      const enabledTools = mcpEnabled ? (session.mcpEnabledTools ?? mcpActiveTools) : [];
+      // v2.11.0: 长期记忆工具跟随设置开关自动启用（不走 MCP 组勾选）
+      const memoryTools = settings.context.enableLongTermMemory ? MEMORY_TOOLS : [];
+      const enabledTools = [
+        ...(mcpEnabled ? (session.mcpEnabledTools ?? mcpActiveTools) : []),
+        ...memoryTools,
+      ];
       const toolsPayload = buildToolsPayload(enabledTools);
 
       // === Agent loop ===
@@ -1090,22 +1126,26 @@ export function ChatPage() {
     setMcpSelectedIds(new Set(currentSession?.mcpSearchResults?.map(r => r.entryId) ?? []));
   }, [currentSession]);
 
-  // MCP 开关（未开启时展开类型选择器；关闭时清空工具并收起）
+  // MCP 按钮：点击始终展开 / 切换 MCP 选择面板（v2.11.0）
+  // 不再"亮着时点击=一键清空所有工具"（极易误触丢配置）；
+  // "全部关闭"操作由面板底部的「清空已启用工具」按钮承载。
   const handleToggleMcp = useCallback(() => {
-    if (!mcpEnabled) {
-      setMcpEnabled(true);
-      setMcpPickerOpen(true);
-    } else {
-      setMcpEnabled(false);
-      handleSetSessionMcpTools([]);
-      setMcpPickerOpen(false);
-    }
-  }, [mcpEnabled, handleSetSessionMcpTools]);
+    setMcpPickerOpen(prev => !prev);
+  }, []);
 
-  // 切换思考强度
+  // 切换思考模式开关（v2.11.0: 对话级持久化）
+  const handleToggleThinking = useCallback(() => {
+    const next = !thinkingEnabled;
+    setThinkingEnabled(next);
+    persistThinkingState({ thinkingEnabled: next });
+  }, [thinkingEnabled, persistThinkingState]);
+
+  // 切换思考强度（v2.11.0: 对话级持久化）
   const handleToggleEffort = useCallback(() => {
-    setThinkingEffort(thinkingEffort === 'high' ? 'max' : 'high');
-  }, [thinkingEffort]);
+    const next = thinkingEffort === 'high' ? 'max' : 'high';
+    setThinkingEffort(next);
+    persistThinkingState({ thinkingEffort: next });
+  }, [thinkingEffort, persistThinkingState]);
 
   return (
     <div className={`chat-page ${isMobile ? 'mobile' : ''} ${sidebarOpen ? 'sidebar-open' : ''}`}>
@@ -1199,7 +1239,7 @@ export function ChatPage() {
           recentPickerEnabled={recentPickerEnabled}
           onToggleRecent={handleRecentPickerToggle}
           thinkingEnabled={thinkingEnabled}
-          onToggleThinking={() => setThinkingEnabled(!thinkingEnabled)}
+          onToggleThinking={handleToggleThinking}
           thinkingEffort={thinkingEffort}
           onToggleEffort={handleToggleEffort}
           mcpEnabled={mcpEnabled}

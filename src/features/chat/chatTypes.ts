@@ -44,6 +44,10 @@ export interface ChatSession {
   model?: string;  // 对话级模型覆盖（留空则用全局默认）
   mcpEnabledTools?: string[];  // 该对话启用的 MCP 工具
   mcpSearchResults?: SearchSelectedResult[];  // MCP 搜索结果选择
+  /** 该对话的深度思考开关（v2.11.0 对话级持久化：切走/退出重进不丢失） */
+  thinkingEnabled?: boolean;
+  /** 该对话的思考强度（v2.11.0 对话级持久化） */
+  thinkingEffort?: ThinkingEffort;
 }
 
 export interface SearchSelectedResult {
