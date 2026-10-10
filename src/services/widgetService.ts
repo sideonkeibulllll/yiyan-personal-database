@@ -30,9 +30,12 @@
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { useEntryStore } from '@/stores/entryStore';
 import { useTodoStore } from '@/stores/todoStore';
+import { useSettingsStore } from '@/stores/settingsStore';
 import { getDatabase } from '@/services/database';
 import { getTodoDatabase } from '@/services/todoDatabase';
-import { weightedRandomSelect } from '@/services/random';
+import { weightedRandomSelect, filterEntries } from '@/services/random';
+import { resolveTimeRange } from '@/utils/timeRangeFilter';
+import { isFilterActive } from '@/utils/entryFilterState';
 import { makeReunionTitle, toDayKey } from '@/utils/notifyPlan';
 import { getSortOrder } from '@/utils/todoSortOrder';
 import {
@@ -120,8 +123,12 @@ export async function syncWidgetPlan(force = false): Promise<WidgetSyncReport> {
       return { ok: true, message: '计划仍有余量', scheduled: 0 };
     }
 
-    // 2. 候选池（store 优先、数据库兜底）+ 曝光去重
-    const entries = await loadPoolEntries();
+    // 2. 候选池（store 优先、数据库兜底）+ 筛选 + 曝光去重
+    const filteredPool = await loadFilteredPool();
+    if (filteredPool === null) {
+      return { ok: false, message: '筛选范围内没有卡片，橱窗暂不换卡', scheduled: 0 };
+    }
+    const entries = filteredPool;
     if (entries.length === 0) {
       return { ok: false, message: '抽屉里还没有卡片，先存一条吧', scheduled: 0 };
     }
@@ -371,6 +378,26 @@ export async function refreshWidgetViews(): Promise<void> {
 }
 
 /* ═══════════════ 内部实现 ═══════════════ */
+
+/**
+ * 候选池 · 加「展示候选筛选」（v2.14.0）
+ *
+ * 语义与随机页 / 记忆来信筛选完全一致（services/random.filterEntries）：
+ * 标签（任一命中）/ 星标三态 / 时间（按修改时间闭区间）。
+ * ⚠️ 筛选后池空 → 返回 null（调用方给出明确提示，而不是静默退化为全量投递）。
+ */
+async function loadFilteredPool(): Promise<Entry[] | null> {
+  const all = await loadPoolEntries();
+  if (all.length === 0) return all;
+  const cfg = useSettingsStore.getState().settings.widget;
+  if (!cfg?.filter || !isFilterActive(cfg.filter)) return all;
+  const filtered = filterEntries(all, {
+    tagIds: cfg.filter.tagIds.length > 0 ? cfg.filter.tagIds : undefined,
+    isStarred: cfg.filter.starred,
+    ...resolveTimeRange(cfg.filter.timeRange),
+  });
+  return filtered.length > 0 ? filtered : null;
+}
 
 /** 候选卡片池：优先用 store 已加载的条目；为空时从数据库全量兜底 */
 async function loadPoolEntries(): Promise<Entry[]> {

@@ -113,6 +113,32 @@ export interface NotifySettings {
   };
 }
 
+/**
+ * 「桌面橱窗」配置（v2.14.0）
+ *
+ * ⚠️ 归属声明：本配置属于「桌面橱窗」模块（见 services/widgetService.ts）。
+ * 写入只允许走 settingsStore.updateWidgetConfig，
+ * 读取渲染由 WidgetPanel 负责。
+ *
+ * 未来扩展方向（橱窗布局偏好、换卡频率等）：向此结构**追加可选字段**，
+ * 由 DEFAULT_SETTINGS / settingsStore 的 sanitizeWidget 兜底，保证旧配置向后兼容。
+ */
+export interface WidgetSettings {
+  /**
+   * 展示候选筛选（v2.14.0）：限定「哪些卡可以被选为橱窗展示」。
+   * 与随机页 / 记忆来信筛选同语义（标签 / 时间 / 星标），不填 = 全部卡片。
+   * 结构见 utils/entryFilterState.ts 的 EntryFilterState（此处内联，保持本文件零依赖）。
+   */
+  filter?: {
+    /** 选中的标签 id（空 = 不限标签） */
+    tagIds: string[];
+    /** 星标状态：undefined=全部 / true=仅星标 / false=仅未星标 */
+    starred?: boolean;
+    /** 时间范围（按修改时间；无 preset = 不限） */
+    timeRange: { preset?: '1d' | '3d' | '7d' | 'custom'; from?: string; to?: string };
+  };
+}
+
 // ==================== 待办相关类型 ====================
 
 /** 待办状态 */
@@ -255,6 +281,8 @@ export interface Settings {
   todo: TodoConfig;
   /** 记忆来信（主动触达，v2.12.0） */
   notify: NotifySettings;
+  /** 桌面橱窗配置（v2.14.0） */
+  widget: WidgetSettings;
   /** Cloudflare 中转站配置（密钥手填） */
   cloud?: CloudConfig;
 }
@@ -646,6 +674,10 @@ export const DEFAULT_SETTINGS: Settings = {
     windowStart: 10,
     windowEnd: 22,
     dailyCount: 1,
+  },
+  /** 桌面橱窗（v2.14.0）：默认不筛选（全部卡片都可能被选到） */
+  widget: {
+    filter: { tagIds: [], timeRange: {} },
   },
   todo: DEFAULT_TODO_CONFIG,
   // Cloudflare 中转站（v2.7.0）：密钥由用户手填，这里默认全空

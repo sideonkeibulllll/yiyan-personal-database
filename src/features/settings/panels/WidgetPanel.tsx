@@ -5,15 +5,20 @@
  * 同步 / 重绘 / 状态查询全部经 widgetService 导出函数完成，不直接触碰原生插件。
  * 本面板无持久化配置项（形态由「桌面上添加哪一个小组件」决定）；样式一律进 WidgetPanel.css。
  */
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import {
   isWidgetSupported,
   syncAll,
   getWidgetStatus,
   refreshWidgetViews,
+  syncWidgetPlan,
 } from '@/services/widgetService';
+import { useSettingsStore } from '@/stores/settingsStore';
 import { WIDGET_PLAN_DAYS, remainingDays } from '@/utils/widgetPlan';
 import type { TodoSnapshot, WidgetPlan } from '@/utils/widgetPlan';
+import { EntryFilterPanel } from '@/components/EntryFilterPanel/EntryFilterPanel';
+import { countActiveFilters, isFilterActive, sanitizeEntryFilter } from '@/utils/entryFilterState';
+import type { EntryFilterState } from '@/utils/entryFilterState';
 import './WidgetPanel.css';
 
 interface WidgetPanelProps {
@@ -28,11 +33,14 @@ function formatTime(ts: number): string {
 }
 
 export function WidgetPanel({ markDirty }: WidgetPanelProps) {
-  // 本面板没有需要「保存」的配置项；保留接口以对齐其他面板
+  // 本面板的 filter 变更通过 updateWidgetConfig 持久化 + 自动重排
   void markDirty;
+  const settings = useSettingsStore(state => state.settings);
+  const updateWidgetConfig = useSettingsStore(state => state.updateWidgetConfig);
   const supported = isWidgetSupported();
 
   const [busy, setBusy] = useState(false);
+  const [filterBusy, setFilterBusy] = useState(false);
   const [toast, setToast] = useState('');
   const [baseCount, setBaseCount] = useState(0);
   const [refreshCount, setRefreshCount] = useState(0);
@@ -40,6 +48,10 @@ export function WidgetPanel({ markDirty }: WidgetPanelProps) {
   const [plan, setPlan] = useState<WidgetPlan | null>(null);
   const [todoSnapshot, setTodoSnapshot] = useState<TodoSnapshot | null>(null);
   const toastTimerRef = useRef<number | null>(null);
+  const rescheduleTimerRef = useRef<number | null>(null);
+
+  /** 空筛选（清除筛选时写入） */
+  const EMPTY_FILTER: EntryFilterState = { tagIds: [], starred: undefined, timeRange: {} };
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
@@ -62,6 +74,7 @@ export function WidgetPanel({ markDirty }: WidgetPanelProps) {
 
   useEffect(() => () => {
     if (toastTimerRef.current !== null) window.clearTimeout(toastTimerRef.current);
+    if (rescheduleTimerRef.current !== null) window.clearTimeout(rescheduleTimerRef.current);
   }, []);
 
   const handleSync = useCallback(async () => {
@@ -81,6 +94,30 @@ export function WidgetPanel({ markDirty }: WidgetPanelProps) {
     await refreshWidgetViews();
     showToast('已通知橱窗重绘');
   }, [busy, showToast]);
+
+  /** 当橱窗的展示候选筛选（标签 / 时间 / 星标，与记忆来信同语义） */
+  const currentFilter: EntryFilterState = useMemo(
+    () => sanitizeEntryFilter(settings.widget.filter),
+    [settings.widget.filter],
+  );
+
+  /**
+   * 筛选变更：写配置 + 防抖触发 force 重排（不跳过余量）。
+   * ⚠️ 与记忆来信筛选**各自独立**：这里进 settings（会云备份），记忆来信也进 settings。
+   */
+  const patchFilter = useCallback((next: EntryFilterState) => {
+    updateWidgetConfig({ filter: next });
+    if (rescheduleTimerRef.current !== null) window.clearTimeout(rescheduleTimerRef.current);
+    setFilterBusy(true);
+    rescheduleTimerRef.current = window.setTimeout(() => {
+      rescheduleTimerRef.current = null;
+      void syncWidgetPlan(true).then(res => {
+        setFilterBusy(false);
+        showToast(res.message);
+        void refreshStatus();
+      });
+    }, 900);
+  }, [updateWidgetConfig, showToast, refreshStatus]);
 
   /* ── 非安卓端降级 ── */
   if (!supported) {
@@ -177,6 +214,34 @@ export function WidgetPanel({ markDirty }: WidgetPanelProps) {
           卡片不刷新？到 设置 → 应用管理 → 记忆库，允许「自启动 / 后台运行」，
           并把电池策略设为「无限制」（部分手机需要）。
         </span>
+      </div>
+
+      {/* v2.14.0: 展示候选范围（标签 / 时间 / 星标，与记忆来信同一套 UI 与语义） */}
+      <div className="form-group">
+        <div className="widget-filter-head">
+          <label className="form-label">展示候选范围</label>
+          {isFilterActive(currentFilter) && (
+            <span className="widget-filter-badge">
+              已筛选 {countActiveFilters(currentFilter)} 项
+              <button type="button" onClick={() => patchFilter({ ...EMPTY_FILTER })}>清除</button>
+            </span>
+          )}
+        </div>
+        <EntryFilterPanel
+          inline
+          value={currentFilter}
+          onChange={patchFilter}
+        />
+        <span className="form-hint">
+          限定哪些卡可以被选为橱窗展示；不筛选就是全部卡片都可能被选到。
+          {isFilterActive(currentFilter) && (
+            <>
+              <br />
+              <strong>注意</strong>：改完会立刻按新范围重排；若无卡符合条件，橱窗暂不换卡。
+            </>
+          )}
+        </span>
+        {filterBusy && <span className="form-hint">正在按新范围重排…</span>}
       </div>
 
       {/* 轻提示 */}

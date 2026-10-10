@@ -2,7 +2,7 @@
  * 设置状态管理
  */
 import { create } from 'zustand';
-import type { CloudConfig, NotifySettings, Settings } from '@/types';
+import type { CloudConfig, NotifySettings, Settings, WidgetSettings } from '@/types';
 import { DEFAULT_SETTINGS, migrateAIConfig } from '@/types';
 import { getDatabase } from '@/services/database';
 import { sanitizeEntryFilter } from '@/utils/entryFilterState';
@@ -32,6 +32,8 @@ interface SettingsStore {
   updateTodoConfig: (config: Partial<Settings['todo']>) => void;
   /** 记忆来信（v2.12.0，主动触达） */
   updateNotifyConfig: (config: Partial<Settings['notify']>) => void;
+  /** 桌面橱窗（v2.14.0） */
+  updateWidgetConfig: (config: Partial<Settings['widget']>) => void;
   /** Cloudflare 中转站配置（v2.7.0：密钥手填） */
   updateCloudConfig: (config: Partial<CloudConfig>) => void;
   resetSettings: () => void;
@@ -71,6 +73,18 @@ function sanitizeNotify(raw: Partial<NotifySettings> | undefined): NotifySetting
   };
 }
 
+/**
+ * 桌面橱窗配置兜底（v2.14.0）
+ * 旧配置无 widget → 校验后回退「不限筛选」
+ */
+function sanitizeWidget(raw: Partial<WidgetSettings> | undefined): WidgetSettings {
+  const dft = DEFAULT_SETTINGS.widget;
+  const r = raw || {};
+  return {
+    filter: sanitizeEntryFilter(r.filter),
+  };
+}
+
 function normalizeSettings(raw: Partial<Settings>): Settings {
   const rawAi: Partial<Settings['ai']> = raw.ai || {};
   const merged: Settings = {
@@ -92,6 +106,8 @@ function normalizeSettings(raw: Partial<Settings>): Settings {
     },
     // 记忆来信：数值级兜底（旧配置无此块时给默认值）
     notify: sanitizeNotify(raw.notify),
+    // 桌面橱窗：筛选兜底（旧配置无此块时给默认值）
+    widget: sanitizeWidget(raw.widget),
   };
   merged.ai = migrateAIConfig(merged.ai);
   merged.cloud = {
@@ -223,6 +239,16 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
       ...get().settings,
       // 走 sanitize：防止 UI 层传入越界值破坏排程计算
       notify: sanitizeNotify({ ...get().settings.notify, ...config }),
+    };
+    saveToLocalStorage(settings);
+    saveToDatabase(settings);
+    set({ settings });
+  },
+
+  updateWidgetConfig: (config) => {
+    const settings = {
+      ...get().settings,
+      widget: sanitizeWidget({ ...get().settings.widget, ...config }),
     };
     saveToLocalStorage(settings);
     saveToDatabase(settings);
