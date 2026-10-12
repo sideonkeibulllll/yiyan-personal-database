@@ -8,6 +8,7 @@ import { CapacitorSQLite, SQLiteConnection, SQLiteDBConnection } from '@capacito
 import type { Entry, Tag, Group, Link, Settings, Attachment } from '@/types';
 import type { IDatabaseService, ChatSession } from './types';
 import { getSharedSQLiteConnection } from './sharedSQLite';
+import { splitKeywords, escapeLike, rankAndFilter, relevanceScore } from '@/utils/searchRank';
 
 class NativeDatabaseService implements IDatabaseService {
   private sqlite: SQLiteConnection;
@@ -293,12 +294,18 @@ class NativeDatabaseService implements IDatabaseService {
     let sql = 'SELECT DISTINCT e.* FROM entries e';
     const conditions: string[] = [];
     const values: unknown[] = [];
+    // 搜索词：空格分隔为多关键词（AND 语义），命中范围 = 正文 / 来源 / 补充
+    const keywords = keyword ? splitKeywords(keyword) : [];
     if (options?.tagIds && options.tagIds.length > 0) {
       sql += ' JOIN entry_tags et ON e.id = et.entry_id';
       conditions.push(`et.tag_id IN (${options.tagIds.map(() => '?').join(',')})`);
       values.push(...options.tagIds);
     }
-    if (keyword) { conditions.push('e.content LIKE ?'); values.push(`%${keyword}%`); }
+    for (const kw of keywords) {
+      const pat = `%${escapeLike(kw)}%`;
+      conditions.push("(e.content LIKE ? ESCAPE '\\' OR e.source LIKE ? ESCAPE '\\' OR e.supplement LIKE ? ESCAPE '\\')");
+      values.push(pat, pat, pat);
+    }
     if (options?.isStarred !== undefined) { conditions.push('e.is_starred = ?'); values.push(options.isStarred ? 1 : 0); }
     // v2.10.0: 「修改时间」范围筛选（按 updated_at，闭区间）
     if (options?.modifiedAfter !== undefined) { conditions.push('e.updated_at >= ?'); values.push(options.modifiedAfter); }
@@ -321,6 +328,18 @@ class NativeDatabaseService implements IDatabaseService {
       }
     }
     await this.fillAttachmentsForEntries(entries);
+    // 相关度排序（有搜索词时）：位置 / 次数 / 字段权重 + 星标与新鲜度微调
+    if (keywords.length > 0) {
+      return rankAndFilter(entries, e => relevanceScore(
+        [
+          { text: e.content, weight: 100 },
+          { text: e.source, weight: 45 },
+          { text: e.supplement, weight: 40 },
+        ],
+        keywords,
+        { starred: e.isStarred, timestamp: e.updatedAt || e.createdAt },
+      ));
+    }
     return entries;
   }
 

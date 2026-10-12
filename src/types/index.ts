@@ -334,6 +334,14 @@ export interface Settings {
   cloud?: CloudConfig;
 }
 
+/** 工具调用上限配置（chat agent loop） */
+export interface ToolOptions {
+  /** agent loop 最多循环轮数（每轮 = 一次模型请求 + 一批工具执行；默认 12，范围 1~30） */
+  maxIterations?: number;
+  /** 单次对话累计工具调用次数预算（默认 20，范围 1~100） */
+  maxToolCalls?: number;
+}
+
 export interface AIConfig {
   apiKey: string;
   model: string;
@@ -341,6 +349,8 @@ export interface AIConfig {
   isDeepSeek: boolean;
   deepSeekOptions: DeepSeekOptions;
   prompts: PromptConfig;
+  /** 工具调用上限（设置页「AI 配置」可调） */
+  toolOptions?: ToolOptions;
   /** 智能标签功能配置 */
   smartTag?: SmartTagOptions;
   /** 智能组建议配置 */
@@ -633,6 +643,10 @@ export const DEFAULT_SETTINGS: Settings = {
       maxTokens: 2000,
     },
     prompts: DEFAULT_PROMPTS,
+    toolOptions: {
+      maxIterations: 12,
+      maxToolCalls: 20,
+    },
     smartTag: {
       recentTagCount: 50,
       tagSuggestPrompt: `你是一个标签建议助手。请分析以下文本内容，结合用户最近使用过的标签，推荐 {minTags}-{maxTags} 个合适的标签。

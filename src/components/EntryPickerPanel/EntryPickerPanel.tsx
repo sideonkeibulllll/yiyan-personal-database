@@ -233,24 +233,25 @@ export function EntryPickerPanel({
         const db = await getDatabase();
         let results: Entry[];
         if (searchQuery.trim()) {
+          // 有关键词：保留 searchEntries 的相关度排序（不再被「最近使用」覆盖）
           results = await db.searchEntries(searchQuery.trim());
         } else {
           results = await db.getAllEntries();
+          // === 修复 2：浏览全部时按最近复制和最近长按排序 ===
+          const COPY_KEY = '__yiyan_last_copy_at__';
+          const MENU_KEY = '__yiyan_last_menu_at__';
+          const copyMap: Record<string, number> = (window as any)[COPY_KEY] || {};
+          const menuMap: Record<string, number> = (window as any)[MENU_KEY] || {};
+          results.sort((a, b) => {
+            const aCopy = copyMap[a.id] || 0;
+            const bCopy = copyMap[b.id] || 0;
+            const aMenu = menuMap[a.id] || 0;
+            const bMenu = menuMap[b.id] || 0;
+            const aMax = Math.max(aCopy, aMenu, a.lastUsedAt || 0);
+            const bMax = Math.max(bCopy, bMenu, b.lastUsedAt || 0);
+            return bMax - aMax;
+          });
         }
-        // === 修复 2：按最近复制和最近长按排序 ===
-        const COPY_KEY = '__yiyan_last_copy_at__';
-        const MENU_KEY = '__yiyan_last_menu_at__';
-        const copyMap: Record<string, number> = (window as any)[COPY_KEY] || {};
-        const menuMap: Record<string, number> = (window as any)[MENU_KEY] || {};
-        results.sort((a, b) => {
-          const aCopy = copyMap[a.id] || 0;
-          const bCopy = copyMap[b.id] || 0;
-          const aMenu = menuMap[a.id] || 0;
-          const bMenu = menuMap[b.id] || 0;
-          const aMax = Math.max(aCopy, aMenu, a.lastUsedAt || 0);
-          const bMax = Math.max(bCopy, bMenu, b.lastUsedAt || 0);
-          return bMax - aMax;
-        });
         setDataEntries(results);
         setDataTodos([]);
       }

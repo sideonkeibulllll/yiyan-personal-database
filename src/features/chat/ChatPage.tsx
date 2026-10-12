@@ -177,6 +177,10 @@ export function ChatPage() {
   const confirmResolversRef = useRef<Map<string, (approved: boolean) => void>>(new Map());
   // v2.6.3: 本次发送是否实际消费了「预备列表」（决定发送后是否清除）
   const consumedPreparedRef = useRef(false);
+  /** isLoading 镜像：供滚动 effect 在不额外触发重跑的前提下读取最新值 */
+  const isLoadingRef = useRef(false);
+  /** sessions 最新镜像：流式回调需要在 React state 之外读取/更新最新值 */
+  const sessionsRef = useRef<ChatSession[]>(sessions);
 
   const currentSession = sessions.find(s => s.id === currentSessionId) || null;
   const messages = currentSession?.messages ?? [];
@@ -224,10 +228,9 @@ export function ChatPage() {
     let mounted = true;
     loadChatSessions().then(dbSessions => {
       if (mounted && dbSessions.length > 0) {
-        setSessions(prev => {
-          // 合并：DB 数据优先，如果没有就用现有的
-          return dbSessions.length > 0 ? dbSessions as unknown as ChatSession[] : prev;
-        });
+        const next = dbSessions as unknown as ChatSession[];
+        sessionsRef.current = next;
+        setSessions(next);
       }
     }).catch(() => {});
     return () => { mounted = false; };
@@ -304,9 +307,14 @@ export function ChatPage() {
     setThinkingEffort(s?.thinkingEffort ?? 'high');
   }, [currentSessionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 自动滚动
+  // isLoading 镜像同步（供滚动 effect 读取，不进入其依赖数组）
+  useEffect(() => { isLoadingRef.current = isLoading; }, [isLoading]);
+
+  // 自动滚动：流式期间用 'auto'（smooth 动画会与高频 chunk 更新排队打架、追不上），
+  // 非流式（发消息、加载历史、切换会话）仍用 smooth
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    messagesEndRef.current?.scrollIntoView({ behavior: isLoadingRef.current ? 'auto' : 'smooth' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages]);
 
   // textarea 自适应
@@ -317,24 +325,66 @@ export function ChatPage() {
     ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
   }, [input]);
 
-  const persistSessions = useCallback((next: ChatSession[]) => {
-    setSessions(next);
-    // 异步写入数据库（不阻塞 UI）
-    next.forEach(s => saveSessionDb(s).catch(() => {}));
+  /* === 会话持久化调度器（性能修复）===
+   * 旧实现里流式响应的每个 chunk 都会触发一次 saveSessionDb：整个会话 JSON
+   * 序列化 → Capacitor bridge → SQLite 写入，且没有任何节流。对话越长单次
+   * 写入越贵，请求在后台堆积，导致流式卡顿、内存膨胀乃至 WebView OOM 闪退。
+   * 现在分两档：
+   * - 'debounced'（流式高频路径）：写库合并为最多 1s 一次；
+   * - 'immediate'（低频路径：用户消息、tool 结果、错误、停止等）：立即落库。
+   * 流式结束/停止时（finally）统一 flush 定稿。
+   */
+  const persistTimerRef = useRef<number | null>(null);
+  const persistPendingRef = useRef(new Map<string, ChatSession>());
+
+  const flushPendingSessionWrites = useCallback(() => {
+    if (persistTimerRef.current !== null) {
+      clearTimeout(persistTimerRef.current);
+      persistTimerRef.current = null;
+    }
+    if (persistPendingRef.current.size === 0) return;
+    const writes = Array.from(persistPendingRef.current.values());
+    persistPendingRef.current.clear();
+    writes.forEach(s => saveSessionDb(s).catch(() => {}));
   }, []);
 
-  const updateSessionMessages = useCallback((sessionId: string, msgs: ChatMessage[]) => {
-    setSessions(prev => {
-      const next = prev.map(s => s.id === sessionId
-        ? { ...s, messages: msgs, updatedAt: Date.now() }
-        : s
-      );
-      // 异步写入数据库
-      const updated = next.find(s => s.id === sessionId);
-      if (updated) saveSessionDb(updated).catch(() => {});
-      return next;
+  const scheduleSessionWrite = useCallback((session: ChatSession) => {
+    persistPendingRef.current.set(session.id, session); // 同会话后写覆盖前写
+    if (persistTimerRef.current !== null) return;       // 已有定时器，等它统一 flush
+    persistTimerRef.current = window.setTimeout(() => flushPendingSessionWrites(), 1000);
+  }, [flushPendingSessionWrites]);
+
+  const persistSessions = useCallback((next: ChatSession[]) => {
+    sessionsRef.current = next;
+    setSessions(next);
+    // 异步写入数据库（不阻塞 UI）；同会话挂起的旧版本直接丢弃，防旧覆盖新
+    next.forEach(s => {
+      persistPendingRef.current.delete(s.id);
+      saveSessionDb(s).catch(() => {});
     });
   }, []);
+
+  /**
+   * 更新某会话的消息列表。
+   * @param mode 写库模式：'debounced' 用于流式高频路径（最多 1s 合并一次）；
+   *             默认 'immediate' 立即落库（低频路径）。
+   */
+  const updateSessionMessages = useCallback((sessionId: string, msgs: ChatMessage[], mode: 'debounced' | 'immediate' = 'immediate') => {
+    const next = sessionsRef.current.map(s => s.id === sessionId
+      ? { ...s, messages: msgs, updatedAt: Date.now() }
+      : s
+    );
+    sessionsRef.current = next;
+    setSessions(next);
+    const updated = next.find(s => s.id === sessionId);
+    if (!updated) return;
+    if (mode === 'debounced') {
+      scheduleSessionWrite(updated);
+    } else {
+      persistPendingRef.current.delete(sessionId); // 立即写为准，丢弃挂起旧版本
+      saveSessionDb(updated).catch(() => {});
+    }
+  }, [scheduleSessionWrite]);
 
   /* === MCP 工具激活：对话级持久化 ===
    * 把当前启用的工具列表同时写到 state（即时 UI 反馈）与 session.mcpEnabledTools（持久化）。
@@ -659,6 +709,13 @@ export function ChatPage() {
     let currentMsgs = [...updatedMessages, aiPlaceholder];
     updateSessionMessages(sessionId, currentMsgs);
 
+    /* === 流式状态（提升到 try 外：异常处理需要读取最新值）=== */
+    let loopDisplayMsgs = [...currentMsgs];   // UI 显示的消息序列（含初始 AI 占位）
+    let streamTargetId = aiMsgId;             // 当前正在流式写入的消息 id（每轮更新）
+    let uiFlushTimer: number | null = null;   // 流式 UI 合帧定时器
+    let fullContent = '';                     // 当前轮累计正文
+    let fullReasoning = '';                   // 当前轮累计思维链
+
     try {
       // e.3: 构建系统提示 — 仅使用 chatSoul。
       // 隐私说明：不再无条件注入最近条目。笔记内容只在用户显式勾选
@@ -674,12 +731,13 @@ export function ChatPage() {
       // 注意：MCP 工具已改为通过 OpenAI 原生 tools 字段下发，不再注入提示词。
       // 用户启用的工具在下方 buildToolsPayload() 中转为结构化 schema 传给 API。
 
-      // MCP 搜索结果注入
+      // MCP 搜索结果注入（每条截断为摘要，防止长条目霸占上下文）
       if (session.mcpSearchResults && session.mcpSearchResults.length > 0) {
+        const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n) + '…' : s);
         const resultsText = session.mcpSearchResults.map((r, i) =>
-          `[${i + 1}] (ID: ${r.entryId}) ${r.content}${r.source ? ` [来源: ${r.source}]` : ''}`
+          `[${i + 1}] (ID: ${r.entryId}) ${clip(r.content, 300)}${r.source ? ` [来源: ${r.source}]` : ''}`
         ).join('\n');
-        systemPrompt += `\n\n## 用户选择的记忆库条目\n用户选择了以下条目作为对话上下文：\n${resultsText}\n`;
+        systemPrompt += `\n\n## 用户选择的记忆库条目\n用户选择了以下条目作为对话上下文（每条为摘要）：\n${resultsText}\n`;
       }
 
       // === 修复 3：注入 pickerSelectedIds 作为对话上下文 ===
@@ -747,6 +805,32 @@ export function ChatPage() {
         }
       }
 
+      // === 历史 tool 消息压缩（上下文优化）===
+      // 历史中的 tool 结果（尤其是搜索结果 JSON）会永久留在上下文里、每轮重发。
+      // 只保留「最后一组」工具结果全文，更早的压缩为一行摘要 ——
+      // 防止旧的搜索结果挤占上下文、干扰模型判断。
+      let lastToolIdx = -1;
+      for (let i = updatedMessages.length - 1; i >= 0; i--) {
+        if (updatedMessages[i].role === 'tool') { lastToolIdx = i; break; }
+      }
+      let keepToolFrom = lastToolIdx;
+      if (lastToolIdx >= 0) {
+        while (keepToolFrom > 0 && updatedMessages[keepToolFrom - 1].role === 'tool') keepToolFrom--;
+      }
+      const compactToolContent = (content: string): string => {
+        let total: number | undefined;
+        try {
+          const parsed = JSON.parse(content);
+          const d = parsed?.data;
+          if (typeof d?.total === 'number') total = d.total;
+          else if (Array.isArray(d?.results)) total = d.results.length;
+        } catch { /* 非 JSON，忽略 */ }
+        return JSON.stringify({
+          compacted: true,
+          note: `该历史工具结果已压缩以节省上下文${typeof total === 'number' ? `（当时共 ${total} 条）` : ''}`,
+        });
+      };
+
       // 构建 API 消息，保留 assistant 的 tool_calls 与 tool 消息的 tool_call_id，
       // 以便 agent loop 第二轮起模型能看到完整上下文。
       const buildApiMessage = (m: ChatMessage): ApiMessage | null => {
@@ -780,7 +864,14 @@ export function ChatPage() {
       // 与其 tool 结果切开 → 服务端 400 "role 'tool' must be a response to a preceding
       // message with 'tool_calls'"（且孤儿永久留档 → 后续每条都报错）。
       const apiHistory = updatedMessages
-        .map(buildApiMessage)
+        .map((m, idx) => {
+          const built = buildApiMessage(m);
+          // 更早的 tool 消息压缩（只保留最后一组全文；tool_call_id 配对不受影响）
+          if (built && m.role === 'tool' && idx < keepToolFrom) {
+            built.content = compactToolContent(m.content);
+          }
+          return built;
+        })
         .filter(Boolean) as ApiMessage[];
       const apiMessages: ApiMessage[] = [
         { role: 'system', content: systemPrompt },
@@ -803,13 +894,38 @@ export function ChatPage() {
       abortRef.current = abortCtrl;
 
       let loopMessages = [...apiMessages];       // 传给 API 的消息序列（循环中追加）
-      let loopDisplayMsgs = [...currentMsgs];   // UI 显示的消息序列（含初始 AI 占位）
       let currentAiMsgId = aiMsgId;
 
-      // 循环轮数上限（防止无限循环）
-      const MAX_ITERATIONS = 12;
-      // 本次对话累计工具调用次数预算（批量场景比「轮数」更合理）
-      const MAX_TOOL_CALLS = 20;
+      /* === 流式合帧器（性能修复）===
+       * 旧实现对每个 SSE chunk 立即 setState + 落库。现在 chunk 只累积字符串，
+       * UI 更新最多 ~100ms 合并一次（渲染频率恒定，不随 chunk 频率暴涨）。
+       * 每轮流式结束/异常时 flush 定稿，写库走调度器的 debounced 通道。
+       * （uiFlushTimer / streamTargetId / fullContent / fullReasoning 已在 try 外声明）
+       */
+      const applyStreamContent = () => {
+        loopDisplayMsgs = loopDisplayMsgs.map(m =>
+          m.id === streamTargetId ? { ...m, content: fullContent, reasoningContent: fullReasoning } : m
+        );
+      };
+      const flushStreamUi = () => {
+        if (uiFlushTimer !== null) { clearTimeout(uiFlushTimer); uiFlushTimer = null; }
+        applyStreamContent();
+        updateSessionMessages(sessionId, loopDisplayMsgs, 'debounced');
+      };
+      const scheduleStreamUi = () => {
+        if (uiFlushTimer !== null) return;
+        uiFlushTimer = window.setTimeout(() => {
+          uiFlushTimer = null;
+          applyStreamContent();
+          updateSessionMessages(sessionId, loopDisplayMsgs, 'debounced');
+        }, 100);
+      };
+
+      // 循环轮数上限 / 工具调用总预算（读取设置页配置，含越界兜底）
+      const rawIter = Number(settings.ai.toolOptions?.maxIterations);
+      const rawCalls = Number(settings.ai.toolOptions?.maxToolCalls);
+      const MAX_ITERATIONS = Number.isFinite(rawIter) && rawIter >= 1 ? Math.min(30, Math.floor(rawIter)) : 12;
+      const MAX_TOOL_CALLS = Number.isFinite(rawCalls) && rawCalls >= 1 ? Math.min(100, Math.floor(rawCalls)) : 20;
       let iteration = 0;
       let toolCallBudget = MAX_TOOL_CALLS;
       let hitLimit = false;
@@ -845,8 +961,9 @@ export function ChatPage() {
       while (iteration < MAX_ITERATIONS) {
         iteration++;
 
-        let fullContent = '';
-        let fullReasoning = '';
+        fullContent = '';
+        fullReasoning = '';
+        streamTargetId = currentAiMsgId;
         const toolCallAcc = new Map<number, ResolvedToolCall>();
 
         const { finishReason } = await streamChatCompletion(
@@ -860,17 +977,11 @@ export function ChatPage() {
           {
             onReasoning: (chunk) => {
               fullReasoning += chunk;
-              loopDisplayMsgs = loopDisplayMsgs.map(m =>
-                m.id === currentAiMsgId ? { ...m, reasoningContent: fullReasoning } : m
-              );
-              updateSessionMessages(sessionId, loopDisplayMsgs);
+              scheduleStreamUi();
             },
             onContent: (chunk) => {
               fullContent += chunk;
-              loopDisplayMsgs = loopDisplayMsgs.map(m =>
-                m.id === currentAiMsgId ? { ...m, content: fullContent } : m
-              );
-              updateSessionMessages(sessionId, loopDisplayMsgs);
+              scheduleStreamUi();
             },
             onToolCall: (deltas) => {
               accumulateToolCallDeltas(toolCallAcc, deltas);
@@ -878,6 +989,9 @@ export function ChatPage() {
           },
           abortCtrl.signal,
         );
+
+        // 本轮流式内容定稿（把合帧中未落地的增量先写进消息，再处理工具/结束）
+        flushStreamUi();
 
         // 检测是否触发了工具调用
         const resolvedToolCalls = Array.from(toolCallAcc.values()).filter(
@@ -1011,24 +1125,35 @@ export function ChatPage() {
         updateSessionMessages(sessionId, currentMsgs);
       }
     } catch (error) {
+      // 取消未落地的流式合帧：把已流出的内容并入消息（随后统一落库）
+      if (uiFlushTimer !== null) { clearTimeout(uiFlushTimer); uiFlushTimer = null; }
+      loopDisplayMsgs = loopDisplayMsgs.map(m =>
+        m.id === streamTargetId
+          ? { ...m, content: fullContent || m.content, reasoningContent: fullReasoning || m.reasoningContent }
+          : m
+      );
       if ((error as Error).name === 'AbortError') {
-        currentMsgs = currentMsgs.map(m =>
-          m.id === aiMsgId
+        loopDisplayMsgs = loopDisplayMsgs.map(m =>
+          m.id === streamTargetId
             ? { ...m, content: m.content || '(已停止)' }
             : m
         );
-        updateSessionMessages(sessionId, currentMsgs);
+        updateSessionMessages(sessionId, loopDisplayMsgs, 'immediate');
       } else {
         const errMsg: ChatMessage = {
-          id: aiMsgId,
+          id: streamTargetId,
           role: 'assistant',
           content: `⚠️ 出错了：${(error as Error).message}`,
           timestamp: Date.now(),
         };
-        currentMsgs = currentMsgs.map(m => m.id === aiMsgId ? errMsg : m);
-        updateSessionMessages(sessionId, currentMsgs);
+        loopDisplayMsgs = loopDisplayMsgs.map(m => m.id === streamTargetId ? errMsg : m);
+        updateSessionMessages(sessionId, loopDisplayMsgs, 'immediate');
       }
+      currentMsgs = loopDisplayMsgs;
     } finally {
+      // 停止/结束时：清理未落地的合帧 + 把挂起的写库全部落盘（定稿）
+      if (uiFlushTimer !== null) { clearTimeout(uiFlushTimer); uiFlushTimer = null; }
+      flushPendingSessionWrites();
       setIsLoading(false);
       abortRef.current = null;
       // === 修复 3：发送后清除预备状态（按钮状态结束）===
@@ -1133,6 +1258,12 @@ export function ChatPage() {
     setMcpPickerOpen(prev => !prev);
   }, []);
 
+  // 稳定的面板开合回调（供 memo 化子组件使用，避免每次渲染产生新引用）
+  const handleOpenSidebar = useCallback(() => setSidebarOpen(true), []);
+  const handleCloseSidebar = useCallback(() => setSidebarOpen(false), []);
+  const handleToggleModelPicker = useCallback(() => setModelPickerOpen(prev => !prev), []);
+  const handleCloseMcpPicker = useCallback(() => setMcpPickerOpen(false), []);
+
   // 切换思考模式开关（v2.11.0: 对话级持久化）
   const handleToggleThinking = useCallback(() => {
     const next = !thinkingEnabled;
@@ -1166,7 +1297,7 @@ export function ChatPage() {
         onCancelRename={handleCancelRename}
         onForkSession={handleForkSession}
         onNewChat={handleNewChat}
-        onCloseSidebar={() => setSidebarOpen(false)}
+        onCloseSidebar={handleCloseSidebar}
       />
 
       {isMobile && sidebarOpen && (
@@ -1187,13 +1318,13 @@ export function ChatPage() {
 
         <ChatHeader
           isMobile={isMobile}
-          onOpenSidebar={() => setSidebarOpen(true)}
+          onOpenSidebar={handleOpenSidebar}
           title={currentSession?.title || 'Chat'}
           currentSessionModel={currentSession?.model || ''}
           currentModel={currentModel}
           modelOptions={modelOptions}
           modelPickerOpen={modelPickerOpen}
-          onToggleModelPicker={() => setModelPickerOpen(!modelPickerOpen)}
+          onToggleModelPicker={handleToggleModelPicker}
           onSelectModel={handleSelectModel}
           balanceInfo={balanceInfo}
           onQueryBalance={handleQueryBalance}
@@ -1246,7 +1377,7 @@ export function ChatPage() {
           mcpPickerOpen={mcpPickerOpen}
           mcpActiveTools={mcpActiveTools}
           onToggleMcp={handleToggleMcp}
-          onCloseMcpPicker={() => setMcpPickerOpen(false)}
+          onCloseMcpPicker={handleCloseMcpPicker}
           onSetMcpTools={handleSetSessionMcpTools}
           mcpSearchCount={currentSession?.mcpSearchResults?.length ?? 0}
           onOpenMcpResults={handleOpenMcpResults}

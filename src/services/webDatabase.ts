@@ -4,6 +4,7 @@
  */
 import type { Entry, Tag, Group, Link, Settings, Attachment } from '@/types';
 import type { IDatabaseService, ChatSession } from './types';
+import { splitKeywords, rankAndFilter, relevanceScore } from '@/utils/searchRank';
 
 /** Simple content hash for deduplication */
 function simpleContentHash(content: string): string {
@@ -72,9 +73,18 @@ class WebDatabaseService implements IDatabaseService {
 
   async searchEntries(keyword: string, options?: { tagIds?: string[]; isStarred?: boolean; hasAttachment?: boolean; modifiedAfter?: number; modifiedBefore?: number }): Promise<Entry[]> {
     let entries = this.getEntriesFromStorage();
+    // 搜索词：空格分隔为多关键词（AND 语义），命中范围 = 正文 / 来源 / 补充
+    const keywords = keyword ? splitKeywords(keyword) : [];
 
-    if (keyword) {
-      entries = entries.filter(e => e.content.toLowerCase().includes(keyword.toLowerCase()));
+    if (keywords.length > 0) {
+      const lowered = keywords.map(k => k.toLowerCase());
+      entries = entries.filter(e =>
+        lowered.every(kw =>
+          e.content.toLowerCase().includes(kw) ||
+          (e.source && e.source.toLowerCase().includes(kw)) ||
+          (e.supplement && e.supplement.toLowerCase().includes(kw))
+        )
+      );
     }
 
     if (options?.tagIds && options.tagIds.length > 0) {
@@ -99,6 +109,18 @@ class WebDatabaseService implements IDatabaseService {
       entries = entries.filter(e => (e.attachments && e.attachments.length > 0) === options.hasAttachment);
     }
 
+    // 相关度排序（有搜索词时）：位置 / 次数 / 字段权重 + 星标与新鲜度微调
+    if (keywords.length > 0) {
+      return rankAndFilter(entries, e => relevanceScore(
+        [
+          { text: e.content, weight: 100 },
+          { text: e.source, weight: 45 },
+          { text: e.supplement, weight: 40 },
+        ],
+        keywords,
+        { starred: e.isStarred, timestamp: e.updatedAt || e.createdAt },
+      ));
+    }
     return entries;
   }
 

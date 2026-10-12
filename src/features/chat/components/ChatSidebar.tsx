@@ -3,6 +3,7 @@
  *
  * 状态与业务逻辑由父组件 ChatPage 持有，本组件只负责展示。
  */
+import { memo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { IconPlus, IconEdit, IconCopy, IconTrash, IconClose, IconExit } from '@/components/icons';
 import { formatDate } from '../chatUtils';
@@ -28,7 +29,7 @@ interface ChatSidebarProps {
   onCloseSidebar: () => void;
 }
 
-export function ChatSidebar({
+export const ChatSidebar = memo(function ChatSidebar({
   sessions,
   currentSessionId,
   sidebarOpen,
@@ -128,4 +129,4 @@ export function ChatSidebar({
       </div>
     </aside>
   );
-}
+});

@@ -37,6 +37,7 @@ import { useTagStore } from '@/stores/tagStore';
 import { useTodoStore } from '@/stores/todoStore';
 import { useTodoTagStore } from '@/stores/todoTagStore';
 import type { Entry, Todo, Link, TodoTag } from '@/types';
+import { splitKeywords, rankAndFilter, relevanceScore } from '@/utils/searchRank';
 
 /** 把单值 / 数组参数统一成字符串数组 */
 function toStringArray(value: unknown): string[] {
@@ -137,15 +138,15 @@ export const BRIDGE_TOOLS: BridgeTool[] = [
   },
   {
     name: 'search_cards',
-    description: '搜索记忆库中的卡片。支持关键字搜索、按标签筛选、按组筛选。返回匹配结果列表。',
+    description: '搜索记忆库中的卡片。支持关键字搜索、按标签筛选、按组筛选，结果按相关度排序。建议提供具体关键词；无任何条件的空搜索不会返回结果。',
     parameters: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: '搜索关键字（可选，留空则返回全部）' },
+        query: { type: 'string', description: '搜索关键字（可选但强烈建议提供；多个词用空格分隔，需全部命中）' },
         tags: { type: 'array', items: { type: 'string' }, description: '按标签名筛选（可选）' },
         groupName: { type: 'string', description: '按组名筛选（可选）' },
         isStarred: { type: 'boolean', description: '只看星标（可选）' },
-        limit: { type: 'number', description: '返回数量上限，默认20' },
+        limit: { type: 'number', description: '返回数量上限，默认 8，最大 20' },
       },
       required: [],
     },
@@ -238,15 +239,15 @@ export const BRIDGE_TOOLS: BridgeTool[] = [
   },
   {
     name: 'search_todos',
-    description: '搜索待办事项。支持关键字搜索、按标签筛选、按日期筛选、按完成状态筛选。',
+    description: '搜索待办事项。支持关键字搜索、按标签筛选、按日期筛选、按完成状态筛选，结果按相关度排序。建议提供具体关键词；仅想了解今天安排时请用 get_today_todos。',
     parameters: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: '搜索关键字（可选）' },
+        query: { type: 'string', description: '搜索关键字（可选但强烈建议；多个词用空格分隔，需全部命中）' },
         tags: { type: 'array', items: { type: 'string' }, description: '按标签名筛选（可选）' },
         folderDate: { type: 'string', description: '按日期筛选，YYYY-MM-DD 格式（可选）' },
         isDone: { type: 'boolean', description: '按完成状态筛选（可选）' },
-        limit: { type: 'number', description: '返回数量上限，默认20' },
+        limit: { type: 'number', description: '返回数量上限，默认 10，最大 30' },
       },
       required: [],
     },
@@ -393,14 +394,14 @@ export const BRIDGE_TOOLS: BridgeTool[] = [
   // === 备忘录 MCP 工具 ===
   {
     name: 'search_memos',
-    description: '搜索备忘录。支持关键字搜索标题与正文，返回备忘录列表（含 ID、标题、摘要、更新时间）。',
+    description: '搜索备忘录。支持关键字搜索标题与正文，返回备忘录列表（含 ID、标题、摘要、更新时间）。必须提供搜索关键词。',
     parameters: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: '搜索关键字（可选，留空返回全部）' },
-        limit: { type: 'number', description: '返回数量上限，默认10' },
+        query: { type: 'string', description: '搜索关键字（必填；多个词用空格分隔，需全部命中）' },
+        limit: { type: 'number', description: '返回数量上限，默认 6，最大 20' },
       },
-      required: [],
+      required: ['query'],
     },
   },
   {
@@ -715,7 +716,19 @@ export async function executeToolCall(
         const isStarred = args.isStarred as boolean | undefined;
         const groupName = String(args.groupName || '');
         const tagNames = (args.tags as string[]) || [];
-        const limit = Number(args.limit) || 20;
+        const limit = Math.min(20, Math.max(1, Number(args.limit) || 8));
+
+        // 空条件不再放行全量（避免把整个库塞进上下文）
+        if (!query && !groupName && isStarred === undefined && tagNames.length === 0) {
+          return {
+            success: true,
+            data: {
+              total: 0,
+              results: [],
+              message: '未提供搜索条件。请提供 query（关键词）或 tags / groupName / isStarred 进行筛选。',
+            },
+          };
+        }
 
         let results: Entry[] = [];
 
@@ -730,7 +743,7 @@ export async function executeToolCall(
           }
         }
 
-        // 关键字搜索
+        // 关键字搜索（db.searchEntries 已带相关度排序：位置 / 次数 / 字段权重 + 星标与新鲜度微调）
         if (query) {
           const searched = await db.searchEntries(query, {
             isStarred: isStarred,
@@ -759,21 +772,26 @@ export async function executeToolCall(
           }
         }
 
+        const total = results.length;
+        const page = results.slice(0, limit);
         return {
           success: true,
           data: {
-            total: results.length,
-            results: await Promise.all(results.slice(0, limit).map(async e => {
+            total,
+            returned: page.length,
+            results: await Promise.all(page.map(async e => {
               const links = await db.getLinksByEntryId(e.id);
               return {
                 id: e.id,
-                content: e.content.length > 200 ? e.content.slice(0, 200) + '…' : e.content,
-                source: e.source,
+                content: e.content.length > 120 ? e.content.slice(0, 120) + '…' : e.content,
+                source: e.source || undefined,
                 isStarred: e.isStarred,
-                createdAt: e.createdAt,
                 linkCount: links.length,
               };
             })),
+            ...(total > page.length
+              ? { hint: `仅返回最相关的 ${page.length} 条（共匹配 ${total} 条）。需要更多结果时，请用更具体的关键词或 tags 筛选。` }
+              : {}),
           },
         };
       }
@@ -1502,15 +1520,31 @@ export async function executeToolCall(
         const folderDate = String(args.folderDate || '');
         const isDone = args.isDone as boolean | undefined;
         const tagNames = (args.tags as string[]) || [];
-        const limit = Number(args.limit) || 20;
+        const limit = Math.min(30, Math.max(1, Number(args.limit) || 10));
+
+        // 空条件不再放行全量（查看今天安排请用 get_today_todos）
+        if (!query && !folderDate && isDone === undefined && tagNames.length === 0) {
+          return {
+            success: true,
+            data: {
+              total: 0,
+              results: [],
+              message: '未提供搜索条件。请提供 query（关键词）或 folderDate / tags / isDone 筛选；查看今天的安排请用 get_today_todos。',
+            },
+          };
+        }
 
         let results = await todoDb.getAllTodos();
 
-        if (query) {
-          const lower = query.toLowerCase();
+        // 多关键词（空格分隔，AND 语义）+ 相关度排序（与全站搜索一致）
+        const keywords = query ? splitKeywords(query) : [];
+        if (keywords.length > 0) {
+          const lowered = keywords.map(k => k.toLowerCase());
           results = results.filter((t: Todo) =>
-            t.title.toLowerCase().includes(lower) ||
-            (t.note && t.note.toLowerCase().includes(lower))
+            lowered.every(kw =>
+              t.title.toLowerCase().includes(kw) ||
+              (t.note && t.note.toLowerCase().includes(kw))
+            )
           );
         }
         if (folderDate) {
@@ -1529,42 +1563,85 @@ export async function executeToolCall(
           }
         }
 
+        const total = results.length;
+        const ranked = keywords.length > 0
+          ? rankAndFilter(results, (t: Todo) => relevanceScore(
+              [
+                { text: t.title, weight: 100 },
+                { text: t.note || undefined, weight: 55 },
+              ],
+              keywords,
+              { timestamp: t.updatedAt || t.createdAt },
+            ))
+          : results;
+        const page = ranked.slice(0, limit);
+
         return {
           success: true,
           data: {
-            total: results.length,
-            results: results.slice(0, limit).map((t: Todo) => ({
+            total,
+            returned: page.length,
+            results: page.map((t: Todo) => ({
               id: t.id,
               title: t.title,
-              note: t.note ? (t.note.length > 100 ? t.note.slice(0, 100) + '…' : t.note) : null,
+              note: t.note ? (t.note.length > 80 ? t.note.slice(0, 80) + '…' : t.note) : null,
               folderDate: t.folderDate,
               startTime: t.startTime || null,
               status: t.status,
             })),
+            ...(total > page.length
+              ? { hint: `仅返回最相关的 ${page.length} 条（共匹配 ${total} 条）。需要更多结果时，请用更具体的关键词或筛选条件。` }
+              : {}),
           },
         };
       }
 
       case 'search_memos': {
-        const query = String(args.query || '').toLowerCase();
-        const limit = Number(args.limit) || 10;
+        const query = String(args.query || '');
+        const limit = Math.min(20, Math.max(1, Number(args.limit) || 6));
+        const keywords = splitKeywords(query);
+
+        if (keywords.length === 0) {
+          return {
+            success: true,
+            data: { total: 0, results: [], message: '请提供搜索关键词（query）。' },
+          };
+        }
+
         const all = await getAllMemos();
-        const filtered = query
-          ? all.filter(m =>
-              m.title.toLowerCase().includes(query) ||
-              m.content.toLowerCase().includes(query))
-          : all;
+        const lowered = keywords.map(k => k.toLowerCase());
+        const filtered = all.filter(m =>
+          lowered.every(kw =>
+            m.title.toLowerCase().includes(kw) ||
+            m.content.toLowerCase().includes(kw)
+          )
+        );
+        // 多关键词（AND 语义）+ 相关度排序（标题权重高于正文）
+        const ranked = rankAndFilter(filtered, m => relevanceScore(
+          [
+            { text: m.title, weight: 100 },
+            { text: m.content, weight: 70 },
+          ],
+          keywords,
+          { timestamp: m.updatedAt },
+        ));
+        const total = ranked.length;
+        const page = ranked.slice(0, limit);
+
         return {
           success: true,
           data: {
-            total: filtered.length,
-            results: filtered.slice(0, limit).map(m => ({
+            total,
+            returned: page.length,
+            results: page.map(m => ({
               id: m.id,
               title: m.title,
-              excerpt: m.content.replace(/\s+/g, ' ').slice(0, 120),
+              excerpt: m.content.replace(/\s+/g, ' ').slice(0, 100),
               updatedAt: m.updatedAt,
             })),
-            message: `找到 ${filtered.length} 篇备忘录`,
+            ...(total > page.length
+              ? { hint: `仅返回最相关的 ${page.length} 篇（共匹配 ${total} 篇）。需要更多时请用更具体的关键词。` }
+              : {}),
           },
         };
       }

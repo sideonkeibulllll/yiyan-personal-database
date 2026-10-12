@@ -14,6 +14,12 @@ interface AiPanelProps {
   markDirty: (field: string) => void;
 }
 
+/** 数值兜底：非法输入回落默认值，并夹紧到 [min, max] */
+function clampNumber(v: number, min: number, max: number, fallback: number): number {
+  if (!Number.isFinite(v)) return fallback;
+  return Math.max(min, Math.min(max, Math.floor(v)));
+}
+
 export function AiPanel({ markDirty }: AiPanelProps) {
   const settings = useSettingsStore(state => state.settings);
   const updateAIConfig = useSettingsStore(state => state.updateAIConfig);
@@ -340,6 +346,41 @@ export function AiPanel({ markDirty }: AiPanelProps) {
           rows={5}
         />
         <span className="form-hint">用于定制 AI 对话时的角色性格和回复风格</span>
+      </div>
+
+      {/* 工具调用上限（chat agent loop 预算） */}
+      <div className="settings-subsection-title">工具调用</div>
+      <div className="form-group">
+        <label className="form-label">最大循环轮数</label>
+        <input
+          type="number"
+          className="form-input glass"
+          value={settings.ai.toolOptions?.maxIterations ?? 12}
+          onChange={e => { updateAIConfig({
+            toolOptions: {
+              ...settings.ai.toolOptions,
+              maxIterations: clampNumber(parseInt(e.target.value), 1, 30, 12),
+            },
+          }); markDirty('ai.toolOptions.maxIterations'); }}
+          min="1" max="30" step="1"
+        />
+        <span className="form-hint">单次对话最多几轮「模型请求 + 工具执行」（默认 12，范围 1~30）</span>
+      </div>
+      <div className="form-group">
+        <label className="form-label">最大工具调用次数</label>
+        <input
+          type="number"
+          className="form-input glass"
+          value={settings.ai.toolOptions?.maxToolCalls ?? 20}
+          onChange={e => { updateAIConfig({
+            toolOptions: {
+              ...settings.ai.toolOptions,
+              maxToolCalls: clampNumber(parseInt(e.target.value), 1, 100, 20),
+            },
+          }); markDirty('ai.toolOptions.maxToolCalls'); }}
+          min="1" max="100" step="1"
+        />
+        <span className="form-hint">单次对话累计的工具调用总预算（默认 20，范围 1~100）</span>
       </div>
 
       {/* f: 数据选择器配置 */}

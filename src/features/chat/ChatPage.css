@@ -1317,6 +1317,23 @@
   color: #c084fc;
 }
 
+/* === tool 消息返回详情折叠（长 JSON 默认收起，避免刷屏） === */
+.tool-json-fold > summary {
+  cursor: pointer;
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  user-select: none;
+  padding: 2px 0;
+}
+.tool-json-fold > summary:hover {
+  color: var(--color-text-secondary);
+}
+.tool-json-fold .message-content {
+  max-height: 280px;
+  overflow: auto;
+  margin-top: 6px;
+}
+
 /* === v3: 工具调用徽章成功/失败 === */
 .tool-call-badge.success {
   color: #10b981;

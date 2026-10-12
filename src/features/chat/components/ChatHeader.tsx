@@ -3,6 +3,7 @@
  *
  * 状态与业务逻辑由父组件 ChatPage 持有，本组件只负责展示。
  */
+import { memo } from 'react';
 import { IconMenu, IconChevronDown, IconTool, IconShare, IconTrash, IconClose } from '@/components/icons';
 
 interface BalanceInfo {
@@ -36,7 +37,7 @@ interface ChatHeaderProps {
   onExportSelected: () => void;
 }
 
-export function ChatHeader({
+export const ChatHeader = memo(function ChatHeader({
   isMobile,
   onOpenSidebar,
   title,
@@ -171,4 +172,4 @@ export function ChatHeader({
       )}
     </header>
   );
-}
+});

@@ -8,6 +8,7 @@ import { CapacitorSQLite, SQLiteConnection, SQLiteDBConnection } from '@capacito
 import type { Todo, TodoTag, TodoTemplate, TodoTemplateItem, TodoSearchTimeFilter } from '@/types';
 import type { ITodoDatabaseService } from './types';
 import { getSharedSQLiteConnection } from './sharedSQLite';
+import { splitKeywords, escapeLike, rankAndFilter, relevanceScore } from '@/utils/searchRank';
 
 class NativeTodoDatabaseService implements ITodoDatabaseService {
   private sqlite: SQLiteConnection;
@@ -357,9 +358,12 @@ class NativeTodoDatabaseService implements ITodoDatabaseService {
       values.push(now, retentionMs);
     }
 
-    if (keyword) {
-      sql += ' AND title LIKE ?';
-      values.push(`%${keyword}%`);
+    // 搜索词：空格分隔为多关键词（AND 语义），命中范围 = 标题 / 备注
+    const keywords = keyword ? splitKeywords(keyword) : [];
+    for (const kw of keywords) {
+      const pat = `%${escapeLike(kw)}%`;
+      sql += " AND (title LIKE ? ESCAPE '\\' OR note LIKE ? ESCAPE '\\')";
+      values.push(pat, pat);
     }
     sql += ' ORDER BY created_at DESC';
 
@@ -370,6 +374,17 @@ class NativeTodoDatabaseService implements ITodoDatabaseService {
       for (const row of result.values) {
         todos.push(await this.rowToTodo(row, tagMap.get(row.id as string) || []));
       }
+    }
+    // 相关度排序（有搜索词时）：位置 / 次数 / 字段权重 + 新鲜度微调
+    if (keywords.length > 0) {
+      return rankAndFilter(todos, t => relevanceScore(
+        [
+          { text: t.title, weight: 100 },
+          { text: t.note || undefined, weight: 55 },
+        ],
+        keywords,
+        { timestamp: t.updatedAt || t.createdAt },
+      ));
     }
     return todos;
   }

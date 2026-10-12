@@ -4,6 +4,7 @@
  */
 import type { Todo, TodoTag, TodoTemplate, TodoTemplateItem, TodoSearchTimeFilter } from '@/types';
 import type { ITodoDatabaseService } from './types';
+import { splitKeywords, rankAndFilter, relevanceScore } from '@/utils/searchRank';
 
 class WebTodoDatabaseService implements ITodoDatabaseService {
   private isInitialized = false;
@@ -106,9 +107,25 @@ class WebTodoDatabaseService implements ITodoDatabaseService {
       filtered = todos.filter(t => t.deletedAt && (now - t.deletedAt) > retentionMs);
     }
 
-    if (keyword) {
-      const lower = keyword.toLowerCase();
-      filtered = filtered.filter(t => t.title.toLowerCase().includes(lower));
+    // 搜索词：空格分隔为多关键词（AND 语义），命中范围 = 标题 / 备注
+    const keywords = keyword ? splitKeywords(keyword) : [];
+    if (keywords.length > 0) {
+      const lowered = keywords.map(k => k.toLowerCase());
+      filtered = filtered.filter(t =>
+        lowered.every(kw =>
+          t.title.toLowerCase().includes(kw) ||
+          (t.note && t.note.toLowerCase().includes(kw))
+        )
+      );
+      // 相关度排序（位置 / 次数 / 字段权重 + 新鲜度微调）
+      return rankAndFilter(filtered, t => relevanceScore(
+        [
+          { text: t.title, weight: 100 },
+          { text: t.note || undefined, weight: 55 },
+        ],
+        keywords,
+        { timestamp: t.updatedAt || t.createdAt },
+      ));
     }
 
     return filtered.sort((a, b) => b.createdAt - a.createdAt);
