@@ -143,10 +143,9 @@ export const useTodoStore = create<TodoStore>((set, get) => ({
   restoreTodo: async (id) => {
     const db = await getTodoDatabase();
     await db.restoreTodo(id);
-    set(state => ({
-      todos: state.todos.map(t => t.id === id ? { ...t, deletedAt: undefined } : t),
-      dateTodos: state.dateTodos.map(t => t.id === id ? { ...t, deletedAt: undefined } : t),
-    }));
+    // v3.2.1：恢复的待办不在内存数组里（删除时已被 filter 移除），map 是空操作。
+    // 必须从库里重新拉全量，保证首页/待办列表立即看到恢复后的待办。
+    await get().refreshAllTodos();
   },
 
   permanentDeleteTodo: async (id) => {

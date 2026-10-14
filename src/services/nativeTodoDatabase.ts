@@ -234,13 +234,18 @@ class NativeTodoDatabaseService implements ITodoDatabaseService {
     const fields: string[] = [];
     const values: unknown[] = [];
     if (updates.title !== undefined) { fields.push('title = ?'); values.push(updates.title); }
-    if (updates.note !== undefined) { fields.push('note = ?'); values.push(updates.note); }
+    // ⚠️ v3.2.1 修复：可空字段用「key 存在即更新」判断，值为 undefined 时写入 SQL NULL，
+    // 对齐 web 端语义（web 端对象展开 + JSON 序列化天然丢掉 undefined 字段）。
+    // 原来用 `!== undefined` 过滤，导致「传 undefined 表示清空」的调用被静默跳过、
+    // SQL 根本不生成对应片段 —— 表现为「回收站恢复无效（deleted_at 没清）」
+    // 「取消完成后 completed_at 残留」「清空备注 / 清空时间保存无效」。
+    if ('note' in updates) { fields.push('note = ?'); values.push(updates.note ?? null); }
     if (updates.status !== undefined) { fields.push('status = ?'); values.push(updates.status); }
-    if (updates.startTime !== undefined) { fields.push('start_time = ?'); values.push(updates.startTime); }
-    if (updates.endTime !== undefined) { fields.push('end_time = ?'); values.push(updates.endTime); }
+    if ('startTime' in updates) { fields.push('start_time = ?'); values.push(updates.startTime ?? null); }
+    if ('endTime' in updates) { fields.push('end_time = ?'); values.push(updates.endTime ?? null); }
     if (updates.isToday !== undefined) { fields.push('is_today = ?'); values.push(updates.isToday ? 1 : 0); }
-    if (updates.completedAt !== undefined) { fields.push('completed_at = ?'); values.push(updates.completedAt); }
-    if (updates.deletedAt !== undefined) { fields.push('deleted_at = ?'); values.push(updates.deletedAt); }
+    if ('completedAt' in updates) { fields.push('completed_at = ?'); values.push(updates.completedAt ?? null); }
+    if ('deletedAt' in updates) { fields.push('deleted_at = ?'); values.push(updates.deletedAt ?? null); }
     if (updates.folderDate !== undefined) { fields.push('folder_date = ?'); values.push(updates.folderDate); }
     fields.push('updated_at = ?'); values.push(Date.now()); values.push(id);
     await this.db.run(`UPDATE todos SET ${fields.join(', ')} WHERE id = ?`, values);
