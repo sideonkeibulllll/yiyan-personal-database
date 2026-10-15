@@ -342,6 +342,9 @@ export interface ToolOptions {
   maxToolCalls?: number;
 }
 
+/** Soul 人格档案最大字数（设置页编辑、AI 写入、怕了么弹框共用上限） */
+export const SOUL_MAX_CHARS = 4000;
+
 export interface AIConfig {
   apiKey: string;
   model: string;
@@ -361,6 +364,11 @@ export interface AIConfig {
   glm?: GLMConfig;
   /** Chat Soul 提示词（对话系统提示词） */
   chatSoul?: string;
+  /**
+   * Soul 人格档案（v3.3.0）：记录用户本人（性格/处境/偏好等），
+   * 聊天与「怕了么」都会读取；AI 只能提议更新（update_soul 工具），用户确认后才写入。
+   */
+  soul?: string;
   /** 数据选择器「最近」勾选项数量 */
   recentPickerCount?: number;
   /** 当前激活的付费提供商（v2.5.0 新增，缺省按 isDeepSeek 推导） */
@@ -714,6 +722,7 @@ export const DEFAULT_SETTINGS: Settings = {
       },
     },
     chatSoul: '',
+    soul: '',
     recentPickerCount: 30,
   },
   context: {
@@ -876,4 +885,17 @@ export interface WorryRecord {
   updatedAt: number;
   /** 软删除标记 */
   isDeleted?: number;
+}
+
+/**
+ * 「怕了么」里 AI 提议的 Soul 人格档案更新（v3.3.0）。
+ * 反转牌生成时若 AI 附带 soulUpdate，会**挂到「怕了么」主页等待确认**；
+ * 确认后才写入 settings.ai.soul，否则永不更新；新的建议直接覆盖旧的。
+ */
+export interface WorryPendingSoul {
+  /** AI 写的更新理由（为什么更新、改了什么，给用户看） */
+  reason: string;
+  /** 更新后的档案全文（整体替换） */
+  content: string;
+  createdAt: number;
 }

@@ -9,9 +9,11 @@
  * - 一次调和 = 一条记录；进行中的记录 status='draft' 用于断点续接，
  *   同一时间最多保留一条 draft。
  */
-import type { WorryRecord } from '@/types';
+import type { WorryRecord, WorryPendingSoul } from '@/types';
 
 const STORAGE_KEY = 'yiyan_worries_v1';
+/** v3.3.0：AI 提议的 Soul 档案更新（挂到「怕了么」主页等待确认；同样不进任何备份） */
+const SOUL_PENDING_KEY = 'yiyan_worry_soul_pending_v1';
 
 function genId(): string {
   return `worry_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -139,4 +141,47 @@ export async function deleteWorry(id: string): Promise<void> {
     all[idx] = { ...all[idx], isDeleted: 1, updatedAt: Date.now() };
     writeAll(all);
   }
+}
+
+// ============ Soul 更新建议（v3.3.0，主页待确认）============
+
+/** 读取待确认的 Soul 更新建议（无 / 损坏 → null） */
+export function getPendingSoulUpdate(): WorryPendingSoul | null {
+  try {
+    const raw = localStorage.getItem(SOUL_PENDING_KEY);
+    if (!raw) return null;
+    const p = JSON.parse(raw);
+    if (!p || typeof p.content !== 'string' || !p.content.trim()) return null;
+    return {
+      reason: String(p.reason ?? ''),
+      content: String(p.content),
+      createdAt: Number(p.createdAt) || Date.now(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 保存一条待确认的 Soul 更新建议。
+ * **直接覆盖旧的待确认请求**（同一时间只保留最新一条，主人明确要求）。
+ */
+export function savePendingSoulUpdate(update: { reason: string; content: string }): void {
+  try {
+    const payload: WorryPendingSoul = {
+      reason: update.reason,
+      content: update.content,
+      createdAt: Date.now(),
+    };
+    localStorage.setItem(SOUL_PENDING_KEY, JSON.stringify(payload));
+  } catch (err) {
+    console.error('[worryDatabase] 待确认 Soul 更新写入失败:', err);
+  }
+}
+
+/** 清除待确认的 Soul 更新建议（用户已处理或主动放弃） */
+export function clearPendingSoulUpdate(): void {
+  try {
+    localStorage.removeItem(SOUL_PENDING_KEY);
+  } catch { /* 忽略 */ }
 }

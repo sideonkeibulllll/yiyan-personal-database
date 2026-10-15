@@ -30,6 +30,7 @@ import {
   formatToolResultForUI,
   DANGEROUS_TOOLS,
   describeToolAction,
+  describeToolPreview,
   MEMORY_TOOLS,
   type ResolvedToolCall,
 } from '@/services/chatBridge';
@@ -223,16 +224,48 @@ export function ChatPage() {
   // v2.5.1: 模型选项按 provider 分组（跨提供商可选）
   const modelOptions = useMemo(() => buildModelOptions(settings.ai), [settings.ai]);
 
-  // 首次挂载：从数据库异步加载对话历史（覆盖 localStorage 同步初始值）
+  // 首次挂载：从数据库异步加载对话历史（覆盖 localStorage 同步初始值）；
+  // 并消费「怕了么 → 聊天」来料草稿（v3.3.0：新建对话 + 预填输入框，不自动发送）
   useEffect(() => {
     let mounted = true;
-    loadChatSessions().then(dbSessions => {
-      if (mounted && dbSessions.length > 0) {
-        const next = dbSessions as unknown as ChatSession[];
+    const consumePendingDraft = (base: ChatSession[]) => {
+      const pending = (window as any).__yiyan_pending_chat_draft__ as { text?: string } | undefined;
+      if (!pending || typeof pending.text !== 'string' || !pending.text.trim()) return;
+      delete (window as any).__yiyan_pending_chat_draft__;
+      // 与「新建对话」同语义：复用已有空会话，否则新建一个
+      const emptySession = base.find(s => s.messages.length === 0);
+      if (emptySession) {
+        sessionsRef.current = base;
+        setSessions(base);
+        setCurrentSessionId(emptySession.id);
+      } else {
+        const newSession: ChatSession = {
+          id: createId(),
+          title: '新对话',
+          messages: [],
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        };
+        const next = [newSession, ...base];
         sessionsRef.current = next;
         setSessions(next);
+        setCurrentSessionId(newSession.id);
+        saveSessionDb(newSession).catch(() => {});
       }
-    }).catch(() => {});
+      setInput(pending.text);
+    };
+    loadChatSessions().then(dbSessions => {
+      if (!mounted) return;
+      let base = sessionsRef.current;
+      if (dbSessions.length > 0) {
+        base = dbSessions as unknown as ChatSession[];
+        sessionsRef.current = base;
+        setSessions(base);
+      }
+      consumePendingDraft(base);
+    }).catch(() => {
+      if (mounted) consumePendingDraft(sessionsRef.current);
+    });
     return () => { mounted = false; };
   }, []);
 
@@ -722,6 +755,16 @@ export function ChatPage() {
       // 「发送最近条目」时，通过下方 context 注入流程加入，避免误发隐私数据。
       let systemPrompt = settings.ai.chatSoul || '你是一个友好的AI助手。';
 
+      // v3.3.0: Soul 人格档案注入（用户自维护、明确供 AI 阅读；有内容才注入）
+      const soulDoc = (settings.ai.soul || '').trim();
+      if (soulDoc) {
+        systemPrompt += `\n\n## 我的人格档案（Soul）\n以下是用户为自己维护的人格档案；把它当作你早已了解的背景，自然地结合运用，不要刻意提及或复述：\n${soulDoc}`;
+      }
+      // 仅当本对话启用了 Soul 工具组时，才告知 AI 具备「提议更新」的能力（对话级开关）
+      if (mcpEnabled && ((session.mcpEnabledTools ?? mcpActiveTools) || []).includes('update_soul')) {
+        systemPrompt += `\n\n（本次对话你具备更新用户「Soul 人格档案」的能力：若出现值得长期写进档案的重要信息，可调用 update_soul 提议更新，系统会先请用户确认；没有重要信息就不要提议。）`;
+      }
+
       // v2.11.0: 长期记忆注入（仅当开关打开；全本地数据、用户可在设置页管理）
       if (settings.context.enableLongTermMemory) {
         const memorySection = getMemoryPromptSection();
@@ -936,12 +979,13 @@ export function ChatPage() {
         return new Promise<boolean>(resolve => {
           const confirmId = createId();
           const summary = describeToolAction(toolName, args);
+          const preview = describeToolPreview(toolName, args);
           const confirmMsg: ChatMessage = {
             id: createId(),
             role: 'assistant',
             content: '',
             timestamp: Date.now(),
-            confirmRequest: { id: confirmId, toolName, summary, status: 'pending' },
+            confirmRequest: { id: confirmId, toolName, summary, preview, status: 'pending' },
           };
           confirmResolversRef.current.set(confirmId, (approved: boolean) => {
             confirmResolversRef.current.delete(confirmId);

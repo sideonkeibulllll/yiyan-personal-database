@@ -9,6 +9,7 @@
  * - 待办标签：列出/创建/改名/改色/删除（独立标签池，颜色可自定义）
  * - 备忘录：搜索/读取/新建/追加/覆写/删除
  * - 数据连线
+ * - Soul 人格档案（v3.3.0）：AI 提议更新（确认卡片展示理由+全文，用户确认后写入）
  *
  * 批量操作：写操作参数统一升级为 ID 数组（`entryIds[]` / `todoIds[]` / `memoIds[]`），
  * 同时兼容旧的单值参数（`entryId` / `todoId`）。
@@ -36,7 +37,9 @@ import { useEntryStore } from '@/stores/entryStore';
 import { useTagStore } from '@/stores/tagStore';
 import { useTodoStore } from '@/stores/todoStore';
 import { useTodoTagStore } from '@/stores/todoTagStore';
+import { useSettingsStore } from '@/stores/settingsStore';
 import type { Entry, Todo, Link, TodoTag } from '@/types';
+import { SOUL_MAX_CHARS } from '@/types';
 import { splitKeywords, rankAndFilter, relevanceScore } from '@/utils/searchRank';
 
 /** 把单值 / 数组参数统一成字符串数组 */
@@ -508,6 +511,20 @@ export const BRIDGE_TOOLS: BridgeTool[] = [
       required: ['memoryIds'],
     },
   },
+  // === Soul 人格档案 MCP 工具（v3.3.0）===
+  // 修改用户的 Soul 人格档案；属重要操作，执行前由界面层弹确认卡片（展示理由 + 更新后全文）。
+  {
+    name: 'update_soul',
+    description: '提议更新「Soul 人格档案」——用户本人的长期人格档案（记录性格、处境、偏好等，聊天与「怕了么」都会读取）。当你发现关于用户的长期信息有重要更新时使用（新的偏好、处境变化、重要认知等）；没有重要信息就不要调用，不要频繁提议。这是重要操作：系统会先向用户弹出确认卡片（展示你给出的 reason 与更新后的全文），用户确认后才会写入，用户取消则不生效。content 必须是「更新后的档案完整全文」（整体替换，不是增量补丁），在原文基础上自然修订。',
+    parameters: {
+      type: 'object',
+      properties: {
+        reason: { type: 'string', description: '为什么更新、改了什么（一两句话，会展示给用户看）' },
+        content: { type: 'string', description: '更新后的档案完整全文（整体替换）' },
+      },
+      required: ['reason', 'content'],
+    },
+  },
 ];
 
 /** 所有工具名称 */
@@ -532,9 +549,17 @@ export const MEMO_TOOLS = [
 export const MEMORY_TOOLS = [
   'save_ai_memory', 'list_ai_memories', 'update_ai_memory', 'delete_ai_memory',
 ];
+/** Soul 人格档案工具（v3.3.0）：走 MCP 组勾选（与数据卡片/待办/备忘录同机制） */
+export const SOUL_TOOLS = [
+  'update_soul',
+];
 
-/** 需要用户确认后才执行的危险工具（删除类） */
-export const DANGEROUS_TOOLS = new Set(['delete_card', 'delete_todo', 'delete_memo', 'delete_todo_tag', 'delete_ai_memory']);
+/**
+ * 需要用户确认后才执行的重要/危险工具。
+ * 删除类：展示「将删除什么」摘要；
+ * update_soul：展示 AI 给出的更新理由 + 更新后全文预览（见 describeToolPreview）。
+ */
+export const DANGEROUS_TOOLS = new Set(['delete_card', 'delete_todo', 'delete_memo', 'delete_todo_tag', 'delete_ai_memory', 'update_soul']);
 
 /** 工具名 → 中文显示名（用于确认弹窗） */
 export const TOOL_DISPLAY_NAMES: Record<string, string> = {
@@ -549,6 +574,7 @@ export const TOOL_DISPLAY_NAMES: Record<string, string> = {
   append_memo: '追加备忘录', update_memo: '覆写备忘录', delete_memo: '删除备忘录',
   save_ai_memory: '记住一条信息', list_ai_memories: '查看长期记忆',
   update_ai_memory: '修改长期记忆', delete_ai_memory: '删除长期记忆',
+  update_soul: '更新人格档案',
 };
 
 /**
@@ -561,6 +587,10 @@ export function describeToolAction(toolName: string, args: Record<string, unknow
     case 'delete_todo': return `删除 ${count(args.todoIds)} 条待办`;
     case 'delete_memo': return `删除 ${count(args.memoIds)} 篇备忘录`;
     case 'delete_ai_memory': return `删除 ${count(args.memoryIds ?? args.memoryId)} 条长期记忆`;
+    case 'update_soul': {
+      const reason = String(args.reason || '').trim();
+      return reason ? `更新你的人格档案（Soul）。理由：${reason}` : '更新你的人格档案（Soul）';
+    }
     case 'delete_todo_tag': {
       const names = [
         ...toStringArray(args.tagNames),
@@ -572,6 +602,18 @@ export function describeToolAction(toolName: string, args: Record<string, unknow
     }
     default: return `执行 ${TOOL_DISPLAY_NAMES[toolName] || toolName}`;
   }
+}
+
+/**
+ * 生成确认卡片的「内容预览」（可选；界面层折叠展示）。
+ * 目前仅 update_soul 使用：展示更新后的人格档案全文。
+ */
+export function describeToolPreview(toolName: string, args: Record<string, unknown>): string | undefined {
+  if (toolName === 'update_soul') {
+    const content = String(args.content ?? '').trim();
+    return content ? content.slice(0, SOUL_MAX_CHARS) : undefined;
+  }
+  return undefined;
 }
 
 /**
@@ -1818,6 +1860,23 @@ export async function executeToolCall(
             deletedCount: deleted.length,
             notFoundIds: notFound.length > 0 ? notFound : undefined,
             message: `已删除 ${deleted.length} 条长期记忆`,
+          },
+        };
+      }
+
+      case 'update_soul': {
+        // 注意：本 case 只有在用户于确认卡片点击「确认执行」后才会被走到
+        //（update_soul 已加入 DANGEROUS_TOOLS，ChatPage 会先 requestConfirm）。
+        const content = String(args.content ?? '').trim();
+        if (!content) return { success: false, error: 'content 不能为空' };
+        const clipped = content.slice(0, SOUL_MAX_CHARS);
+        useSettingsStore.getState().updateAIConfig({ soul: clipped });
+        return {
+          success: true,
+          data: {
+            updated: true,
+            length: clipped.length,
+            message: '已更新 Soul 人格档案',
           },
         };
       }

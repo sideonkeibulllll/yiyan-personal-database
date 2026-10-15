@@ -1,7 +1,7 @@
 /**
  * 「怕了么」工具函数与常量
  */
-import type { WorryNormalizedProbs, WorryOutcomeType } from '@/types';
+import type { WorryNormalizedProbs, WorryOutcomeType, WorryRecord } from '@/types';
 
 /** 翻卡顺序（与参考视频一致：最坏 → 最好 → 普通） */
 export const FLIP_ORDER: WorryOutcomeType[] = ['worst', 'best', 'normal'];
@@ -57,4 +57,25 @@ export function normalizeProbs(raw: { worst: number; normal: number; best: numbe
   const result: WorryNormalizedProbs = { worst: 0, normal: 0, best: 0 };
   for (const s of scaled) result[s.key] = s.floor;
   return result;
+}
+
+/**
+ * 拼「新建对话继续聊」预填到聊天输入框的上下文文本（v3.3.0）。
+ * 第一人称、用户口吻；只填不发送，用户可自行编辑后再发。
+ */
+export function buildContinueChatDraft(record: WorryRecord, scoreAfter: number): string {
+  const lines: string[] = [
+    '【来自「怕了么」的一次调和，我想就这件事继续聊聊】',
+    `我担心的是：${record.content}`,
+    `担心程度：${record.scoreBefore}/10 → 现在 ${scoreAfter}/10`,
+  ];
+  const worst = record.outcomes.find(o => o.type === 'worst');
+  if (worst?.text) {
+    const prob = record.normalizedProbs?.worst;
+    lines.push(`我最怕的结局：${worst.text}${prob != null ? `（我估计约 ${prob}%）` : ''}`);
+  }
+  if (record.flipPoints.length > 0) {
+    lines.push(`即使真的发生，我也会获得：${record.flipPoints.map(p => p.title).join('、')}`);
+  }
+  return lines.join('\n');
 }

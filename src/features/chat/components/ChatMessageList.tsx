@@ -88,6 +88,12 @@ const ChatMessageItem = memo(function ChatMessageItem({
           <div className={`confirm-card ${confirm.status}`}>
             <div className="confirm-card-head">⚠️ 需要你确认</div>
             <div className="confirm-card-summary">{confirm.summary}</div>
+            {confirm.preview && (
+              <details className="confirm-card-preview">
+                <summary className="confirm-card-preview-summary">查看更新后的全文</summary>
+                <pre className="confirm-card-preview-text">{confirm.preview}</pre>
+              </details>
+            )}
             <div className="confirm-card-tool">工具：{confirm.toolName}</div>
             {confirm.status === 'pending' ? (
               <div className="confirm-card-actions">

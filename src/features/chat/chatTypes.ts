@@ -32,6 +32,8 @@ export interface ChatMessage {
     toolName: string;
     summary: string;
     status: 'pending' | 'approved' | 'rejected';
+    /** 可选：确认内容的预览（如 Soul 新版全文），在卡片内折叠展示 */
+    preview?: string;
   };
 }
 

@@ -8,7 +8,7 @@ import { useSettingsStore } from '@/stores/settingsStore';
 import { MemoryManagerPanel } from './MemoryManagerPanel';
 import { listMemories } from '@/services/aiMemory';
 import type { AIProviderId, ProviderEntry } from '@/types';
-import { AI_PROVIDER_ORDER, PROVIDER_PRESETS, getProviderPreset } from '@/types';
+import { AI_PROVIDER_ORDER, PROVIDER_PRESETS, getProviderPreset, SOUL_MAX_CHARS } from '@/types';
 
 interface AiPanelProps {
   markDirty: (field: string) => void;
@@ -346,6 +346,27 @@ export function AiPanel({ markDirty }: AiPanelProps) {
           rows={5}
         />
         <span className="form-hint">用于定制 AI 对话时的角色性格和回复风格</span>
+      </div>
+
+      {/* v3.3.0: Soul 人格档案 */}
+      <div className="settings-subsection-title">Soul 人格档案</div>
+      <div className="form-group">
+        <label className="form-label">我的人格档案（Soul）</label>
+        <textarea
+          className="form-input glass"
+          style={{ minHeight: '120px', fontFamily: 'monospace', fontSize: '12px', resize: 'vertical' }}
+          value={settings.ai.soul ?? ''}
+          onChange={e => {
+            updateAIConfig({ soul: e.target.value.slice(0, SOUL_MAX_CHARS) });
+            markDirty('ai.soul');
+          }}
+          placeholder={'记录你自己：你是怎样的人、在意什么、最近的生活处境、喜欢的相处方式……\n（聊天与「怕了么」都会读取这份档案；AI 只能提议修改，必须经你确认后才会写入）'}
+          rows={6}
+        />
+        <span className="form-hint">
+          供 AI 了解你本人（与上面的 Chat Soul 不同——那份定义 AI 的角色风格）；当前{' '}
+          {(settings.ai.soul ?? '').length} / {SOUL_MAX_CHARS} 字
+        </span>
       </div>
 
       {/* 工具调用上限（chat agent loop 预算） */}

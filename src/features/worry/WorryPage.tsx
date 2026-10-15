@@ -8,9 +8,16 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { WorryRecord } from '@/types';
-import { createDraft, deleteWorry, getCompletedWorries, getDraft } from '@/services/worryDatabase';
-import { buildWorryModelOptions, getWorryModelValue, setWorryModelValue } from '@/services/worryAI';
+import type { WorryRecord, WorryPendingSoul } from '@/types';
+import {
+  createDraft, deleteWorry, getCompletedWorries, getDraft,
+  getPendingSoulUpdate, clearPendingSoulUpdate,
+} from '@/services/worryDatabase';
+import {
+  buildWorryModelOptions, getWorryModelValue, setWorryModelValue,
+  getWorryThinking, setWorryThinking, getWorrySoulEnabled, setWorrySoulEnabled,
+} from '@/services/worryAI';
+import type { WorryThinkingConfig, WorryThinkingEffort } from '@/services/worryAI';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { BottomNav } from '@/components/BottomNav';
 import { TrendChart } from './components/TrendChart';
@@ -49,11 +56,18 @@ export function WorryPage() {
   // 模型选择（在「开始」页设置；流程中不可改）
   const [modelValue, setModelValue] = useState(() => getWorryModelValue());
   const modelOptions = useMemo(() => buildWorryModelOptions(aiConfig), [aiConfig]);
+  // v3.3.0: 深度思考配置 + 启用 soul 记忆（均在「开始」页设置）
+  const [thinking, setThinking] = useState<WorryThinkingConfig>(() => getWorryThinking());
+  const [soulEnabled, setSoulEnabled] = useState(() => getWorrySoulEnabled());
+  // v3.3.0: 待确认的 Soul 更新建议（AI 挂到本页，确认后才写入）
+  const [pendingSoul, setPendingSoul] = useState<WorryPendingSoul | null>(null);
+  const updateAIConfig = useSettingsStore(s => s.updateAIConfig);
 
   const reload = useCallback(async () => {
     const [d, all] = await Promise.all([getDraft(), getCompletedWorries()]);
     setDraft(d);
     setRecords(all);
+    setPendingSoul(getPendingSoulUpdate());
   }, []);
 
   useEffect(() => {
@@ -67,6 +81,43 @@ export function WorryPage() {
     setConfirmNew(false);
     navigate('/worries/flow');
   }, [draft, navigate]);
+
+  // ===== v3.3.0：深度思考 / soul 记忆 / 待确认卡 =====
+
+  /** 切换深度思考开关（即改即存，下一次生成生效） */
+  const handleToggleThinking = useCallback(() => {
+    const next = { ...thinking, enabled: !thinking.enabled };
+    setThinking(next);
+    setWorryThinking(next);
+  }, [thinking]);
+
+  /** 切换思考强度（High / MAX） */
+  const handleSetEffort = useCallback((effort: WorryThinkingEffort) => {
+    const next = { ...thinking, effort };
+    setThinking(next);
+    setWorryThinking(next);
+  }, [thinking]);
+
+  /** 切换「启用 soul 记忆」 */
+  const handleToggleSoul = useCallback(() => {
+    const next = !soulEnabled;
+    setSoulEnabled(next);
+    setWorrySoulEnabled(next);
+  }, [soulEnabled]);
+
+  /** 待确认 Soul 更新：同意 → 写入人格档案并清除待确认 */
+  const handleAcceptSoul = useCallback(() => {
+    if (!pendingSoul) return;
+    updateAIConfig({ soul: pendingSoul.content });
+    clearPendingSoulUpdate();
+    setPendingSoul(null);
+  }, [pendingSoul, updateAIConfig]);
+
+  /** 待确认 Soul 更新：保持不变 → 直接清除（不写入，永不更新） */
+  const handleDeclineSoul = useCallback(() => {
+    clearPendingSoulUpdate();
+    setPendingSoul(null);
+  }, []);
 
   const hasDraft = isMeaningfulDraft(draft);
   // 趋势曲线用时间正序、最近 20 次
@@ -97,6 +148,28 @@ export function WorryPage() {
         {/* ===== 开始 ===== */}
         {tab === 'use' && (
           <div className="worry-use-section">
+            {/* v3.3.0: AI 提议的 Soul 档案更新（挂在这里等待确认；确认后才写入） */}
+            {pendingSoul && (
+              <div className="worry-soul-pending-card">
+                <div className="worry-soul-pending-head">AI 想更新你的人格档案</div>
+                {pendingSoul.reason && (
+                  <p className="worry-soul-pending-reason">理由：{pendingSoul.reason}</p>
+                )}
+                <details className="worry-soul-pending-details">
+                  <summary>查看更新后的全文</summary>
+                  <pre className="worry-soul-pending-text">{pendingSoul.content}</pre>
+                </details>
+                <div className="worry-two-buttons">
+                  <button className="worry-btn-secondary" onClick={handleDeclineSoul}>
+                    保持不变
+                  </button>
+                  <button className="worry-btn-primary" onClick={handleAcceptSoul}>
+                    同意更新
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div className="worry-intro-card">
               <p className="worry-intro-line">担心的时候，脑子里的画面往往比现实可怕。</p>
               <p className="worry-intro-line">用两个小步骤，帮自己看个清楚——大约只要两分钟。</p>
@@ -114,6 +187,58 @@ export function WorryPage() {
                 }}
               />
             </div>
+
+            {/* v3.3.0: 深度思考开关 + 思考强度（生成时生效，流程中不可改） */}
+            <div className="worry-model-row">
+              <span className="worry-model-row-label">深度思考</span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={thinking.enabled}
+                className={`worry-switch ${thinking.enabled ? 'on' : ''}`}
+                onClick={handleToggleThinking}
+                title="深度思考模式（更慢但更细致）"
+              >
+                <span className="worry-switch-knob" />
+              </button>
+            </div>
+            {thinking.enabled && (
+              <div className="worry-model-row">
+                <span className="worry-model-row-label">思考强度</span>
+                <div className="worry-effort-seg">
+                  {(['high', 'max'] as const).map(e => (
+                    <button
+                      key={e}
+                      type="button"
+                      className={`worry-effort-btn ${thinking.effort === e ? 'active' : ''}`}
+                      onClick={() => handleSetEffort(e)}
+                    >
+                      {e === 'max' ? 'MAX' : 'High'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* v3.3.0: 启用 soul 记忆（注入人格档案；反转牌时 AI 可提议更新） */}
+            <div className="worry-model-row">
+              <span className="worry-model-row-label">启用 soul 记忆</span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={soulEnabled}
+                className={`worry-switch ${soulEnabled ? 'on' : ''}`}
+                onClick={handleToggleSoul}
+                title="生成时参考你的人格档案"
+              >
+                <span className="worry-switch-knob" />
+              </button>
+            </div>
+            {soulEnabled && (
+              <p className="worry-soul-toggle-hint">
+                生成时会参考你的人格档案（在「设置 → AI 配置」里编辑）；反转牌时 AI 可提议更新档案，建议会先挂到本页等你确认。
+              </p>
+            )}
 
             {hasDraft ? (
               <>

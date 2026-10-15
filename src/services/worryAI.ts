@@ -8,16 +8,30 @@
  * - 选中哪个模型即用**那个提供商**的 baseURL / apiKey，无需回设置页
  *
  * 调用策略：
- * - 30s 超时（AbortController 真实中断请求）
+ * - 超时（AbortController 真实中断请求）：普通 30s / 深度思考 90s
  * - 流式优先（SSE，onProgress 回报「已生成字数」）；流式失败自动降级为非流式重试
  * - JSON 解析容错链：剥 ``` 围栏 → 截取首尾大括号 → parse → 字段校验
  * - 配置类错误不重试
+ *
+ * v3.3.0 新增：
+ * - 深度思考配置（键 `yiyan_worry_thinking_v1`，默认开）：thinking.enabled + reasoning_effort，
+ *   语义与 Chat 页一致（开思考时不传 temperature / max_tokens）；「已生成字数」计数含思维链
+ * - Soul 人格档案（settings.ai.soul）：开关 `yiyan_worry_soul_v1` 打开且档案非空时注入两个 prompt；
+ *   反转牌生成额外授权 AI 输出 soulUpdate（由调用方挂到主页待确认，确认后才写入）
  */
 import type { AIConfig, AIProviderId, WorryFlipPoint } from '@/types';
-import { AI_PROVIDER_ORDER, GLM_FREE_MODEL_POOL, PROVIDER_PRESETS } from '@/types';
+import { AI_PROVIDER_ORDER, GLM_FREE_MODEL_POOL, PROVIDER_PRESETS, SOUL_MAX_CHARS } from '@/types';
 import { useSettingsStore } from '@/stores/settingsStore';
 
+/** 非思考模式超时 */
 const REQUEST_TIMEOUT_MS = 30_000;
+/** 深度思考模式超时（思考期可能长时间不吐正文） */
+const THINKING_TIMEOUT_MS = 90_000;
+
+/** 当前生效的请求超时（按深度思考开关取值） */
+function currentTimeoutMs(): number {
+  return getWorryThinking().enabled ? THINKING_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
+}
 /** 单条结局文案上限（防模型话痨） */
 const MAX_OUTCOME_LEN = 220;
 /** 收获点标题 / 说明上限 */
@@ -88,6 +102,78 @@ function parseModelValue(value: string): { providerId: AIProviderId | null; mode
   const pid = value.slice(0, idx) as AIProviderId;
   const model = value.slice(idx + MODEL_SEP.length);
   return { providerId: pid, model };
+}
+
+// ============ 深度思考配置（v3.3.0，与 Chat 页同款语义）============
+
+/** 思考强度（与 Chat 页一致） */
+export type WorryThinkingEffort = 'high' | 'max';
+
+export interface WorryThinkingConfig {
+  enabled: boolean;
+  effort: WorryThinkingEffort;
+}
+
+/** 深度思考配置的存储键 */
+export const WORRY_THINKING_KEY = 'yiyan_worry_thinking_v1';
+
+/** 默认：开启深度思考（质量优先；可在「开始」页随时关闭） */
+const DEFAULT_THINKING: WorryThinkingConfig = { enabled: true, effort: 'high' };
+
+/** 读取深度思考配置（容错：坏数据回退默认） */
+export function getWorryThinking(): WorryThinkingConfig {
+  try {
+    const raw = localStorage.getItem(WORRY_THINKING_KEY);
+    if (!raw) return { ...DEFAULT_THINKING };
+    const parsed = JSON.parse(raw);
+    return {
+      enabled: typeof parsed?.enabled === 'boolean' ? parsed.enabled : DEFAULT_THINKING.enabled,
+      effort: parsed?.effort === 'max' ? 'max' : 'high',
+    };
+  } catch {
+    return { ...DEFAULT_THINKING };
+  }
+}
+
+/** 保存深度思考配置 */
+export function setWorryThinking(cfg: WorryThinkingConfig): void {
+  try {
+    localStorage.setItem(WORRY_THINKING_KEY, JSON.stringify(cfg));
+  } catch { /* 忽略写入失败 */ }
+}
+
+// ============ Soul 人格档案（v3.3.0）============
+
+/** 「启用 soul 记忆」开关的存储键 */
+export const WORRY_SOUL_KEY = 'yiyan_worry_soul_v1';
+
+/** 是否启用 soul 记忆（默认关；打开一次后记住） */
+export function getWorrySoulEnabled(): boolean {
+  try {
+    return localStorage.getItem(WORRY_SOUL_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+/** 保存「启用 soul 记忆」开关 */
+export function setWorrySoulEnabled(enabled: boolean): void {
+  try {
+    if (enabled) localStorage.setItem(WORRY_SOUL_KEY, '1');
+    else localStorage.removeItem(WORRY_SOUL_KEY);
+  } catch { /* 忽略写入失败 */ }
+}
+
+/** 读取当前应注入的 Soul 档案内容（开关关 / 档案为空 → null） */
+export function getWorrySoulContent(): string | null {
+  if (!getWorrySoulEnabled()) return null;
+  const soul = (useSettingsStore.getState().settings.ai.soul || '').trim();
+  return soul || null;
+}
+
+/** 拼「Soul 背景」提示词段（两个生成函数复用） */
+function buildSoulSection(soul: string): string {
+  return `\n\n【关于用户（来自 ta 自己维护的人格档案）】\n${soul}\n（以上背景帮助你写出更贴合 ta 真实生活的结局，不要生硬复述档案内容，也不要在回复里提及档案本身。）`;
 }
 
 /** GLM 免费池轮询游标（进程内，跨调用递增） */
@@ -186,16 +272,27 @@ interface RequestOpts {
   maxTokens?: number;
 }
 
-/** 构造请求体（流式 / 非流式共用） */
+/**
+ * 构造请求体（流式 / 非流式共用）。
+ * 深度思考语义对齐 Chat 页（chatStream.ts）：
+ * - 开：thinking.enabled + reasoning_effort，且**不传** temperature / max_tokens；
+ * - 关：显式 thinking.disabled（对默认思考的模型才是"真关"），保留 temperature / max_tokens。
+ */
 function buildBody(model: string, opts: RequestOpts, stream: boolean): string {
+  const thinking = getWorryThinking();
   return JSON.stringify({
     model,
     messages: [
       { role: 'system', content: opts.systemPrompt },
       { role: 'user', content: opts.userMessage },
     ],
-    temperature: opts.temperature ?? 0.7,
-    max_tokens: opts.maxTokens ?? 900,
+    ...(thinking.enabled
+      ? { thinking: { type: 'enabled' }, reasoning_effort: thinking.effort }
+      : {
+          thinking: { type: 'disabled' },
+          temperature: opts.temperature ?? 0.7,
+          max_tokens: opts.maxTokens ?? 900,
+        }),
     ...(stream ? { stream: true } : {}),
   });
 }
@@ -204,7 +301,7 @@ function buildBody(model: string, opts: RequestOpts, stream: boolean): string {
 async function requestTextPlain(opts: RequestOpts): Promise<string> {
   const endpoint = resolveEndpoint();
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), currentTimeoutMs());
   try {
     const response = await fetch(`${endpoint.baseURL}/chat/completions`, {
       method: 'POST',
@@ -234,7 +331,8 @@ async function requestTextPlain(opts: RequestOpts): Promise<string> {
 }
 
 /**
- * 流式请求（SSE）：逐增量回调「已生成字符数」，返回完整文本。
+ * 流式请求（SSE）：逐增量回调「已生成字符数」（含思维链字数，思考期计数也会增长），
+ * 返回完整正文文本。
  *
  * ⚠️ Android/Capacitor 上原生 HTTP（被 CapacitorHttp patch 的 fetch）不支持流式读取，
  * 必须使用原始 WebView fetch（`CapacitorWebFetch`，与 chatStream.ts 同款处理）。
@@ -245,7 +343,7 @@ async function requestTextStream(
 ): Promise<string> {
   const endpoint = resolveEndpoint();
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), currentTimeoutMs());
   const fetchFn = (window as any).CapacitorWebFetch || fetch;
   try {
     const response = await fetchFn(`${endpoint.baseURL}/chat/completions`, {
@@ -269,6 +367,7 @@ async function requestTextStream(
     const decoder = new TextDecoder();
     let buffer = '';
     let full = '';
+    let reasoningLen = 0;
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -283,9 +382,14 @@ async function requestTextStream(
         try {
           const json = JSON.parse(data);
           const delta = json.choices?.[0]?.delta;
+          // 思维链增量：只计数（不进入正文累积，正文才是被解析的 JSON）
+          if (delta?.reasoning_content) {
+            reasoningLen += String(delta.reasoning_content).length;
+            onProgress?.(full.length + reasoningLen);
+          }
           if (delta?.content) {
             full += delta.content;
-            onProgress?.(full.length);
+            onProgress?.(full.length + reasoningLen);
           }
         } catch {
           // 忽略单帧解析错误
@@ -324,11 +428,12 @@ async function requestJson(opts: RequestOpts, onProgress?: (chars: number) => vo
 
 // ============ 业务生成函数 ============
 
-/** 生成三种结局（最坏 / 普通 / 最好）；onProgress 回报「已生成字数」 */
+/** 生成三种结局（最坏 / 普通 / 最好）；onProgress 回报「已生成字数」（含思维链） */
 export async function generateOutcomes(
   content: string,
   onProgress?: (chars: number) => void,
 ): Promise<GeneratedOutcomes> {
+  const soul = getWorrySoulContent();
   const systemPrompt = `你是一位温和、专业的心理支持助手。用户会写下自己正在担心的一件事，请你客观地帮 ta 想象这件事往后发展可能出现的三种结局。
 
 要求：
@@ -336,7 +441,8 @@ export async function generateOutcomes(
 2. 每条结局 40~90 字，用第二人称「你」叙述，像在描述一种可能发生的平常生活
 3. 最坏结果要真实，但不夸张、不渲染灾难；普通结果最贴近现实、最可能发生；最好结果合理可信，不轻浮、不像鸡汤
 4. 语气温和、克制、平实，不用感叹号，避免「一定会」「彻底完蛋」这类绝对化、吓人的措辞
-5. 只输出一个 JSON 对象，不要输出任何其他文字
+5. 必须贴合用户写下的具体处境来写（如下方提供了关于用户的背景，请结合背景，让结局落在 ta 真实的生活里），不要写「对谁都成立」的万能句子
+6. 只输出一个 JSON 对象，不要输出任何其他文字${soul ? buildSoulSection(soul) : ''}
 
 输出格式（严格按此 JSON 结构）：
 {"worst": "最坏结果的描述……", "normal": "普通结果的描述……", "best": "最好结果的描述……"}`;
@@ -357,22 +463,45 @@ export async function generateOutcomes(
   return { worst, normal, best };
 }
 
-/** 生成反转牌收获点（「即使发生，我也会获得」）；onProgress 回报「已生成字数」 */
+/** 反转牌生成时 AI 附带的 Soul 更新提议（可选） */
+export interface SoulUpdateProposal {
+  /** AI 写的更新理由（为什么更新、改了什么，给用户看） */
+  reason: string;
+  /** 更新后的档案全文（整体替换） */
+  content: string;
+}
+
+export interface FlipGenerateResult {
+  points: WorryFlipPoint[];
+  /** AI 提议的 Soul 更新（仅当「启用 soul 记忆」且 AI 自愿附带时存在） */
+  soulUpdate?: SoulUpdateProposal;
+}
+
+/**
+ * 生成反转牌收获点（「即使发生，我也会获得」）；onProgress 回报「已生成字数」（含思维链）。
+ * 若已启用 soul 记忆：prompt 注入档案背景，并授权 AI 在发现重要长期信息时
+ * 附带可选的 soulUpdate 提议（由调用方挂到主页待确认，确认后才写入）。
+ */
 export async function generateFlipPoints(
   content: string,
   worstText: string,
   onProgress?: (chars: number) => void,
-): Promise<WorryFlipPoint[]> {
+): Promise<FlipGenerateResult> {
+  const soul = getWorrySoulContent();
+  const updateSection = soul
+    ? `\n\n【档案更新】如果你从这次担心中获知了关于用户的重要长期信息（新的处境、在意的点、被证实的有效应对方式等），可以在 JSON 中附带可选的 soulUpdate 字段，提议更新 ta 的人格档案；没有这样的信息就完全不要输出该字段。soulUpdate 的 reason 用一两句话说明为什么更新、改了什么（会展示给用户看），content 必须是更新后的档案完整全文（整体替换，不是增量补丁，在原内容基础上自然修订，不超过 ${Math.floor(SOUL_MAX_CHARS / 2)} 字）。`
+    : '';
+
   const systemPrompt = `你是一位温和的心理支持助手。用户担心的一件事可能发生最坏的结果，用户已经看到了这个最坏结果。请你帮 ta 换一个角度：即使这个最坏结果真的发生，ta 的生活中也可能获得什么？
 
 要求：
 1. 给出 3 个可能的收获，每个包含 title（不超过 6 个字）和 desc（不超过 40 字）
-2. 收获要具体、真诚、贴合用户担心的这件事，不要空洞的鸡汤
+2. 收获要具体、真诚、贴合用户担心的这件事（如下方提供了关于用户的背景，请结合背景来写），不要空洞的鸡汤
 3. 用温和的第二人称「你」叙述，传递「即使发生，你也不会一无所有」的支撑感
-4. 只输出一个 JSON 对象，不要输出任何其他文字
+4. 只输出一个 JSON 对象，不要输出任何其他文字${soul ? buildSoulSection(soul) : ''}${updateSection}
 
 输出格式（严格按此 JSON 结构）：
-{"points": [{"title": "收获标题", "desc": "一句话说明……"}, {"title": "收获标题", "desc": "一句话说明……"}, {"title": "收获标题", "desc": "一句话说明……"}]}`;
+{"points": [{"title": "收获标题", "desc": "一句话说明……"}, {"title": "收获标题", "desc": "一句话说明……"}, {"title": "收获标题", "desc": "一句话说明……"}]${soul ? ', "soulUpdate": {"reason": "为什么更新、改了什么（可选字段，没有重要信息就不要带上）", "content": "更新后的档案全文"}' : ''}}`;
 
   const json = await requestJson({
     systemPrompt,
@@ -394,5 +523,21 @@ export async function generateFlipPoints(
   if (points.length === 0) {
     throw new Error('AI 生成内容不完整，请重试');
   }
-  return points;
+
+  // 可选：Soul 更新提议（仅当过开关开启且 AI 附带有效内容时提取）
+  let soulUpdate: SoulUpdateProposal | undefined;
+  if (soul) {
+    const raw = json?.soulUpdate;
+    if (raw && typeof raw === 'object') {
+      const updateContent = clipText(raw.content, SOUL_MAX_CHARS);
+      if (updateContent) {
+        soulUpdate = {
+          reason: clipText(raw.reason, 200),
+          content: updateContent,
+        };
+      }
+    }
+  }
+
+  return { points, soulUpdate };
 }

@@ -14,12 +14,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { WorryOutcome, WorryOutcomeType, WorryRecord } from '@/types';
-import { createDraft, getDraft, saveWorry } from '@/services/worryDatabase';
+import { createDraft, getDraft, saveWorry, savePendingSoulUpdate } from '@/services/worryDatabase';
 import { generateFlipPoints, generateOutcomes } from '@/services/worryAI';
 import { ScoreSlider } from './components/ScoreSlider';
 import { OutcomeCards } from './components/OutcomeCards';
 import { ProbBars } from './components/ProbBars';
-import { clampInt, normalizeProbs } from './utils';
+import { buildContinueChatDraft, clampInt, normalizeProbs } from './utils';
 import './Worry.css';
 
 type Phase = 1 | 2 | 3 | 4 | 5 | 6;
@@ -70,6 +70,8 @@ export function WorryFlowPage() {
   const [flipGenerating, setFlipGenerating] = useState(false);
   const [flipError, setFlipError] = useState<string | null>(null);
   const [flipRevealed, setFlipRevealed] = useState(false);
+  // v3.3.0: 本次反转牌生成是否附带 Soul 更新建议（已挂到主页待确认）
+  const [soulCaptured, setSoulCaptured] = useState(false);
   // 步 6 总结子态
   const [showSummary, setShowSummary] = useState(false);
   // 生成反馈：已生成字数（100ms 节流）+ 等待文案轮换
@@ -241,9 +243,14 @@ export function WorryFlowPage() {
     progressLastRef.current = 0;
     try {
       const worstText = record.outcomes.find(o => o.type === 'worst')?.text || record.content;
-      const points = await generateFlipPoints(record.content, worstText, handleFlipProgress);
-      await updateRecord({ flipPoints: points });
+      const result = await generateFlipPoints(record.content, worstText, handleFlipProgress);
+      await updateRecord({ flipPoints: result.points });
       setFlipRevealed(true);
+      // v3.3.0: AI 附带 Soul 更新建议 → 挂到「怕了么」主页等待确认（新建议覆盖旧的）
+      if (result.soulUpdate) {
+        savePendingSoulUpdate(result.soulUpdate);
+        setSoulCaptured(true);
+      }
     } catch (e) {
       setFlipError(e instanceof Error ? e.message : '生成失败，请重试');
     } finally {
@@ -259,6 +266,21 @@ export function WorryFlowPage() {
     }
     void runFlipGenerate();
   }, [record, runFlipGenerate]);
+
+  // ===== 步 6：新建对话继续聊（v3.3.0）=====
+  // 完成本次调和 → 跳聊天页新建对话 → 把上下文预填进输入框（不发送）
+  const handleContinueToChat = useCallback(() => {
+    if (!record) return;
+    const finalScore = record.scoreAfter ?? scoreAfter;
+    (window as any).__yiyan_pending_chat_draft__ = {
+      text: buildContinueChatDraft(record, finalScore),
+      source: 'worry',
+    };
+    void (async () => {
+      await updateRecord({ status: 'completed', scoreAfter: finalScore, step: 7 });
+      navigate('/chat');
+    })();
+  }, [record, scoreAfter, updateRecord, navigate]);
 
   // ===== 渲染 =====
   if (booting || !record) {
@@ -482,6 +504,12 @@ export function WorryFlowPage() {
                 </div>
               </div>
             </div>
+
+            {soulCaptured && (
+              <p className="worry-flow-soul-hint">
+                AI 有一条人格档案的更新建议，已挂到「怕了么」主页，回去可以确认。
+              </p>
+            )}
           </div>
         )}
 
@@ -502,6 +530,12 @@ export function WorryFlowPage() {
               }}
             >
               下一步
+            </button>
+            <button
+              className="worry-btn-secondary worry-btn-continue-chat"
+              onClick={handleContinueToChat}
+            >
+              新建对话继续聊
             </button>
           </div>
         )}
