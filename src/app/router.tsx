@@ -24,6 +24,8 @@ const TodoTemplatePage = lazy(() => import('@/features/todo/TodoTemplatePage').t
 const TodoRecycleBinPage = lazy(() => import('@/features/todo/TodoRecycleBinPage').then(m => ({ default: m.TodoRecycleBinPage })));
 const WheelPage = lazy(() => import('@/features/wheel/WheelPage').then(m => ({ default: m.WheelPage })));
 const MemoPage = lazy(() => import('@/features/memo/MemoPage').then(m => ({ default: m.MemoPage })));
+const WorryPage = lazy(() => import('@/features/worry/WorryPage').then(m => ({ default: m.WorryPage })));
+const WorryFlowPage = lazy(() => import('@/features/worry/WorryFlowPage').then(m => ({ default: m.WorryFlowPage })));
 
 const router = createHashRouter([
   {
@@ -199,6 +201,22 @@ const router = createHashRouter([
     element: (
       <Suspense fallback={<Loading />}>
         <MemoPage />
+      </Suspense>
+    ),
+  },
+  {
+    path: '/worries',
+    element: (
+      <Suspense fallback={<Loading />}>
+        <WorryPage />
+      </Suspense>
+    ),
+  },
+  {
+    path: '/worries/flow',
+    element: (
+      <Suspense fallback={<Loading />}>
+        <WorryFlowPage />
       </Suspense>
     ),
   },

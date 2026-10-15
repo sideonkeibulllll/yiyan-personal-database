@@ -137,19 +137,18 @@ const PaperclipIcon = (
   </svg>
 );
 
-/** Stacked cards SVG icon */
-const CardsIcon = (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-    <rect x="2" y="6" width="16" height="14" rx="2" />
-    <rect x="6" y="4" width="16" height="14" rx="2" />
-  </svg>
-);
-
 /** Search SVG icon */
 const SearchIcon = (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="11" cy="11" r="8" />
     <line x1="21" y1="21" x2="16.65" y2="16.65" />
+  </svg>
+);
+
+/** Heart SVG icon（怕了么 · 消除担心） */
+const HeartIcon = (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
   </svg>
 );
 
@@ -969,9 +968,9 @@ export function HomePage() {
             <span className="btn-icon">{MemoIcon}</span>
             <span>备忘录</span>
           </button>
-          <button className="quick-btn glass" onClick={() => navigate('/random')}>
-            <span className="btn-icon">{CardsIcon}</span>
-            <span>随机浏览</span>
+          <button className="quick-btn glass" onClick={() => navigate('/worries')}>
+            <span className="btn-icon">{HeartIcon}</span>
+            <span>怕了么</span>
           </button>
           <button className="quick-btn glass" onClick={() => navigate('/search')}>
             <span className="btn-icon">{SearchIcon}</span>

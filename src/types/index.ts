@@ -819,3 +819,61 @@ export interface MemoDoc {
   updatedAt: number;
   isDeleted?: number;
 }
+
+/** ============ 怕了么（消除担心） ============ */
+
+/** 三种结局的类型标识 */
+export type WorryOutcomeType = 'worst' | 'normal' | 'best';
+
+/** 一张结局卡（最坏 / 普通 / 最好） */
+export interface WorryOutcome {
+  type: WorryOutcomeType;
+  /** AI 生成（或用户手填）的结局文案 */
+  text: string;
+  /** 用户给出的原始概率 0–100 */
+  rawProb: number;
+  /** 用户是否已「确定」过这张卡（翻卡流程中；断点续接用） */
+  confirmed?: boolean;
+}
+
+/** 归一化后的概率（三数之和恒为 100） */
+export interface WorryNormalizedProbs {
+  worst: number;
+  normal: number;
+  best: number;
+}
+
+/** 反转牌收获点（"即使发生，我也会获得"） */
+export interface WorryFlipPoint {
+  /** 收获标题（≤6 字） */
+  title: string;
+  /** 一句话说明（≤40 字） */
+  desc: string;
+}
+
+/** 一次担心的调和记录（一条 localStorage 记录） */
+export interface WorryRecord {
+  id: string;
+  /** 担心内容 */
+  content: string;
+  /** 前测：初始担心程度 1–10 */
+  scoreBefore: number;
+  /** 后测：结束担心程度 1–10（未完成时 null） */
+  scoreAfter: number | null;
+  /** 三张结局卡（AI 生成前为空数组） */
+  outcomes: WorryOutcome[];
+  /** 归一化概率（未推进到第 4 步时为 null） */
+  normalizedProbs: WorryNormalizedProbs | null;
+  /** 反转牌 3 个收获点（未生成 / 被跳过时为空数组） */
+  flipPoints: WorryFlipPoint[];
+  /** 是否跳过了反转牌（第 4 步点「下一步」） */
+  skippedFlip: boolean;
+  /** draft = 进行中（断点续接）；completed = 已完成 */
+  status: 'draft' | 'completed';
+  /** 当前推进到第几步（1–6；completed 时置 7） */
+  step: number;
+  createdAt: number;
+  updatedAt: number;
+  /** 软删除标记 */
+  isDeleted?: number;
+}

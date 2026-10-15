@@ -1,0 +1,1313 @@
+/* ===== 「怕了么」治愈风样式 =====
+ * 在 Ember 暗色体系内做治愈感：
+ * - 柔和辅色（柔青 = 平息 / 暖杏 = 温柔 / 灰蓝 = 沉重）
+ * - 更大的圆角 + 缓动动画 + 低饱和点缀
+ */
+
+.worry-page {
+  /* 本功能专属辅色（仅作用于 .worry-page 作用域） */
+  --worry-teal: #63e6be;
+  --worry-amber: #ffd8a8;
+  --worry-blue: #8fa6c9;
+
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  background: var(--color-bg-primary);
+  padding-bottom: calc(76px + var(--safe-bottom));
+}
+
+.worry-boot-loading {
+  margin: auto;
+  color: var(--color-text-tertiary);
+  font-size: var(--text-sm);
+}
+
+/* === 主页顶部 === */
+.worry-header {
+  padding: calc(var(--space-6) + var(--safe-top)) var(--space-5) var(--space-3);
+}
+
+.worry-title {
+  font-size: var(--text-2xl);
+  font-weight: 500;
+  color: var(--color-text-primary);
+  letter-spacing: 1px;
+}
+
+.worry-slogan {
+  margin-top: var(--space-1);
+  font-size: var(--text-sm);
+  color: var(--color-text-tertiary);
+}
+
+/* === Tab === */
+.worry-tabs {
+  display: flex;
+  gap: var(--space-2);
+  padding: 0 var(--space-5) var(--space-4);
+}
+
+.worry-tab {
+  flex: 1;
+  padding: 10px 0;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-border-primary);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: all var(--duration-normal) var(--ease-out);
+}
+
+.worry-tab.active {
+  border-color: var(--color-border-accent);
+  background: var(--color-accent-subtle);
+  color: var(--color-accent-secondary);
+}
+
+.worry-main {
+  flex: 1;
+  padding: 0 var(--space-5);
+}
+
+/* === 通用按钮体系 === */
+.worry-btn-primary {
+  width: 100%;
+  padding: 15px;
+  border-radius: var(--radius-full);
+  background: var(--color-accent-primary);
+  color: #fff;
+  font-size: var(--text-base);
+  font-weight: 500;
+  cursor: pointer;
+  transition: transform var(--duration-fast) var(--ease-out), opacity var(--duration-fast);
+}
+
+.worry-btn-primary:active {
+  transform: scale(0.98);
+}
+
+.worry-btn-primary:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.worry-btn-secondary {
+  width: 100%;
+  padding: 13px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-border-accent);
+  background: transparent;
+  color: var(--color-accent-secondary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.worry-btn-secondary:active {
+  background: var(--color-accent-subtle);
+}
+
+.worry-btn-ghost {
+  width: 100%;
+  padding: 11px;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--color-text-tertiary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.worry-btn-danger {
+  padding: 11px 18px;
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(250, 82, 82, 0.35);
+  background: transparent;
+  color: var(--color-error);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.worry-btn-danger.confirming {
+  background: rgba(250, 82, 82, 0.14);
+  border-color: var(--color-error);
+}
+
+.worry-btn-big {
+  padding: 17px;
+  font-size: var(--text-lg);
+}
+
+/* === 开始 Tab === */
+.worry-use-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding-top: var(--space-2);
+}
+
+.worry-intro-card {
+  padding: var(--space-5);
+  border-radius: 18px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-secondary);
+}
+
+.worry-intro-line {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.8;
+}
+
+.worry-draft-hint {
+  text-align: center;
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+}
+
+.worry-confirm-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.worry-confirm-text {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.worry-use-stats {
+  text-align: center;
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  padding-top: var(--space-2);
+}
+
+/* === 回顾 Tab === */
+.worry-review-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding-top: var(--space-2);
+}
+
+.worry-empty {
+  text-align: center;
+  padding: var(--space-12) 0;
+  color: var(--color-text-tertiary);
+  font-size: var(--text-sm);
+  line-height: 2;
+}
+
+.worry-chart-card {
+  padding: var(--space-4) var(--space-3) var(--space-3);
+  border-radius: 18px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-secondary);
+}
+
+.worry-chart-stats {
+  text-align: center;
+  margin-top: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+}
+
+/* === 趋势曲线 === */
+.trend-chart {
+  width: 100%;
+}
+
+.trend-grid {
+  stroke: var(--color-border-secondary);
+  stroke-width: 1;
+  stroke-dasharray: 3 5;
+}
+
+.trend-axis {
+  font-size: 11px;
+  fill: var(--color-text-disabled);
+}
+
+.trend-line {
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.trend-line.before {
+  stroke: var(--color-accent-primary);
+  stroke-opacity: 0.85;
+}
+
+.trend-line.after {
+  stroke: var(--worry-teal);
+}
+
+.trend-dot.before {
+  fill: var(--color-bg-secondary);
+  stroke: var(--color-accent-primary);
+  stroke-width: 2;
+}
+
+.trend-dot.after {
+  fill: var(--color-bg-secondary);
+  stroke: var(--worry-teal);
+  stroke-width: 2;
+}
+
+.trend-legend {
+  display: flex;
+  justify-content: center;
+  gap: var(--space-5);
+  margin-top: var(--space-2);
+}
+
+.trend-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+}
+
+.trend-legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.trend-legend-dot.before {
+  background: var(--color-accent-primary);
+}
+
+.trend-legend-dot.after {
+  background: var(--worry-teal);
+}
+
+/* === 回顾列表 === */
+.worry-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.worry-list-item {
+  text-align: left;
+  padding: var(--space-4);
+  border-radius: 16px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-secondary);
+  cursor: pointer;
+  transition: border-color var(--duration-fast) var(--ease-out);
+}
+
+.worry-list-item:active {
+  border-color: var(--color-border-accent);
+}
+
+.worry-list-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-2);
+}
+
+.worry-list-date {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+}
+
+.worry-list-score {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-style: normal;
+  font-size: var(--text-sm);
+}
+
+.worry-list-score i {
+  font-style: normal;
+  font-weight: 500;
+}
+
+.worry-list-score i.before {
+  color: var(--color-accent-secondary);
+}
+
+.worry-list-score i.after {
+  color: var(--worry-teal);
+}
+
+.worry-list-arrow {
+  color: var(--color-text-disabled);
+  font-size: var(--text-xs);
+}
+
+.worry-list-content {
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+/* ========================================================
+ *  流程页
+ * ======================================================== */
+
+.worry-flow-page {
+  padding-bottom: calc(var(--space-8) + var(--safe-bottom));
+}
+
+.worry-flow-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: calc(var(--space-3) + var(--safe-top)) var(--space-4) var(--space-2);
+}
+
+.worry-icon-btn {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  background: transparent;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.worry-flow-title {
+  font-size: var(--text-base);
+  color: var(--color-text-secondary);
+}
+
+/* 进度条（6 段） */
+.worry-progress {
+  display: flex;
+  gap: 6px;
+  padding: var(--space-2) var(--space-5) var(--space-4);
+}
+
+.worry-progress-seg {
+  flex: 1;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--color-bg-float);
+  transition: background var(--duration-slow) var(--ease-out);
+}
+
+.worry-progress-seg.filled {
+  background: var(--color-accent-primary);
+}
+
+.worry-flow-body {
+  flex: 1;
+  padding: var(--space-2) var(--space-5) 0;
+}
+
+/* 步骤入场动画 */
+.worry-step {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  animation: worryStepIn 380ms var(--ease-out);
+}
+
+@keyframes worryStepIn {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.worry-question {
+  font-size: var(--text-xl);
+  font-weight: 500;
+  color: var(--color-text-primary);
+  line-height: 1.5;
+}
+
+.worry-sub {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.8;
+}
+
+/* 担心回显 */
+.worry-echo {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--space-4);
+  border-radius: 14px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-secondary);
+}
+
+.worry-echo-label {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  letter-spacing: 1px;
+}
+
+.worry-echo-text {
+  font-size: var(--text-base);
+  color: var(--color-text-primary);
+  line-height: 1.7;
+}
+
+/* 输入框 */
+.worry-input {
+  width: 100%;
+  padding: var(--space-4);
+  border-radius: 16px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-primary);
+  color: var(--color-text-primary);
+  font-size: var(--text-base);
+  line-height: 1.8;
+  resize: none;
+  transition: border-color var(--duration-fast) var(--ease-out);
+}
+
+.worry-input:focus {
+  border-color: var(--color-border-accent);
+}
+
+.worry-input::placeholder {
+  color: var(--color-text-disabled);
+}
+
+/* 刻度说明 */
+.worry-scale-hints {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--text-xs);
+  color: var(--color-text-disabled);
+  line-height: 1.7;
+}
+
+.worry-scale-hints span:last-child {
+  text-align: right;
+  max-width: 60%;
+}
+
+/* === 大号打分滑块 === */
+.score-slider {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding: var(--space-5) 0;
+}
+
+.score-slider-value {
+  text-align: center;
+  font-size: 56px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+  line-height: 1;
+}
+
+.score-slider-input {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 8px;
+  border-radius: 4px;
+  outline: none;
+}
+
+.score-slider-input::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #fff;
+  border: 3px solid var(--color-accent-primary);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+}
+
+.score-slider-scale {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--text-xs);
+  color: var(--color-text-disabled);
+}
+
+/* === 加载与错误 === */
+.worry-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-8) 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+/* 「已生成字数」实时反馈行 */
+.worry-loading-chars {
+  margin-top: -8px;
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.worry-loading-dots {
+  display: flex;
+  gap: 7px;
+}
+
+.worry-loading-dots span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--worry-amber);
+  animation: worryDotPulse 1.2s ease-in-out infinite;
+}
+
+.worry-loading-dots span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.worry-loading-dots span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes worryDotPulse {
+  0%, 100% {
+    opacity: 0.25;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.worry-error {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border-radius: 14px;
+  background: rgba(250, 82, 82, 0.06);
+  border: 1px solid rgba(250, 82, 82, 0.25);
+}
+
+.worry-error-text {
+  font-size: var(--text-sm);
+  color: var(--color-error);
+  line-height: 1.7;
+}
+
+.worry-error-actions {
+  display: flex;
+  gap: var(--space-3);
+}
+
+.worry-error-actions > * {
+  flex: 1;
+}
+
+/* === 3D 翻转卡（通用结构） === */
+.flip-card {
+  perspective: 1200px;
+}
+
+.flip-card-inner {
+  display: grid;
+  transform-style: preserve-3d;
+  transition: transform 620ms var(--ease-in-out);
+}
+
+.flip-card.is-flipped .flip-card-inner {
+  transform: rotateY(180deg);
+}
+
+.flip-card-face {
+  grid-area: 1 / 1;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  border-radius: 18px;
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  max-height: 62vh;
+  overflow-y: auto;
+}
+
+/* 封面（未翻开） */
+.flip-card-cover {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  background:
+    radial-gradient(ellipse 70% 60% at 50% 30%, rgba(255, 216, 168, 0.05), transparent),
+    var(--color-bg-secondary);
+  border: 1px solid var(--color-border-accent);
+  pointer-events: auto;
+}
+
+.flip-card.is-flipped .flip-card-cover {
+  pointer-events: none;
+}
+
+.flip-cover-deco {
+  font-size: 30px;
+  color: var(--worry-amber);
+}
+
+.flip-cover-title {
+  font-size: var(--text-lg);
+  color: var(--color-text-primary);
+  font-weight: 500;
+}
+
+.flip-cover-hint {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+}
+
+/* 内容面（翻开后） */
+.flip-card-content {
+  transform: rotateY(180deg);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-primary);
+  pointer-events: none;
+}
+
+.flip-card.is-flipped .flip-card-content {
+  pointer-events: auto;
+}
+
+/* 卡片类型点缀色 */
+.flip-card.type-worst .outcome-card-label {
+  color: var(--worry-blue);
+}
+
+.flip-card.type-normal .outcome-card-label {
+  color: var(--worry-teal);
+}
+
+.flip-card.type-best .outcome-card-label {
+  color: var(--worry-amber);
+}
+
+.outcome-card-label {
+  font-size: var(--text-xs);
+  letter-spacing: 2px;
+  color: var(--worry-amber);
+}
+
+.outcome-card-text {
+  font-size: var(--text-base);
+  color: var(--color-text-primary);
+  line-height: 1.9;
+}
+
+.outcome-prob-tag {
+  align-self: flex-start;
+  padding: 3px 12px;
+  border-radius: var(--radius-full);
+  background: var(--color-accent-subtle);
+  color: var(--color-accent-secondary);
+  font-size: var(--text-xs);
+}
+
+/* 概率滑块块 */
+.outcome-prob-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-top: auto;
+  padding-top: var(--space-3);
+}
+
+.outcome-prob-question {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.outcome-prob-value {
+  text-align: center;
+  font-size: var(--text-3xl);
+  font-weight: 500;
+  color: var(--color-text-primary);
+  line-height: 1;
+}
+
+.outcome-prob-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 8px;
+  border-radius: 4px;
+  outline: none;
+}
+
+.outcome-prob-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #fff;
+  border: 3px solid var(--color-accent-primary);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+}
+
+/* 手填输入 */
+.outcome-manual-input {
+  width: 100%;
+  padding: var(--space-3);
+  border-radius: 12px;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border-primary);
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+  line-height: 1.8;
+  resize: none;
+}
+
+/* 已完成缩略 / 计数 */
+.outcome-done-row {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.outcome-done-chip {
+  padding: 3px 12px;
+  border-radius: var(--radius-full);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border-secondary);
+  color: var(--color-text-tertiary);
+  font-size: var(--text-xs);
+}
+
+.outcome-counter {
+  text-align: center;
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+}
+
+.outcome-cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* 三卡回看 */
+.outcome-review {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.outcome-review-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border-radius: 14px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-secondary);
+}
+
+.outcome-review-card .outcome-card-text {
+  font-size: var(--text-sm);
+}
+
+/* === 步 4 · 概率条 === */
+.prob-bars {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.prob-bar-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.prob-bar-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.prob-bar-label {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.prob-bar-value {
+  font-size: var(--text-lg);
+  font-weight: 500;
+}
+
+.prob-bar-track {
+  position: relative;
+  height: 10px;
+  border-radius: 5px;
+  background: var(--color-bg-float);
+  overflow: hidden;
+}
+
+.prob-bar-fill {
+  height: 100%;
+  border-radius: 5px;
+  transition: width 700ms var(--ease-out);
+}
+
+.prob-bar-scale {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--color-text-disabled);
+  opacity: 0.5;
+}
+
+.prob-bar-worst .prob-bar-fill {
+  background: var(--worry-blue);
+}
+
+.prob-bar-worst .prob-bar-value {
+  color: var(--worry-blue);
+}
+
+.prob-bar-normal .prob-bar-fill {
+  background: var(--worry-teal);
+}
+
+.prob-bar-normal .prob-bar-value {
+  color: var(--worry-teal);
+}
+
+.prob-bar-best .prob-bar-fill {
+  background: var(--worry-amber);
+}
+
+.prob-bar-best .prob-bar-value {
+  color: var(--worry-amber);
+}
+
+.worry-sum-line {
+  text-align: center;
+  font-size: var(--text-sm);
+  color: var(--color-text-tertiary);
+}
+
+.worry-insight {
+  padding: var(--space-4);
+  border-radius: 14px;
+  background: rgba(255, 216, 168, 0.06);
+  border: 1px solid rgba(255, 216, 168, 0.2);
+  font-size: var(--text-sm);
+  color: var(--worry-amber);
+  line-height: 1.8;
+}
+
+.worry-conclusion {
+  padding: var(--space-4);
+  border-radius: 14px;
+  background: rgba(99, 230, 190, 0.06);
+  border: 1px solid rgba(99, 230, 190, 0.22);
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+  line-height: 1.9;
+}
+
+.worry-conclusion strong {
+  color: var(--worry-teal);
+  font-size: var(--text-lg);
+  font-weight: 500;
+}
+
+.worry-two-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+
+/* === 步 5 · 反转牌 === */
+.worry-flip-reveal .flip-card-content {
+  gap: var(--space-4);
+}
+
+.worry-flip-title {
+  font-size: var(--text-lg);
+  font-weight: 500;
+  color: var(--worry-amber);
+  text-align: center;
+  letter-spacing: 1px;
+}
+
+.worry-flip-points {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.worry-flip-point {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: 14px;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border-secondary);
+}
+
+.worry-flip-index {
+  font-size: var(--text-xs);
+  color: var(--worry-teal);
+  padding-top: 3px;
+  font-weight: 500;
+}
+
+.worry-flip-point-title {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--color-text-primary);
+  margin-bottom: 3px;
+}
+
+.worry-flip-point-desc {
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  line-height: 1.7;
+}
+
+/* === 步 6 · 总结 === */
+.worry-summary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.worry-compare {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.worry-compare-row {
+  display: grid;
+  grid-template-columns: 48px 1fr 32px;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.worry-compare-label {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.worry-compare-track {
+  height: 10px;
+  border-radius: 5px;
+  background: var(--color-bg-float);
+  overflow: hidden;
+}
+
+.worry-compare-fill {
+  height: 100%;
+  border-radius: 5px;
+  transition: width 800ms var(--ease-out);
+}
+
+.worry-compare-fill.before {
+  background: var(--color-accent-primary);
+}
+
+.worry-compare-fill.after {
+  background: var(--worry-teal);
+}
+
+.worry-compare-value {
+  font-size: var(--text-lg);
+  font-weight: 500;
+  text-align: right;
+}
+
+/* ========================================================
+ *  模型选择器（与 Chat 页同款交互）
+ * ======================================================== */
+
+/* 「开始」页的模型设置行 */
+.worry-model-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: 14px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-secondary);
+}
+
+.worry-model-row-label {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  flex-shrink: 0;
+}
+
+.worry-model-picker {
+  position: relative;
+  margin-left: auto;
+}
+
+.worry-model-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 152px;
+  padding: 6px 11px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-border-primary);
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.worry-model-btn.open {
+  border-color: var(--color-border-accent);
+  color: var(--color-accent-secondary);
+}
+
+.worry-model-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.worry-model-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+}
+
+.worry-model-dropdown {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 41;
+  width: 250px;
+  max-height: 340px;
+  overflow-y: auto;
+  padding: var(--space-2);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-primary);
+  box-shadow: var(--shadow-lg);
+  animation: worryStepIn 200ms var(--ease-out);
+}
+
+.worry-model-group {
+  padding: 8px 10px 4px;
+  font-size: var(--text-xs);
+  color: var(--color-text-disabled);
+}
+
+.worry-model-option {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 9px 10px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  transition: background var(--duration-fast);
+}
+
+.worry-model-option.active {
+  color: var(--color-accent-secondary);
+  background: var(--color-accent-subtle);
+}
+
+.worry-model-check {
+  color: var(--color-accent-secondary);
+  font-size: var(--text-xs);
+}
+
+/* ========================================================
+ *  详情弹层
+ * ======================================================== */
+
+.worry-detail-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+  animation: worryFadeIn 200ms var(--ease-out);
+}
+
+@keyframes worryFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.worry-detail-panel {
+  width: 100%;
+  max-width: 560px;
+  max-height: 84vh;
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-2) var(--space-5) calc(var(--space-5) + var(--safe-bottom));
+  border-radius: 22px 22px 0 0;
+  background: var(--color-bg-elevated);
+  animation: worrySheetUp 320ms var(--ease-out);
+}
+
+@keyframes worrySheetUp {
+  from { transform: translateY(40px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+
+.worry-detail-handle {
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--color-bg-float);
+  margin: var(--space-2) auto var(--space-3);
+}
+
+.worry-detail-head {
+  padding-bottom: var(--space-3);
+}
+
+.worry-detail-date {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+}
+
+.worry-detail-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  overflow-y: auto;
+  padding-bottom: var(--space-4);
+}
+
+.worry-detail-scores {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-6);
+  padding: var(--space-2) 0;
+}
+
+.worry-detail-score {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.worry-detail-score-num {
+  font-size: var(--text-3xl);
+  font-weight: 500;
+  line-height: 1;
+}
+
+.worry-detail-score-num.before {
+  color: var(--color-accent-secondary);
+}
+
+.worry-detail-score-num.after {
+  color: var(--worry-teal);
+}
+
+.worry-detail-score-label {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+}
+
+.worry-detail-arrow {
+  color: var(--color-text-disabled);
+  font-size: var(--text-lg);
+}
+
+.worry-detail-section-title {
+  font-size: var(--text-xs);
+  letter-spacing: 1px;
+  color: var(--color-text-tertiary);
+  padding-top: var(--space-2);
+}
+
+.worry-detail-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border-radius: 14px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-secondary);
+}
+
+.worry-detail-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.worry-detail-card-text {
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+  line-height: 1.8;
+}
+
+.worry-detail-norm {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--space-3) var(--space-4);
+  border-radius: 14px;
+  background: var(--color-bg-tertiary);
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+}
+
+.worry-detail-norm-item {
+  color: var(--color-text-secondary);
+}
+
+.worry-detail-actions {
+  display: flex;
+  justify-content: center;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border-secondary);
+}
+
+.worry-detail-actions .worry-btn-danger {
+  width: 100%;
+}
