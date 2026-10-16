@@ -3,6 +3,7 @@
  * 支持 JSON 和 Markdown 格式
  */
 import { getDatabase } from '@/services/database';
+import { localDateKey } from '@/utils/localDate';
 import type { Entry, Tag } from '@/types';
 
 /**
@@ -164,7 +165,8 @@ export function downloadFile(content: string, filename: string, mimeType: string
  */
 export async function exportAndDownload(options: ExportOptions): Promise<void> {
   const content = await exportData(options);
-  const timestamp = new Date().toISOString().slice(0, 10);
+  // 文件名用本地日期（北京时间）；曾用 toISOString().slice(0,10) → 凌晨导出的文件名是昨天
+  const timestamp = localDateKey();
   const extension = options.format === 'json' ? 'json' : 'md';
   const filename = `memory-export-${timestamp}.${extension}`;
   const mimeType = options.format === 'json' ? 'application/json' : 'text/markdown';

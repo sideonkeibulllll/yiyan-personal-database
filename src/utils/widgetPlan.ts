@@ -223,6 +223,8 @@ export interface WidgetTodoLike {
   startTime?: number;
   endTime?: number;
   createdAt: number;
+  /** 今日处理 */
+  isToday?: boolean;
 }
 
 /**
@@ -253,12 +255,13 @@ export function orderTimedForWidget<T extends WidgetTodoLike>(todos: T[], now: n
 
 /**
  * 无期视图（口径逐行对照主页 untimed 卡，完整列表版）：
- * - 候选：pending 未删除、无起止时间
+ * - 候选：pending 未删除、无起止时间、勾了「今日处理」
  * - 排序：创建时间最早的在前
+ * 2026-10：原口径为「最旧的无时间待办」（常显示陈年积压），与主页同步改为「今日处理」口径
  */
 export function orderUntimedForWidget<T extends WidgetTodoLike>(todos: T[]): T[] {
   return todos
-    .filter(t => t.status === 'pending' && !t.deletedAt && !t.startTime && !t.endTime)
+    .filter(t => t.status === 'pending' && !t.deletedAt && !t.startTime && !t.endTime && t.isToday)
     .sort((a, b) => a.createdAt - b.createdAt);
 }
 

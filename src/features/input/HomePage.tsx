@@ -398,14 +398,15 @@ export function HomePage() {
     return future[0];
   }, [pinnedTimedId, allTodos, now]);
 
-  // untimed slot：pin 优先；失效则 auto 选取（createdAt 最早的 pending 且无时间）
+  // untimed slot：pin 优先；失效则 auto 选取（createdAt 最早的「今日处理」pending 且无时间）
+  // 2026-10：原口径为「最旧的无时间待办」（常显示陈年积压），改为只显示勾了「今日处理」的
   const untimedCard = useMemo<Todo | null>(() => {
     if (pinnedUntimedId) {
       const t = allTodos.find(x => x.id === pinnedUntimedId);
       if (t && t.status === 'pending' && !t.deletedAt && !t.startTime && !t.endTime) return t;
     }
     const candidates = allTodos.filter(x =>
-      x.status === 'pending' && !x.deletedAt && !x.startTime && !x.endTime,
+      x.status === 'pending' && !x.deletedAt && !x.startTime && !x.endTime && x.isToday,
     );
     if (candidates.length === 0) return null;
     return candidates.reduce((a, b) => (a.createdAt < b.createdAt ? a : b));

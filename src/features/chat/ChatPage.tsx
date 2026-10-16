@@ -36,6 +36,7 @@ import {
 } from '@/services/chatBridge';
 import { getMemoryPromptSection } from '@/services/aiMemory';
 import { renderSoulPortrait } from '@/services/soulFacts';
+import { localDateKey } from '@/utils/localDate';
 import { getDatabase } from '@/services/database';
 import { getTodoDatabase } from '@/services/todoDatabase';
 import { EntryPickerPanel } from '@/components/EntryPickerPanel';
@@ -796,6 +797,15 @@ export function ChatPage() {
       // 隐私说明：不再无条件注入最近条目。笔记内容只在用户显式勾选
       // 「发送最近条目」时，通过下方 context 注入流程加入，避免误发隐私数据。
       let systemPrompt = settings.ai.chatSoul || '你是一个友好的AI助手。';
+
+      // 注入当前时间（北京时间）——让 AI 对「今天」有明确认知，
+      // 能正确推算「明天/后天」等日期（此前 AI 不知当前日期容易算错）
+      {
+        const now = new Date();
+        const hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+        const weekCN = '日一二三四五六'[now.getDay()];
+        systemPrompt += `\n\n## 当前时间\n现在是 ${localDateKey(now)} ${hhmm}（周${weekCN}，北京时间）。涉及「今天／明天／后天」等日期推算时以此为准。`;
+      }
 
       // v3.4.0: Soul 事实档案注入（结构化事实渲染；无事实时回退 legacy 文本——兼容期）
       const soulPortrait = renderSoulPortrait('chat');

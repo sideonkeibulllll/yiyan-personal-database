@@ -198,7 +198,7 @@ export async function syncWidgetPlan(force = false): Promise<WidgetSyncReport> {
  * - 每次打开 App 都写；App 内待办变动由 initTodoAutoSync 防抖触发（不做余量跳过）
  * - today 视图：今天文件夹 ∪ 「今日处理」；个人拖拽排序优先 → 到期近 → 创建先后
  * - timed 视图：主页 timed 卡口径（进行中 → 未来，见 widgetPlan.orderTimedForWidget）
- * - untimed 视图：主页 untimed 卡口径（无时间、创建最早在前）
+ * - untimed 视图：主页 untimed 卡口径（「今日处理」且无时间、创建最早在前）
  */
 export async function syncTodoSnapshot(): Promise<WidgetSyncReport> {
   if (!isWidgetSupported()) {

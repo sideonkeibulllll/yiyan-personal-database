@@ -39,6 +39,7 @@ import { useTodoStore } from '@/stores/todoStore';
 import { useTodoTagStore } from '@/stores/todoTagStore';
 import type { Entry, Todo, Link, TodoTag } from '@/types';
 import { splitKeywords, rankAndFilter, relevanceScore } from '@/utils/searchRank';
+import { localDateKey } from '@/utils/localDate';
 import {
   applySoulChanges,
   countSoulChanges,
@@ -72,6 +73,16 @@ function validateHexColor(color: string): string | null {
 function parseIsoTime(value: unknown, fieldName: string): { ts?: number; error?: string } {
   const str = typeof value === 'string' ? value.trim() : '';
   if (!str) return {};
+  // 纯日期（YYYY-MM-DD）按本地 00:00 解析：
+  // Date.parse 规范会把纯日期当 UTC 午夜，北京时间下会偏成当天 08:00
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(str);
+  if (dateOnly) {
+    const y = Number(dateOnly[1]), m = Number(dateOnly[2]), d = Number(dateOnly[3]);
+    const dt = new Date(y, m - 1, d);
+    if (dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d) {
+      return { ts: dt.getTime() };
+    }
+  }
   const parsed = Date.parse(str);
   if (isNaN(parsed)) {
     return { error: `${fieldName} 无法解析："${str}"。请使用 ISO 8601 格式（如 2026-10-11T15:00:00+08:00）` };
@@ -1139,7 +1150,8 @@ export async function executeToolCall(
 
       case 'get_today_todos': {
         const includeDone = Boolean(args.includeDone);
-        const today = new Date().toISOString().slice(0, 10);
+        // 本地日期（北京时间）；曾用 toISOString().slice(0,10) 取「今天」→ 凌晨 0-8 点会错成昨天
+        const today = localDateKey();
         let todos = await todoDb.getAllTodos();
         todos = todos.filter((t: Todo) => t.folderDate === today);
         if (!includeDone) todos = todos.filter((t: Todo) => t.status !== 'done');
@@ -1588,7 +1600,8 @@ export async function executeToolCall(
         if (!title) return { success: false, error: 'title 不能为空' };
 
         const now = Date.now();
-        const folderDate = String(args.folderDate || new Date().toISOString().slice(0, 10));
+        // 本地日期（北京时间）；曾用 toISOString().slice(0,10) → 凌晨创建的待办会落进昨天文件夹
+        const folderDate = String(args.folderDate || localDateKey());
         const note = String(args.note || '');
         const timeParsed = parseIsoTime(args.time, 'time');
         if (timeParsed.error) {
@@ -1990,7 +2003,7 @@ export async function executeToolCall(
               id: f.id,
               content: f.content,
               category: f.category,
-              updatedAt: new Date(f.updatedAt).toISOString().slice(0, 10),
+              updatedAt: localDateKey(new Date(f.updatedAt)),
             })),
             hint: facts.length === 0
               ? '档案里还没有事实（或没有符合过滤条件的事实）；可用 update_soul 的 add 提议新增'
