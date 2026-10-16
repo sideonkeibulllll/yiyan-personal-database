@@ -16,12 +16,17 @@
  * v3.3.0 新增：
  * - 深度思考配置（键 `yiyan_worry_thinking_v1`，默认开）：thinking.enabled + reasoning_effort，
  *   语义与 Chat 页一致（开思考时不传 temperature / max_tokens）；「已生成字数」计数含思维链
- * - Soul 人格档案（settings.ai.soul）：开关 `yiyan_worry_soul_v1` 打开且档案非空时注入两个 prompt；
+ * - Soul 人格档案：开关 `yiyan_worry_soul_v1` 打开且档案非空时注入两个 prompt；
  *   反转牌生成额外授权 AI 输出 soulUpdate（由调用方挂到主页待确认，确认后才写入）
+ *
+ * v3.4.0 变更：
+ * - 注入改为 Soul 事实库渲染（怕了么视野：白名单 4 类 + 800 字预算），无事实时回退 legacy soul 文本
+ * - soulUpdate 升级为结构化变更组（add / update / retire）
  */
-import type { AIConfig, AIProviderId, WorryFlipPoint } from '@/types';
-import { AI_PROVIDER_ORDER, GLM_FREE_MODEL_POOL, PROVIDER_PRESETS, SOUL_MAX_CHARS } from '@/types';
+import type { AIConfig, AIProviderId, SoulChanges, WorryFlipPoint } from '@/types';
+import { AI_PROVIDER_ORDER, GLM_FREE_MODEL_POOL, PROVIDER_PRESETS } from '@/types';
 import { useSettingsStore } from '@/stores/settingsStore';
+import { parseSoulChanges, renderSoulPortrait } from './soulFacts';
 
 /** 非思考模式超时 */
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -164,9 +169,12 @@ export function setWorrySoulEnabled(enabled: boolean): void {
   } catch { /* 忽略写入失败 */ }
 }
 
-/** 读取当前应注入的 Soul 档案内容（开关关 / 档案为空 → null） */
+/** 读取当前应注入的 Soul 档案内容（开关关 / 无内容 → null）。
+ *  v3.4.0：优先事实库渲染（怕了么视野：白名单 4 类 + 800 字预算）；无事实时回退旧文本（兼容期） */
 export function getWorrySoulContent(): string | null {
   if (!getWorrySoulEnabled()) return null;
+  const portrait = renderSoulPortrait('worry');
+  if (portrait) return portrait;
   const soul = (useSettingsStore.getState().settings.ai.soul || '').trim();
   return soul || null;
 }
@@ -190,8 +198,15 @@ interface ResolvedEndpoint {
  * 规则与 Chat 页一致；默认（''）走设置页激活提供商，**不做 GLM 优先**。
  */
 function resolveEndpoint(): ResolvedEndpoint {
+  return resolveEndpointForModelValue(getWorryModelValue());
+}
+
+/**
+ * 按指定模型值解析请求终点（v3.4.0 抽出，供 Soul 蒸馏等复用）。
+ * 规则与 Chat 页一致；默认（''）走设置页激活提供商，**不做 GLM 优先**。
+ */
+export function resolveEndpointForModelValue(value: string): ResolvedEndpoint {
   const aiCfg = useSettingsStore.getState().settings.ai;
-  const value = getWorryModelValue();
 
   // 智能 GLM（免费池）：轮询池中模型
   if (value === '__glm_smart__') {
@@ -248,8 +263,8 @@ export interface GeneratedOutcomes {
   best: string;
 }
 
-/** 从模型输出中提取 JSON 对象（剥 ``` 围栏 + 截取首尾大括号容错） */
-function extractJson(text: string): any {
+/** 从模型输出中提取 JSON 对象（剥 ``` 围栏 + 截取首尾大括号容错）；v3.4.0 导出供 Soul 蒸馏复用 */
+export function extractJson(text: string): any {
   let s = String(text || '').trim();
   const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
   if (fence && fence[1]) s = fence[1].trim();
@@ -463,12 +478,12 @@ export async function generateOutcomes(
   return { worst, normal, best };
 }
 
-/** 反转牌生成时 AI 附带的 Soul 更新提议（可选） */
+/** 反转牌生成时 AI 附带的 Soul 变更提议（可选；v3.4.0 升级为结构化变更组） */
 export interface SoulUpdateProposal {
   /** AI 写的更新理由（为什么更新、改了什么，给用户看） */
   reason: string;
-  /** 更新后的档案全文（整体替换） */
-  content: string;
+  /** 结构化变更组（add / update / retire） */
+  changes: SoulChanges;
 }
 
 export interface FlipGenerateResult {
@@ -489,7 +504,7 @@ export async function generateFlipPoints(
 ): Promise<FlipGenerateResult> {
   const soul = getWorrySoulContent();
   const updateSection = soul
-    ? `\n\n【档案更新】如果你从这次担心中获知了关于用户的重要长期信息（新的处境、在意的点、被证实的有效应对方式等），可以在 JSON 中附带可选的 soulUpdate 字段，提议更新 ta 的人格档案；没有这样的信息就完全不要输出该字段。soulUpdate 的 reason 用一两句话说明为什么更新、改了什么（会展示给用户看），content 必须是更新后的档案完整全文（整体替换，不是增量补丁，在原内容基础上自然修订，不超过 ${Math.floor(SOUL_MAX_CHARS / 2)} 字）。`
+    ? `\n\n【档案更新】如果你从这次担心中获知了关于用户的重要长期信息（新的处境、在意的点、被证实的有效应对方式等），可以在 JSON 中附带可选的 soulUpdate 字段，提议更新 ta 的事实档案；没有这样的信息就完全不要输出该字段。\n只记事实与状态，不记指令/偏好/倾向。soulUpdate 结构：{"reason": "一两句说明（会展示给用户看）", "add": [{"content": "一条独立事实，≤100字", "category": "identity|situation|state|goal|history"}]}；如需修正已有事实，可额外带 "update": [{"matchText": "档案中逐字出现且唯一的原文片段", "content": "改后内容"}]；已明显不再成立的用 "retire": [{"matchText": "原文片段"}]（不确定原文时就不要带 update/retire）。`
     : '';
 
   const systemPrompt = `你是一位温和的心理支持助手。用户担心的一件事可能发生最坏的结果，用户已经看到了这个最坏结果。请你帮 ta 换一个角度：即使这个最坏结果真的发生，ta 的生活中也可能获得什么？
@@ -501,7 +516,7 @@ export async function generateFlipPoints(
 4. 只输出一个 JSON 对象，不要输出任何其他文字${soul ? buildSoulSection(soul) : ''}${updateSection}
 
 输出格式（严格按此 JSON 结构）：
-{"points": [{"title": "收获标题", "desc": "一句话说明……"}, {"title": "收获标题", "desc": "一句话说明……"}, {"title": "收获标题", "desc": "一句话说明……"}]${soul ? ', "soulUpdate": {"reason": "为什么更新、改了什么（可选字段，没有重要信息就不要带上）", "content": "更新后的档案全文"}' : ''}}`;
+{"points": [{"title": "收获标题", "desc": "一句话说明……"}, {"title": "收获标题", "desc": "一句话说明……"}, {"title": "收获标题", "desc": "一句话说明……"}]${soul ? ', "soulUpdate": {"reason": "为什么更新、改了什么（可选字段，没有重要信息就不要带上）", "add": [{"content": "一条新事实", "category": "situation"}]}' : ''}}`;
 
   const json = await requestJson({
     systemPrompt,
@@ -524,16 +539,16 @@ export async function generateFlipPoints(
     throw new Error('AI 生成内容不完整，请重试');
   }
 
-  // 可选：Soul 更新提议（仅当过开关开启且 AI 附带有效内容时提取）
+  // 可选：Soul 变更提议（仅当开关开启且 AI 附带有效变更组时提取）
   let soulUpdate: SoulUpdateProposal | undefined;
   if (soul) {
     const raw = json?.soulUpdate;
     if (raw && typeof raw === 'object') {
-      const updateContent = clipText(raw.content, SOUL_MAX_CHARS);
-      if (updateContent) {
+      const changes = parseSoulChanges(raw);
+      if (changes.add.length + changes.update.length + changes.retire.length > 0) {
         soulUpdate = {
           reason: clipText(raw.reason, 200),
-          content: updateContent,
+          changes,
         };
       }
     }

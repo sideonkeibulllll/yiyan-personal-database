@@ -133,6 +133,14 @@ export function deleteMemory(id: string): boolean {
 }
 
 /**
+ * （应急通道）全量替换记忆数组——仅供应急恢复使用（如 Soul 蒸馏批次的撤销还原）。
+ * 常规增删改一律走 saveMemory / updateMemory / deleteMemory。
+ */
+export function replaceAllMemories(memories: AIMemory[]): void {
+  persist(memories.map(m => ({ ...m })).slice(0, MEMORY_COUNT_MAX));
+}
+
+/**
  * 生成注入到 systemPrompt 的「长期记忆」列表文本。
  * 无记忆时返回 null（调用方自行决定是否仍注入行为引导）。
  * 超预算时按「最近更新优先」截断。

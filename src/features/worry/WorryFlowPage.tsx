@@ -507,7 +507,7 @@ export function WorryFlowPage() {
 
             {soulCaptured && (
               <p className="worry-flow-soul-hint">
-                AI 有一条人格档案的更新建议，已挂到「怕了么」主页，回去可以确认。
+                AI 有一条事实档案的变更建议，已挂到「怕了么」主页，回去可以确认。
               </p>
             )}
           </div>

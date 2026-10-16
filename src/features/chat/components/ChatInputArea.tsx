@@ -46,7 +46,7 @@ const MCP_GROUPS: { key: string; icon: string; title: string; desc: string; tool
   { key: 'entry', icon: '📊', title: '数据卡片', desc: '搜索 / 创建 / 编辑 / 标签 / 星标 / 删除', tools: ENTRY_TOOLS },
   { key: 'todo', icon: '✅', title: '待办事项', desc: '搜索 / 创建 / 编辑 / 完成 / 删除 / 标签管理', tools: TODO_TOOLS },
   { key: 'memo', icon: '📝', title: '备忘录', desc: '搜索 / 读取 / 新建 / 追加 / 删除', tools: MEMO_TOOLS },
-  { key: 'soul', icon: '🪞', title: 'Soul 人格档案', desc: '让 AI 提议更新你的人格档案（需你确认）', tools: SOUL_TOOLS },
+  { key: 'soul', icon: '🪞', title: 'Soul 事实档案', desc: '让 AI 查看事实库并提议变更（需你确认）', tools: SOUL_TOOLS },
 ];
 
 export function ChatInputArea({

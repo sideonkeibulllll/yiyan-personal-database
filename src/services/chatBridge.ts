@@ -9,7 +9,7 @@
  * - 待办标签：列出/创建/改名/改色/删除（独立标签池，颜色可自定义）
  * - 备忘录：搜索/读取/新建/追加/覆写/删除
  * - 数据连线
- * - Soul 人格档案（v3.3.0）：AI 提议更新（确认卡片展示理由+全文，用户确认后写入）
+ * - Soul 事实档案（v3.4.0）：AI 提议变更（add/update/retire 变更组；确认卡片展示理由+逐项变更+更新后画像，用户确认后写入）+ 只读 list_soul_facts
  *
  * 批量操作：写操作参数统一升级为 ID 数组（`entryIds[]` / `todoIds[]` / `memoIds[]`），
  * 同时兼容旧的单值参数（`entryId` / `todoId`）。
@@ -37,10 +37,17 @@ import { useEntryStore } from '@/stores/entryStore';
 import { useTagStore } from '@/stores/tagStore';
 import { useTodoStore } from '@/stores/todoStore';
 import { useTodoTagStore } from '@/stores/todoTagStore';
-import { useSettingsStore } from '@/stores/settingsStore';
 import type { Entry, Todo, Link, TodoTag } from '@/types';
-import { SOUL_MAX_CHARS } from '@/types';
 import { splitKeywords, rankAndFilter, relevanceScore } from '@/utils/searchRank';
+import {
+  applySoulChanges,
+  countSoulChanges,
+  isSoulFactCategory,
+  listSoulFacts,
+  parseSoulChanges,
+  previewSoulChanges,
+  renderSoulPortraitForFacts,
+} from '@/services/soulFacts';
 
 /** 把单值 / 数组参数统一成字符串数组 */
 function toStringArray(value: unknown): string[] {
@@ -72,17 +79,24 @@ function parseIsoTime(value: unknown, fieldName: string): { ts?: number; error?:
   return { ts: parsed };
 }
 
+/** 工具参数属性（v3.4.0：items 支持一层嵌套对象——update_soul 的变更组用） */
+export interface ToolProperty {
+  type: string;
+  description: string;
+  items?: {
+    type: string;
+    properties?: Record<string, ToolProperty>;
+    required?: string[];
+  };
+}
+
 /** 工具元数据（仅用于内部描述，传给 API 时由 buildToolsPayload 转换） */
 export interface BridgeTool {
   name: string;
   description: string;
   parameters: {
     type: string;
-    properties: Record<string, {
-      type: string;
-      description: string;
-      items?: { type: string };
-    }>;
+    properties: Record<string, ToolProperty>;
     required: string[];
   };
 }
@@ -511,18 +525,66 @@ export const BRIDGE_TOOLS: BridgeTool[] = [
       required: ['memoryIds'],
     },
   },
-  // === Soul 人格档案 MCP 工具（v3.3.0）===
-  // 修改用户的 Soul 人格档案；属重要操作，执行前由界面层弹确认卡片（展示理由 + 更新后全文）。
+  // === Soul 事实库 MCP 工具（v3.4.0）===
+  // 结构化事实的增改废；属重要操作，执行前由界面层弹确认卡片（展示理由 + 逐项变更 + 更新后画像）。
   {
     name: 'update_soul',
-    description: '提议更新「Soul 人格档案」——用户本人的长期人格档案（记录性格、处境、偏好等，聊天与「怕了么」都会读取）。当你发现关于用户的长期信息有重要更新时使用（新的偏好、处境变化、重要认知等）；没有重要信息就不要调用，不要频繁提议。这是重要操作：系统会先向用户弹出确认卡片（展示你给出的 reason 与更新后的全文），用户确认后才会写入，用户取消则不生效。content 必须是「更新后的档案完整全文」（整体替换，不是增量补丁），在原文基础上自然修订。',
+    description: '提议变更「Soul 事实档案」——用户本人的长期事实库（记录身份/处境/状态/目标/经历，聊天与「怕了么」都会读取渲染后的画像）。当你发现关于用户的持久事实有新增、变化或过时时使用。\n只记「事实与状态」：不要记录指令、偏好或倾向（凡是「替 AI 决定怎么回应 / 怎么对待用户」的内容一律不写；「喜欢/讨厌某事物」这类倾向也不要写）。没有重要信息就不要调用，不要频繁提议。\n可以用 add 新增、update 修改、retire 废除（事实不再成立时；软删除保留历史）——一次调用可组合多项，等于一组变更、一张确认卡。不确定现状时先调用 list_soul_facts 查看。\n这是重要操作：系统会先向用户弹出确认卡片（展示 reason、逐项变更与更新后画像），用户确认后才写入，取消则不生效。',
     parameters: {
       type: 'object',
       properties: {
-        reason: { type: 'string', description: '为什么更新、改了什么（一两句话，会展示给用户看）' },
-        content: { type: 'string', description: '更新后的档案完整全文（整体替换）' },
+        reason: { type: 'string', description: '为什么变更、改了哪些（一两句话，会展示给用户看）' },
+        add: {
+          type: 'array',
+          description: '新增的事实（每项一条独立事实，≤200 字）',
+          items: {
+            type: 'object',
+            properties: {
+              content: { type: 'string', description: '事实正文（≤200 字）' },
+              category: { type: 'string', description: '分类：identity 身份 / situation 处境 / state 状态 / goal 目标 / history 经历（默认 situation）' },
+            },
+            required: ['content'],
+          },
+        },
+        update: {
+          type: 'array',
+          description: '修改现有事实（factId 与 matchText 二选一；matchText 须是现有事实中逐字出现且唯一的片段）',
+          items: {
+            type: 'object',
+            properties: {
+              factId: { type: 'string', description: '事实 ID（先用 list_soul_facts 获取）' },
+              matchText: { type: 'string', description: '要修改的原文片段（唯一匹配；与 factId 二选一）' },
+              content: { type: 'string', description: '改后的完整新内容' },
+              category: { type: 'string', description: '可选：同时改分类' },
+            },
+            required: ['content'],
+          },
+        },
+        retire: {
+          type: 'array',
+          description: '废除不再成立的事实（软删除，保留历史）',
+          items: {
+            type: 'object',
+            properties: {
+              factId: { type: 'string', description: '事实 ID（与 matchText 二选一）' },
+              matchText: { type: 'string', description: '要废除的原文片段（唯一匹配）' },
+            },
+          },
+        },
       },
-      required: ['reason', 'content'],
+      required: ['reason'],
+    },
+  },
+  {
+    name: 'list_soul_facts',
+    description: '查看「Soul 事实档案」的全部事实（含 ID、分类、时间），只读、无副作用。修改或废除事实前先用它获取 factId 与原文。',
+    parameters: {
+      type: 'object',
+      properties: {
+        category: { type: 'string', description: '可选：只看某一类（identity/situation/state/goal/history）' },
+        keyword: { type: 'string', description: '可选：按关键词过滤正文' },
+      },
+      required: [],
     },
   },
 ];
@@ -549,15 +611,16 @@ export const MEMO_TOOLS = [
 export const MEMORY_TOOLS = [
   'save_ai_memory', 'list_ai_memories', 'update_ai_memory', 'delete_ai_memory',
 ];
-/** Soul 人格档案工具（v3.3.0）：走 MCP 组勾选（与数据卡片/待办/备忘录同机制） */
+/** Soul 事实库工具（v3.4.0）：走 MCP 组勾选（与数据卡片/待办/备忘录同机制） */
 export const SOUL_TOOLS = [
   'update_soul',
+  'list_soul_facts',
 ];
 
 /**
  * 需要用户确认后才执行的重要/危险工具。
  * 删除类：展示「将删除什么」摘要；
- * update_soul：展示 AI 给出的更新理由 + 更新后全文预览（见 describeToolPreview）。
+ * update_soul：展示理由 + 逐项变更 + 更新后画像预览（见 describeToolPreview）。
  */
 export const DANGEROUS_TOOLS = new Set(['delete_card', 'delete_todo', 'delete_memo', 'delete_todo_tag', 'delete_ai_memory', 'update_soul']);
 
@@ -589,7 +652,15 @@ export function describeToolAction(toolName: string, args: Record<string, unknow
     case 'delete_ai_memory': return `删除 ${count(args.memoryIds ?? args.memoryId)} 条长期记忆`;
     case 'update_soul': {
       const reason = String(args.reason || '').trim();
-      return reason ? `更新你的人格档案（Soul）。理由：${reason}` : '更新你的人格档案（Soul）';
+      const counts = countSoulChanges(parseSoulChanges(args));
+      const parts: string[] = [];
+      if (counts.add) parts.push(`新增 ${counts.add} 条`);
+      if (counts.update) parts.push(`修改 ${counts.update} 条`);
+      if (counts.retire) parts.push(`废除 ${counts.retire} 条`);
+      const action = parts.length > 0 ? parts.join(' · ') : '调整';
+      return reason
+        ? `更新你的人格档案（Soul）：${action}。理由：${reason}`
+        : `更新你的人格档案（Soul）：${action}`;
     }
     case 'delete_todo_tag': {
       const names = [
@@ -606,12 +677,25 @@ export function describeToolAction(toolName: string, args: Record<string, unknow
 
 /**
  * 生成确认卡片的「内容预览」（可选；界面层折叠展示）。
- * 目前仅 update_soul 使用：展示更新后的人格档案全文。
+ * 目前仅 update_soul 使用：展示逐项变更清单 + 更新后的画像（注入态预览）。
  */
 export function describeToolPreview(toolName: string, args: Record<string, unknown>): string | undefined {
   if (toolName === 'update_soul') {
-    const content = String(args.content ?? '').trim();
-    return content ? content.slice(0, SOUL_MAX_CHARS) : undefined;
+    const outcome = previewSoulChanges(parseSoulChanges(args));
+    const changed = outcome.added + outcome.updated + outcome.retired;
+    if (changed === 0 && outcome.errors.length > 0) {
+      return `⚠️ 本次变更无法执行：\n${outcome.errors.map(e => `· ${e}`).join('\n')}`;
+    }
+    const lines: string[] = ['【本次变更】'];
+    for (const d of outcome.details) lines.push(`· ${d}`);
+    if (outcome.errors.length > 0) {
+      lines.push('【以下操作无法执行】');
+      for (const e of outcome.errors) lines.push(`· ⚠️ ${e}`);
+    }
+    lines.push('');
+    lines.push('——— 更新后画像（注入态预览）———');
+    lines.push(renderSoulPortraitForFacts(outcome.next, 'chat') ?? '（暂无事实）');
+    return lines.join('\n');
   }
   return undefined;
 }
@@ -1867,16 +1951,50 @@ export async function executeToolCall(
       case 'update_soul': {
         // 注意：本 case 只有在用户于确认卡片点击「确认执行」后才会被走到
         //（update_soul 已加入 DANGEROUS_TOOLS，ChatPage 会先 requestConfirm）。
-        const content = String(args.content ?? '').trim();
-        if (!content) return { success: false, error: 'content 不能为空' };
-        const clipped = content.slice(0, SOUL_MAX_CHARS);
-        useSettingsStore.getState().updateAIConfig({ soul: clipped });
+        const outcome = applySoulChanges(parseSoulChanges(args), 'ai');
+        if (!outcome.applied) {
+          return {
+            success: false,
+            error: outcome.errors[0] || '没有可应用的变更（请检查 add/update/retire 参数）',
+            data: { errors: outcome.errors.length > 0 ? outcome.errors : undefined },
+          };
+        }
         return {
           success: true,
           data: {
-            updated: true,
-            length: clipped.length,
-            message: '已更新 Soul 人格档案',
+            added: outcome.added,
+            updated: outcome.updated,
+            retired: outcome.retired,
+            totalActive: listSoulFacts().length,
+            skipped: outcome.errors.length > 0 ? outcome.errors : undefined,
+            message: `已更新人格档案：新增 ${outcome.added} 条 · 修改 ${outcome.updated} 条 · 废除 ${outcome.retired} 条`,
+          },
+        };
+      }
+
+      case 'list_soul_facts': {
+        const category = typeof args.category === 'string' ? args.category.trim() : '';
+        const keyword = typeof args.keyword === 'string' ? args.keyword.trim().toLowerCase() : '';
+        let facts = listSoulFacts();
+        if (category && isSoulFactCategory(category)) {
+          facts = facts.filter(f => f.category === category);
+        }
+        if (keyword) {
+          facts = facts.filter(f => f.content.toLowerCase().includes(keyword));
+        }
+        return {
+          success: true,
+          data: {
+            total: facts.length,
+            facts: facts.map(f => ({
+              id: f.id,
+              content: f.content,
+              category: f.category,
+              updatedAt: new Date(f.updatedAt).toISOString().slice(0, 10),
+            })),
+            hint: facts.length === 0
+              ? '档案里还没有事实（或没有符合过滤条件的事实）；可用 update_soul 的 add 提议新增'
+              : undefined,
           },
         };
       }

@@ -71,12 +71,12 @@ export function MemoryManagerPanel({ onClose, onChanged }: MemoryManagerPanelPro
     <div className="memory-overlay" onClick={onClose}>
       <div className="memory-panel glass" onClick={e => e.stopPropagation()}>
         <div className="memory-header">
-          <h3>长期记忆</h3>
+          <h3>素材收件箱</h3>
           <button className="memory-close" onClick={onClose} title="关闭"><CloseIcon /></button>
         </div>
         <p className="memory-hint">
-          开启长期记忆后，AI 会把值得记住的信息存在这里、并在对话中自然运用（全本地存储）。
-          你手动添加的内容同样对 AI 可见。
+          这里是 AI 的素材暂存区（收件箱）：对话中值得留存的素材会先存到这里（全本地存储、不上传、不进备份）。
+          之后可以在「Soul 事实档案 → 从收件箱提炼」里升级为正式事实；你手动添加的内容同样对 AI 可见。
         </p>
 
         <div className="memory-add">
@@ -96,7 +96,7 @@ export function MemoryManagerPanel({ onClose, onChanged }: MemoryManagerPanelPro
         <div className="memory-list">
           {memories.length === 0 ? (
             <div className="memory-empty">
-              还没有记忆。<br />开启开关后，AI 会在对话中自动记住重要信息；也可以先手动添加一条。
+              收件箱是空的。<br />开启开关后，AI 会把对话中值得留存的素材暂存到这里；也可以先手动添加一条。
             </div>
           ) : (
             memories.map(m => (

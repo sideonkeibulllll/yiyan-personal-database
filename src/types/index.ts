@@ -342,8 +342,87 @@ export interface ToolOptions {
   maxToolCalls?: number;
 }
 
-/** Soul 人格档案最大字数（设置页编辑、AI 写入、怕了么弹框共用上限） */
+/** Soul 人格档案最大字数（设置页编辑、AI 写入、怕了么弹框共用上限；legacy soul 字段用） */
 export const SOUL_MAX_CHARS = 4000;
+
+// ============ Soul 事实库（v3.4.0）============
+// 档案进化：soul 文本 → 结构化事实（settings.ai.soulFacts）+ 场景渲染。
+// soul 字段降级为 legacy（迁移后清空）；注入统一走 renderSoulPortrait 渲染。
+
+/** Soul 事实库分类（只存事实与状态；不含「倾向」——避免滑向约束 AI 行为） */
+export type SoulFactCategory = 'identity' | 'situation' | 'state' | 'goal' | 'history';
+
+/** 分类中文标签（UI / 渲染共用） */
+export const SOUL_CATEGORY_LABELS: Record<SoulFactCategory, string> = {
+  identity: '身份',
+  situation: '处境',
+  state: '状态',
+  goal: '目标',
+  history: '经历',
+};
+
+/** 单条 Soul 事实 */
+export interface SoulFact {
+  id: string;
+  /** 事实正文（≤ SOUL_FACT_CONTENT_MAX 字，超出截断） */
+  content: string;
+  category: SoulFactCategory;
+  /** 来源：ai = AI 提议；user = 手动添加；migrated = 旧档案迁移 */
+  source: 'ai' | 'user' | 'migrated';
+  /** 废除 = 保留历史（软删）；仅手动删除才物理移除 */
+  status: 'active' | 'retired';
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** AI 的一组事实变更（update_soul 参数 / 怕了么 soulUpdate / 蒸馏输出共用） */
+export interface SoulChanges {
+  add: Array<{ content: string; category?: SoulFactCategory }>;
+  update: Array<{ factId?: string; matchText?: string; content: string; category?: SoulFactCategory }>;
+  retire: Array<{ factId?: string; matchText?: string }>;
+}
+
+/** Soul 事实库条数上限（超出时变更被拒） */
+export const SOUL_FACTS_MAX = 300;
+/** 单条事实字数上限 */
+export const SOUL_FACT_CONTENT_MAX = 200;
+/** chat 注入渲染预算（字符） */
+export const SOUL_PORTRAIT_CHAT_MAX = 1200;
+/** 怕了么注入渲染预算（字符） */
+export const SOUL_PORTRAIT_WORRY_MAX = 800;
+
+/**
+ * Soul 事实库数据清洗（normalizeSettings / 备份恢复时用）。
+ * 只过滤无效项；**绝不因缺省清空**（坏数据逐项剔除，合法数据原样保留）。
+ */
+export function sanitizeSoulFacts(raw: unknown): SoulFact[] {
+  if (!Array.isArray(raw)) return [];
+  const validCats = ['identity', 'situation', 'state', 'goal', 'history'];
+  const out: SoulFact[] = [];
+  const seenIds = new Set<string>();
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const f = item as Record<string, unknown>;
+    const content = typeof f.content === 'string' ? f.content.trim() : '';
+    if (!content) continue;
+    const id = typeof f.id === 'string' && f.id
+      ? f.id
+      : `fact_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    if (seenIds.has(id)) continue;
+    seenIds.add(id);
+    out.push({
+      id,
+      content: content.length > SOUL_FACT_CONTENT_MAX ? content.slice(0, SOUL_FACT_CONTENT_MAX) : content,
+      category: validCats.includes(String(f.category)) ? (f.category as SoulFactCategory) : 'situation',
+      source: f.source === 'user' || f.source === 'migrated' ? f.source : 'ai',
+      status: f.status === 'retired' ? 'retired' : 'active',
+      createdAt: typeof f.createdAt === 'number' ? f.createdAt : Date.now(),
+      updatedAt: typeof f.updatedAt === 'number' ? f.updatedAt : Date.now(),
+    });
+    if (out.length >= 1000) break;
+  }
+  return out;
+}
 
 export interface AIConfig {
   apiKey: string;
@@ -365,10 +444,15 @@ export interface AIConfig {
   /** Chat Soul 提示词（对话系统提示词） */
   chatSoul?: string;
   /**
-   * Soul 人格档案（v3.3.0）：记录用户本人（性格/处境/偏好等），
-   * 聊天与「怕了么」都会读取；AI 只能提议更新（update_soul 工具），用户确认后才写入。
+   * Soul 人格档案（v3.3.0，legacy）：旧版单文本档案。
+   * v3.4.0 起由 soulFacts 事实库取代（迁移后清空）；未迁移时仍直接注入（兼容期）。
    */
   soul?: string;
+  /**
+   * Soul 事实库（v3.4.0）：结构化事实数组，档案的唯一事实源。
+   * 注入时经 renderSoulPortrait 渲染；AI 只能提议变更（update_soul 工具），用户确认后才写入。
+   */
+  soulFacts?: SoulFact[];
   /** 数据选择器「最近」勾选项数量 */
   recentPickerCount?: number;
   /** 当前激活的付费提供商（v2.5.0 新增，缺省按 isDeepSeek 推导） */
@@ -723,6 +807,7 @@ export const DEFAULT_SETTINGS: Settings = {
     },
     chatSoul: '',
     soul: '',
+    soulFacts: [],
     recentPickerCount: 30,
   },
   context: {
@@ -888,14 +973,14 @@ export interface WorryRecord {
 }
 
 /**
- * 「怕了么」里 AI 提议的 Soul 人格档案更新（v3.3.0）。
+ * 「怕了么」里 AI 提议的 Soul 档案变更（v3.3.0 引入；v3.4.0 升级为结构化变更组）。
  * 反转牌生成时若 AI 附带 soulUpdate，会**挂到「怕了么」主页等待确认**；
- * 确认后才写入 settings.ai.soul，否则永不更新；新的建议直接覆盖旧的。
+ * 确认后经 applySoulChanges 应用到事实库，否则永不更新；新的建议直接覆盖旧的。
  */
 export interface WorryPendingSoul {
   /** AI 写的更新理由（为什么更新、改了什么，给用户看） */
   reason: string;
-  /** 更新后的档案全文（整体替换） */
-  content: string;
+  /** 结构化变更组（add / update / retire） */
+  changes: SoulChanges;
   createdAt: number;
 }

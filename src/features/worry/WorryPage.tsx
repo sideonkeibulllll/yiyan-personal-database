@@ -19,6 +19,7 @@ import {
 } from '@/services/worryAI';
 import type { WorryThinkingConfig, WorryThinkingEffort } from '@/services/worryAI';
 import { useSettingsStore } from '@/stores/settingsStore';
+import { applySoulChanges } from '@/services/soulFacts';
 import { BottomNav } from '@/components/BottomNav';
 import { TrendChart } from './components/TrendChart';
 import { RecordDetail } from './components/RecordDetail';
@@ -59,9 +60,8 @@ export function WorryPage() {
   // v3.3.0: 深度思考配置 + 启用 soul 记忆（均在「开始」页设置）
   const [thinking, setThinking] = useState<WorryThinkingConfig>(() => getWorryThinking());
   const [soulEnabled, setSoulEnabled] = useState(() => getWorrySoulEnabled());
-  // v3.3.0: 待确认的 Soul 更新建议（AI 挂到本页，确认后才写入）
+  // v3.3.0: 待确认的 Soul 变更建议（AI 挂到本页，确认后才写入；v3.4.0 结构化变更组）
   const [pendingSoul, setPendingSoul] = useState<WorryPendingSoul | null>(null);
-  const updateAIConfig = useSettingsStore(s => s.updateAIConfig);
 
   const reload = useCallback(async () => {
     const [d, all] = await Promise.all([getDraft(), getCompletedWorries()]);
@@ -105,13 +105,13 @@ export function WorryPage() {
     setWorrySoulEnabled(next);
   }, [soulEnabled]);
 
-  /** 待确认 Soul 更新：同意 → 写入人格档案并清除待确认 */
+  /** 待确认 Soul 变更：同意 → 应用到事实库并清除待确认 */
   const handleAcceptSoul = useCallback(() => {
     if (!pendingSoul) return;
-    updateAIConfig({ soul: pendingSoul.content });
+    applySoulChanges(pendingSoul.changes, 'ai');
     clearPendingSoulUpdate();
     setPendingSoul(null);
-  }, [pendingSoul, updateAIConfig]);
+  }, [pendingSoul]);
 
   /** 待确认 Soul 更新：保持不变 → 直接清除（不写入，永不更新） */
   const handleDeclineSoul = useCallback(() => {
@@ -151,14 +151,23 @@ export function WorryPage() {
             {/* v3.3.0: AI 提议的 Soul 档案更新（挂在这里等待确认；确认后才写入） */}
             {pendingSoul && (
               <div className="worry-soul-pending-card">
-                <div className="worry-soul-pending-head">AI 想更新你的人格档案</div>
+                <div className="worry-soul-pending-head">AI 想更新你的事实档案</div>
                 {pendingSoul.reason && (
                   <p className="worry-soul-pending-reason">理由：{pendingSoul.reason}</p>
                 )}
-                <details className="worry-soul-pending-details">
-                  <summary>查看更新后的全文</summary>
-                  <pre className="worry-soul-pending-text">{pendingSoul.content}</pre>
-                </details>
+                <div className="worry-soul-pending-changes">
+                  {pendingSoul.changes.add.map((c, i) => (
+                    <div key={`add-${i}`} className="worry-soul-pending-line add">＋ {c.content}</div>
+                  ))}
+                  {pendingSoul.changes.update.map((c, i) => (
+                    <div key={`upd-${i}`} className="worry-soul-pending-line">～ {c.content}</div>
+                  ))}
+                  {pendingSoul.changes.retire.map((c, i) => (
+                    <div key={`ret-${i}`} className="worry-soul-pending-line retire">
+                      － {c.matchText || c.factId || '（未知条目）'}
+                    </div>
+                  ))}
+                </div>
                 <div className="worry-two-buttons">
                   <button className="worry-btn-secondary" onClick={handleDeclineSoul}>
                     保持不变

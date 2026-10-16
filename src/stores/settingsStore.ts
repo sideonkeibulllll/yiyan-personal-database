@@ -12,7 +12,7 @@ import type {
   WidgetStyleMap,
   WidgetStyleTarget,
 } from '@/types';
-import { DEFAULT_SETTINGS, migrateAIConfig } from '@/types';
+import { DEFAULT_SETTINGS, migrateAIConfig, sanitizeSoulFacts } from '@/types';
 import { getDatabase } from '@/services/database';
 import { sanitizeEntryFilter } from '@/utils/entryFilterState';
 import { setTransferConfig } from '@/config/cloudflare';
@@ -162,6 +162,8 @@ function normalizeSettings(raw: Partial<Settings>): Settings {
     widget: sanitizeWidget(raw.widget),
   };
   merged.ai = migrateAIConfig(merged.ai);
+  // v3.4.0: Soul 事实库清洗（只过滤无效项；绝不因缺省清空——坏数据逐项剔除）
+  merged.ai = { ...merged.ai, soulFacts: sanitizeSoulFacts(merged.ai.soulFacts) };
   merged.cloud = {
     ...DEFAULT_SETTINGS.cloud,
     ...(raw.cloud || {}),

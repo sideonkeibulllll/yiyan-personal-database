@@ -6,9 +6,11 @@
 import { useState } from 'react';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { MemoryManagerPanel } from './MemoryManagerPanel';
+import { SoulManagerPanel } from './SoulManagerPanel';
 import { listMemories } from '@/services/aiMemory';
+import { countActiveSoulFacts } from '@/services/soulFacts';
 import type { AIProviderId, ProviderEntry } from '@/types';
-import { AI_PROVIDER_ORDER, PROVIDER_PRESETS, getProviderPreset, SOUL_MAX_CHARS } from '@/types';
+import { AI_PROVIDER_ORDER, PROVIDER_PRESETS, getProviderPreset } from '@/types';
 
 interface AiPanelProps {
   markDirty: (field: string) => void;
@@ -26,9 +28,12 @@ export function AiPanel({ markDirty }: AiPanelProps) {
   const updateContextConfig = useSettingsStore(state => state.updateContextConfig);
   const updatePushConfig = useSettingsStore(state => state.updatePushConfig);
   const [newModel, setNewModel] = useState('');
-  // v2.11.0: 长期记忆管理面板
+  // v2.11.0: 长期记忆管理面板（v3.4.0 起定位为「素材收件箱」）
   const [showMemoryManager, setShowMemoryManager] = useState(false);
   const [memoryCount, setMemoryCount] = useState(() => listMemories().length);
+  // v3.4.0: Soul 事实库管理面板
+  const [showSoulManager, setShowSoulManager] = useState(false);
+  const [soulFactCount, setSoulFactCount] = useState(() => countActiveSoulFacts());
 
   // v2.5.1: openai 已移除，兜底为 deepseek
   const providerId: AIProviderId = settings.ai.provider || 'deepseek';
@@ -348,25 +353,25 @@ export function AiPanel({ markDirty }: AiPanelProps) {
         <span className="form-hint">用于定制 AI 对话时的角色性格和回复风格</span>
       </div>
 
-      {/* v3.3.0: Soul 人格档案 */}
-      <div className="settings-subsection-title">Soul 人格档案</div>
+      {/* v3.4.0: Soul 事实库（档案进化） */}
+      <div className="settings-subsection-title">Soul 事实档案</div>
       <div className="form-group">
-        <label className="form-label">我的人格档案（Soul）</label>
-        <textarea
-          className="form-input glass"
-          style={{ minHeight: '120px', fontFamily: 'monospace', fontSize: '12px', resize: 'vertical' }}
-          value={settings.ai.soul ?? ''}
-          onChange={e => {
-            updateAIConfig({ soul: e.target.value.slice(0, SOUL_MAX_CHARS) });
-            markDirty('ai.soul');
-          }}
-          placeholder={'记录你自己：你是怎样的人、在意什么、最近的生活处境、喜欢的相处方式……\n（聊天与「怕了么」都会读取这份档案；AI 只能提议修改，必须经你确认后才会写入）'}
-          rows={6}
-        />
         <span className="form-hint">
-          供 AI 了解你本人（与上面的 Chat Soul 不同——那份定义 AI 的角色风格）；当前{' '}
-          {(settings.ai.soul ?? '').length} / {SOUL_MAX_CHARS} 字
+          供 AI 了解你本人（与上面的 Chat Soul 不同——那份定义 AI 的角色风格）。
+          只存事实与状态，不存指令与偏好；AI 只能提议变更，必须经你确认后才会写入。
         </span>
+        <button
+          className="settings-link-btn"
+          type="button"
+          onClick={() => setShowSoulManager(true)}
+        >
+          管理事实库（{soulFactCount} 条）
+        </button>
+        {(settings.ai.soul ?? '').trim() && (
+          <span className="form-hint">
+            检测到旧版档案文本（{(settings.ai.soul ?? '').length} 字，尚未整理）——可在「管理事实库」里用 AI 拆解为事实条目。
+          </span>
+        )}
       </div>
 
       {/* 工具调用上限（chat agent loop 预算） */}
@@ -438,17 +443,18 @@ export function AiPanel({ markDirty }: AiPanelProps) {
             checked={settings.context.enableLongTermMemory ?? false}
             onChange={e => { updateContextConfig({ enableLongTermMemory: e.target.checked }); markDirty('context.enableLongTermMemory'); }}
           />
-          <span>启用长期记忆</span>
+          <span>启用素材收件箱</span>
         </label>
         <span className="form-hint">
-          开启后 AI 会跨对话记住你的偏好和习惯，并在对话中自然运用（全本地存储，不上传）
+          AI 会把对话中值得留存的素材暂存到收件箱（全本地存储、不上传）。开启后对话中也会参考收件箱内容；
+          素材可在「Soul 事实档案 → 管理事实库 → 从收件箱提炼」里升级为正式事实。
         </span>
         <button
           className="settings-link-btn"
           type="button"
           onClick={() => setShowMemoryManager(true)}
         >
-          管理记忆（{memoryCount} 条）
+          管理收件箱（{memoryCount} 条）
         </button>
       </div>
 
@@ -478,11 +484,19 @@ export function AiPanel({ markDirty }: AiPanelProps) {
         <span className="form-hint">值越高要求越严格（当前: {(settings.push?.similarityThreshold ?? 0.7).toFixed(2)}）</span>
       </div>
 
-      {/* v2.11.0: 长期记忆管理面板 */}
+      {/* v2.11.0: 长期记忆管理面板（素材收件箱） */}
       {showMemoryManager && (
         <MemoryManagerPanel
           onClose={() => { setShowMemoryManager(false); setMemoryCount(listMemories().length); }}
           onChanged={() => setMemoryCount(listMemories().length)}
+        />
+      )}
+
+      {/* v3.4.0: Soul 事实库管理面板 */}
+      {showSoulManager && (
+        <SoulManagerPanel
+          onClose={() => { setShowSoulManager(false); setSoulFactCount(countActiveSoulFacts()); }}
+          onFactsChanged={() => setSoulFactCount(countActiveSoulFacts())}
         />
       )}
     </div>

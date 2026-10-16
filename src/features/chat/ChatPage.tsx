@@ -35,6 +35,7 @@ import {
   type ResolvedToolCall,
 } from '@/services/chatBridge';
 import { getMemoryPromptSection } from '@/services/aiMemory';
+import { renderSoulPortrait } from '@/services/soulFacts';
 import { getDatabase } from '@/services/database';
 import { getTodoDatabase } from '@/services/todoDatabase';
 import { EntryPickerPanel } from '@/components/EntryPickerPanel';
@@ -755,14 +756,15 @@ export function ChatPage() {
       // 「发送最近条目」时，通过下方 context 注入流程加入，避免误发隐私数据。
       let systemPrompt = settings.ai.chatSoul || '你是一个友好的AI助手。';
 
-      // v3.3.0: Soul 人格档案注入（用户自维护、明确供 AI 阅读；有内容才注入）
-      const soulDoc = (settings.ai.soul || '').trim();
+      // v3.4.0: Soul 事实档案注入（结构化事实渲染；无事实时回退 legacy 文本——兼容期）
+      const soulPortrait = renderSoulPortrait('chat');
+      const soulDoc = soulPortrait || (settings.ai.soul || '').trim();
       if (soulDoc) {
         systemPrompt += `\n\n## 我的人格档案（Soul）\n以下是用户为自己维护的人格档案；把它当作你早已了解的背景，自然地结合运用，不要刻意提及或复述：\n${soulDoc}`;
       }
-      // 仅当本对话启用了 Soul 工具组时，才告知 AI 具备「提议更新」的能力（对话级开关）
+      // 仅当本对话启用了 Soul 工具组时，才告知 AI 具备「提议变更」的能力（对话级开关）
       if (mcpEnabled && ((session.mcpEnabledTools ?? mcpActiveTools) || []).includes('update_soul')) {
-        systemPrompt += `\n\n（本次对话你具备更新用户「Soul 人格档案」的能力：若出现值得长期写进档案的重要信息，可调用 update_soul 提议更新，系统会先请用户确认；没有重要信息就不要提议。）`;
+        systemPrompt += `\n\n（本次对话你具备更新用户「Soul 事实档案」的能力：发现值得长期记录的持久事实时，可调用 update_soul 提议变更（新增/修改/废除；不确定现状可先用 list_soul_facts 查看），系统会先请用户确认。只记录事实与状态，不要记录指令、偏好或倾向；没有重要信息就不要提议。）`;
       }
 
       // v2.11.0: 长期记忆注入（仅当开关打开；全本地数据、用户可在设置页管理）

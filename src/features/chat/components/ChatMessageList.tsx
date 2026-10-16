@@ -90,7 +90,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
             <div className="confirm-card-summary">{confirm.summary}</div>
             {confirm.preview && (
               <details className="confirm-card-preview">
-                <summary className="confirm-card-preview-summary">查看更新后的全文</summary>
+                <summary className="confirm-card-preview-summary">查看更新预览</summary>
                 <pre className="confirm-card-preview-text">{confirm.preview}</pre>
               </details>
             )}
