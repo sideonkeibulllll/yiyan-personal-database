@@ -14,17 +14,187 @@
 }
 
 /* === 日期选择器 === */
+/* v3.5.0: 日期栏外层 —— 「选择」按钮与「上次查看」槽固定，其余日期卡横向滚动 */
+.date-selector-wrap {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-2);
+  padding: var(--space-4) 0;
+}
+
 .date-selector {
   display: flex;
   gap: var(--space-2);
   overflow-x: auto;
-  padding: var(--space-4) 0;
+  flex: 1;
+  min-width: 0;
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
 }
 
 .date-selector::-webkit-scrollbar {
   display: none;
+}
+
+/* === v3.5.0: 「选择」按钮（样式与日期卡一致，固定在日期栏最左侧） === */
+.date-pick-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 60px;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-primary);
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.date-pick-btn:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-border-secondary);
+}
+
+.date-pick-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* === v3.5.0: 日期「选择」弹窗 === */
+.todo-datepick-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: var(--space-4);
+}
+
+.todo-datepick-dialog {
+  width: 100%;
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-primary);
+  overflow: hidden;
+}
+
+.todo-datepick-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border-primary);
+}
+
+.todo-datepick-header h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+
+.todo-datepick-close {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: none;
+  color: var(--color-text-tertiary);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: var(--radius-xs);
+}
+
+.todo-datepick-close:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-elevated);
+}
+
+.todo-datepick-quicks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-4);
+}
+
+.todo-datepick-quick {
+  flex: 1;
+  min-width: 56px;
+  padding: var(--space-2) var(--space-1);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-primary);
+  background: none;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.todo-datepick-quick.on {
+  background: var(--color-accent-subtle);
+  border-color: var(--color-border-accent);
+  color: var(--color-accent-primary);
+  font-weight: 600;
+}
+
+.todo-datepick-custom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 0 var(--space-4) var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.todo-datepick-custom input {
+  flex: 1;
+  min-width: 0;
+  padding: var(--space-2);
+  border-radius: var(--radius-xs);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-primary);
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+}
+
+.todo-datepick-actions {
+  display: flex;
+  gap: var(--space-3);
+  justify-content: flex-end;
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--color-border-primary);
+}
+
+.todo-datepick-actions button {
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-primary);
+  color: var(--color-text-secondary);
+}
+
+.todo-datepick-actions button.primary {
+  background: var(--color-accent-primary);
+  border-color: var(--color-copper-primary);
+  color: var(--color-text-primary);
+}
+
+.todo-datepick-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .date-chip {
@@ -279,10 +449,12 @@
 
 /* === 从模板导入按钮 === */
 .todo-import-btn {
-  padding: var(--space-3);
+  /* v3.5.0: 今天视图有 4 个按钮（含「应用模板」），压缩横向内边距 + 禁止折行防挤 */
+  padding: var(--space-3) var(--space-2);
   border-radius: var(--radius-md);
   text-align: center;
   font-size: var(--text-sm);
+  white-space: nowrap;
   color: var(--color-text-secondary);
   cursor: pointer;
   transition: all var(--duration-fast) var(--ease-out);
@@ -290,6 +462,123 @@
 
 .todo-import-btn:active {
   transform: scale(0.98);
+}
+
+/* === v3.5.0: 「应用模板」弹层 === */
+.todo-tpl-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: var(--space-4);
+}
+
+.todo-tpl-dialog {
+  width: 100%;
+  max-width: 400px;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-primary);
+  overflow: hidden;
+}
+
+.todo-tpl-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border-primary);
+}
+
+.todo-tpl-dialog-header h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+
+.todo-tpl-close {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: none;
+  color: var(--color-text-tertiary);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: var(--radius-xs);
+}
+
+.todo-tpl-close:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-elevated);
+}
+
+.todo-tpl-list {
+  overflow-y: auto;
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.todo-tpl-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: none;
+  background: none;
+  border-radius: var(--radius-xs);
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  text-align: left;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.todo-tpl-item:hover {
+  background: var(--color-bg-elevated);
+}
+
+.todo-tpl-item:active {
+  transform: scale(0.99);
+}
+
+.todo-tpl-days {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  flex-shrink: 0;
+}
+
+.todo-tpl-empty {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  text-align: center;
+  color: var(--color-text-tertiary);
+  font-size: var(--text-sm);
+}
+
+.todo-tpl-go {
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-border-accent);
+  background: var(--color-accent-subtle);
+  color: var(--color-accent-primary);
+  font-size: var(--text-sm);
+  cursor: pointer;
 }
 
 /* === 底部固定操作栏 === */

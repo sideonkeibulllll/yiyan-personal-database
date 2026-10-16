@@ -10,7 +10,7 @@ import { useSettingsStore } from '@/stores/settingsStore';
 import { useTodoStore } from '@/stores/todoStore';
 import { getDatabase } from '@/services/database';
 import { weightedRandomSelect, filterEntries } from '@/services/random';
-import { resolveTimeRange, timeRangeLabel } from '@/utils/timeRangeFilter';
+import { resolveTimeRange } from '@/utils/timeRangeFilter';
 import { sanitizeEntryFilter } from '@/utils/entryFilterState';
 import type { EntryFilterState } from '@/utils/entryFilterState';
 import { BottomNav } from '@/components/BottomNav';
@@ -50,18 +50,6 @@ const RefreshIcon = () => (
 const StarFilledIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
     <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
-  </svg>
-);
-
-const StarOutlineIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
-  </svg>
-);
-
-const CloseIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
   </svg>
 );
 
@@ -518,18 +506,8 @@ export function RandomPage() {
     setIsLoading(false);
   }, [entries, cardsPerPage, saveSnapshot, persistFilter]);
 
-  // 清除单个筛选条件（徽章上的 × ；不关面板）
-  const clearStarred = useCallback(() => {
-    applyFilter({ ...filter, starred: undefined });
-  }, [applyFilter, filter]);
-
-  const clearTimeRange = useCallback(() => {
-    applyFilter({ ...filter, timeRange: {} });
-  }, [applyFilter, filter]);
-
-  const removeTag = useCallback((tagId: string) => {
-    applyFilter({ ...filter, tagIds: filter.tagIds.filter(id => id !== tagId) });
-  }, [applyFilter, filter]);
+  // v3.5.0: 当前是否处于筛选状态（右上角筛选按钮标橙提示；v3.5.0 起不再显示上方标签块）
+  const hasActiveFilter = filter.tagIds.length > 0 || filter.starred !== undefined || !!filter.timeRange.preset;
 
   // 清理长按计时器
   useEffect(() => {
@@ -552,37 +530,13 @@ export function RandomPage() {
 
   return (
     <div className="random-page">
-      {/* 筛选按钮 - 右上角浮动 */}
-      <button className="filter-btn" onClick={() => setShowFilter(true)}>
+      {/* 筛选按钮 - 右上角浮动（v3.5.0: 处于筛选条件中时标橙示意，不再显示上方标签块） */}
+      <button
+        className={`filter-btn ${hasActiveFilter ? 'active' : ''}`}
+        onClick={() => setShowFilter(true)}
+      >
         <FunnelIcon />
       </button>
-
-      {/* 筛选标签显示 */}
-      {(filter.tagIds.length > 0 || filter.starred !== undefined || filter.timeRange.preset) && (
-        <div className="active-filters">
-          {filter.starred !== undefined && (
-            <span className="filter-badge">
-              {filter.starred ? <><StarFilledIcon /> 已星标</> : <><StarOutlineIcon /> 未星标</>}
-              <button onClick={clearStarred}><CloseIcon /></button>
-            </span>
-          )}
-          {filter.timeRange.preset && (
-            <span className="filter-badge">
-              {timeRangeLabel(filter.timeRange)}
-              <button onClick={clearTimeRange}><CloseIcon /></button>
-            </span>
-          )}
-          {filter.tagIds.map(tagId => {
-            const tag = tags.find(t => t.id === tagId);
-            return tag ? (
-              <span key={tagId} className="filter-badge">
-                #{tag.name}
-                <button onClick={() => removeTag(tagId)}><CloseIcon /></button>
-              </span>
-            ) : null;
-          })}
-        </div>
-      )}
 
       <main className="page-content">
         {currentEntries.length > 0 ? (

@@ -11,7 +11,8 @@ import { useSettingsStore } from '@/stores/settingsStore';
 import { getTodoDatabase } from '@/services/todoDatabase';
 import { BottomNav } from '@/components/BottomNav';
 import { applySortOrder, setSortOrder, extractIds, clearSortOrder } from '@/utils/todoSortOrder';
-import type { Todo } from '@/types';
+import { parseAutoWeekdays, WEEKDAY_LABELS } from '@/utils/todoWeekdays';
+import type { Todo, TodoTemplate } from '@/types';
 import './TodoPage.css';
 
 /** 暖色调色板（8 种交替分配，与待办管理器一致） */
@@ -94,6 +95,33 @@ function formatTime(ts?: number): string {
 /** 待办日期栏目缓存键（v2.6.0：避免每次进页面全量查询） */
 const PENDING_DATES_CACHE_KEY = 'yiyan_todo_pending_dates_v1';
 
+/** v3.5.0: 「上次查看的日期」记录键（「选择」按钮跳转的日期，新的顶掉旧的） */
+const LAST_PICKED_DATE_KEY = 'yiyan_todo_last_picked_date_v1';
+
+/** 日期卡的 label（与 buildDateOptions 的规则一致） */
+function dateChipLabel(folderDate: string): string {
+  const parts = folderDate.split('-').map(Number);
+  if (parts.length !== 3 || parts.some(isNaN)) return folderDate;
+  const [y, m, d] = parts;
+  const date = new Date(y, m - 1, d);
+  date.setHours(0, 0, 0, 0);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const diffDays = Math.round((date.getTime() - today.getTime()) / 86400000);
+  if (diffDays === 0) return '今天';
+  if (diffDays === 1) return '明天';
+  if (diffDays === 2) return '后天';
+  if (diffDays === -1) return '昨天';
+  if (diffDays === -2) return '前天';
+  return `${m}/${d}`;
+}
+
+/** 日期卡上的"日"数字 */
+function dateChipDay(folderDate: string): string {
+  const parts = folderDate.split('-').map(Number);
+  return parts.length === 3 ? String(parts[2]) : '';
+}
+
 export function TodoPage() {
   const navigate = useNavigate();
   const [selectedDate, setSelectedDate] = useState(() => {
@@ -122,6 +150,7 @@ export function TodoPage() {
   const toggleDone = useTodoStore(state => state.toggleDone);
   const deleteTodo = useTodoStore(state => state.deleteTodo);
   const isLoading = useTodoStore(state => state.isLoading);
+  const refreshAllTodos = useTodoStore(state => state.refreshAllTodos);
   const settings = useSettingsStore(state => state.settings);
   const loadTodoTags = useTodoTagStore(state => state.loadTags);
 
@@ -132,7 +161,38 @@ export function TodoPage() {
   const dragStateRef = useRef<{ id: string; startY: number; fromIndex: number; toIndex: number } | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
 
+  // v3.5.0: 「应用模板」弹层（入口仅在「今天」视图显示）
+  const [showApplyTemplate, setShowApplyTemplate] = useState(false);
+  const [applyTemplates, setApplyTemplates] = useState<TodoTemplate[]>([]);
+
+  // v3.5.0: 日期「选择」弹窗 + 「上次查看」槽（记录选择器跳转的日期，新的顶掉旧的）
+  const [datePickerOpen, setDatePickerOpen] = useState(false);
+  const [pickerValue, setPickerValue] = useState<string>(selectedDate);
+  const [lastPicked, setLastPicked] = useState<string | null>(() => {
+    try { return localStorage.getItem(LAST_PICKED_DATE_KEY) || null; } catch { return null; }
+  });
+
   const dateOptions = useMemo(() => buildDateOptions(pendingFolderDates), [pendingFolderDates]);
+  /** 「上次查看」槽仅在记录日期不在动态日期列表时显示（避免与常规日期卡重复） */
+  const lastPickedVisible = !!lastPicked && !dateOptions.some(o => o.folderDate === lastPicked);
+  /** 选择弹窗的快捷项（以今天为基准：-3天 / -1天 / 今天 / +1天 / +3天） */
+  const quickDateOptions = useMemo(() => {
+    const t = new Date();
+    t.setHours(0, 0, 0, 0);
+    const mk = (offset: number, label: string) => {
+      const d = new Date(t);
+      d.setDate(d.getDate() + offset);
+      return { folderDate: formatDate(d), label };
+    };
+    return [mk(-3, '-3天'), mk(-1, '-1天'), mk(0, '今天'), mk(1, '+1天'), mk(3, '+3天')];
+  }, []);
+  /** 今天的文件夹日期键（本地时区） */
+  const todayFolder = useMemo(() => {
+    const t = new Date();
+    t.setHours(0, 0, 0, 0);
+    return formatDate(t);
+  }, []);
+  const isTodayView = selectedDate === todayFolder;
   const timerRef = useRef<ReturnType<typeof setInterval>>();
 
   // 加载当前选中日期的待办
@@ -303,6 +363,41 @@ export function TodoPage() {
     navigate('/todo/templates');
   }, [navigate]);
 
+  // v3.5.0: 日期「选择」弹窗确定 → 跳转 + 记录「上次查看」（新的顶掉旧的）
+  const handlePickConfirm = useCallback(() => {
+    if (!pickerValue) return;
+    setSelectedDate(pickerValue);
+    setLastPicked(pickerValue);
+    try { localStorage.setItem(LAST_PICKED_DATE_KEY, pickerValue); } catch { /* 忽略 */ }
+    setDatePickerOpen(false);
+  }, [pickerValue]);
+
+  // v3.5.0: 「应用模板」——打开弹层前拉取模板列表
+  const handleOpenApplyTemplate = useCallback(async () => {
+    try {
+      const db = await getTodoDatabase();
+      setApplyTemplates(await db.getAllTemplates());
+    } catch (e) {
+      console.error('[TodoPage] 加载模板失败:', e);
+      setApplyTemplates([]);
+    }
+    setShowApplyTemplate(true);
+  }, []);
+
+  // v3.5.0: 应用所选模板到当前选中日期（今天视图入口）
+  const handleApplyTemplate = useCallback(async (templateId: string) => {
+    try {
+      const db = await getTodoDatabase();
+      await db.importTemplateToDate(templateId, selectedDate);
+      setShowApplyTemplate(false);
+      await loadTodosByDate(selectedDate);
+      refreshAllTodos().catch(() => {});
+    } catch (e) {
+      console.error('[TodoPage] 应用模板失败:', e);
+      alert(`应用模板失败：${(e as Error).message}`);
+    }
+  }, [selectedDate, loadTodosByDate, refreshAllTodos]);
+
   // 倒计时条
   const activeTodos = sortedTodos.filter(t => t.status === 'pending' && t.endTime && t.endTime > now);
   const countdownTodos = activeTodos
@@ -317,19 +412,45 @@ export function TodoPage() {
       onTouchEnd={handleTouchEnd}
     >
       <main className="page-content">
-        {/* 日期选择器：今天 + 所有有未完成待办的日期 */}
-        <div className="date-selector">
-          {dateOptions.map(d => (
+        {/* 日期选择器：「选择」按钮（固定） + 「上次查看」槽 + 今天 + 所有有未完成待办的日期 */}
+        <div className="date-selector-wrap">
+          <button
+            type="button"
+            className="date-pick-btn"
+            onClick={() => {
+              if (sortMode) return;
+              setPickerValue(selectedDate);
+              setDatePickerOpen(true);
+            }}
+            disabled={sortMode}
+          >
+            选择
+          </button>
+          {lastPickedVisible && lastPicked && (
             <button
-              key={d.folderDate}
-              className={`date-chip ${selectedDate === d.folderDate ? 'active' : ''}`}
-              onClick={() => { if (!sortMode) setSelectedDate(d.folderDate); }}
+              type="button"
+              className={`date-chip date-chip-picked ${selectedDate === lastPicked ? 'active' : ''}`}
+              onClick={() => { if (!sortMode) setSelectedDate(lastPicked); }}
               disabled={sortMode}
+              title="上次查看的日期"
             >
-              <span className="date-label">{d.label}</span>
-              <span className="date-day">{d.date.getDate()}</span>
+              <span className="date-label">{dateChipLabel(lastPicked)}</span>
+              <span className="date-day">{dateChipDay(lastPicked)}</span>
             </button>
-          ))}
+          )}
+          <div className="date-selector">
+            {dateOptions.map(d => (
+              <button
+                key={d.folderDate}
+                className={`date-chip ${selectedDate === d.folderDate ? 'active' : ''}`}
+                onClick={() => { if (!sortMode) setSelectedDate(d.folderDate); }}
+                disabled={sortMode}
+              >
+                <span className="date-label">{d.label}</span>
+                <span className="date-day">{d.date.getDate()}</span>
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* 排序模式提示条 */}
@@ -399,6 +520,15 @@ export function TodoPage() {
         >
           <span>{sortMode ? '完成排序' : '调整顺序'}</span>
         </button>
+        {isTodayView && (
+          <button
+            className="todo-import-btn glass"
+            onClick={() => void handleOpenApplyTemplate()}
+            disabled={sortMode}
+          >
+            <span>应用模板</span>
+          </button>
+        )}
         <button
           className="todo-import-btn glass"
           onClick={handleImportTemplate}
@@ -425,6 +555,84 @@ export function TodoPage() {
             </div>
           ))}
         </div>
+      )}
+
+      {/* v3.5.0: 日期「选择」弹窗 —— 快捷日期 / 自定义日期 → 跳转 */}
+      {datePickerOpen && createPortal(
+        <div className="todo-datepick-overlay" onClick={() => setDatePickerOpen(false)}>
+          <div className="todo-datepick-dialog glass" onClick={e => e.stopPropagation()}>
+            <div className="todo-datepick-header">
+              <h3>选择日期</h3>
+              <button className="todo-datepick-close" onClick={() => setDatePickerOpen(false)} aria-label="关闭">×</button>
+            </div>
+            <div className="todo-datepick-quicks">
+              {quickDateOptions.map(q => (
+                <button
+                  key={q.folderDate}
+                  type="button"
+                  className={`todo-datepick-quick ${pickerValue === q.folderDate ? 'on' : ''}`}
+                  onClick={() => setPickerValue(q.folderDate)}
+                >
+                  {q.label}
+                </button>
+              ))}
+            </div>
+            <label className="todo-datepick-custom">
+              <span>自定义日期</span>
+              <input
+                type="date"
+                value={pickerValue}
+                onChange={e => setPickerValue(e.target.value)}
+              />
+            </label>
+            <div className="todo-datepick-actions">
+              <button onClick={() => setDatePickerOpen(false)}>取消</button>
+              <button className="primary" onClick={handlePickConfirm} disabled={!pickerValue}>确定</button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
+
+      {/* v3.5.0: 「应用模板」弹层 —— 选择模板一键落到当前日期 */}
+      {showApplyTemplate && createPortal(
+        <div className="todo-tpl-overlay" onClick={() => setShowApplyTemplate(false)}>
+          <div className="todo-tpl-dialog glass" onClick={e => e.stopPropagation()}>
+            <div className="todo-tpl-dialog-header">
+              <h3>应用模板到「{isTodayView ? '今天' : selectedDate}」</h3>
+              <button className="todo-tpl-close" onClick={() => setShowApplyTemplate(false)} aria-label="关闭">×</button>
+            </div>
+            {applyTemplates.length === 0 ? (
+              <div className="todo-tpl-empty">
+                <p>还没有模板</p>
+                <button
+                  className="todo-tpl-go"
+                  onClick={() => { setShowApplyTemplate(false); navigate('/todo/templates'); }}
+                >
+                  去创建模板
+                </button>
+              </div>
+            ) : (
+              <div className="todo-tpl-list">
+                {applyTemplates.map(tpl => (
+                  <button
+                    key={tpl.id}
+                    className="todo-tpl-item"
+                    onClick={() => void handleApplyTemplate(tpl.id)}
+                  >
+                    <span className="todo-tpl-name">{tpl.name}</span>
+                    {tpl.autoWeekdays && (
+                      <span className="todo-tpl-days">
+                        {parseAutoWeekdays(tpl.autoWeekdays).map(d => WEEKDAY_LABELS[d]).join('、')}
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>,
+        document.body,
       )}
 
       <BottomNav />

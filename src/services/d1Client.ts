@@ -106,12 +106,27 @@ let _connCache: { at: number; result: { ok: boolean; message: string } } | null 
 const CONN_CACHE_TTL = 60_000;
 
 /**
+ * 旧库列迁移（v3.5.0）：
+ * templates.auto_weekdays —— 模板「自动应用（周1~7）」规则。
+ * CREATE TABLE IF NOT EXISTS 不会给已存在的表补列，这里用 ALTER TABLE 幂等补齐
+ *（列已存在时 D1 会报错，直接吞掉）。
+ */
+async function d1MigrateSchema(): Promise<void> {
+  try {
+    await d1Query('ALTER TABLE templates ADD COLUMN auto_weekdays TEXT', []);
+  } catch {
+    // 列已存在（新库建表时已含 / 已迁移过）→ 忽略
+  }
+}
+
+/**
  * 初始化表结构（进程内只执行一次）
  */
 let _schemaReady = false;
 export async function d1InitSchemaOnce(): Promise<void> {
   if (_schemaReady) return;
   await d1BatchExec(D1_INIT_SQL);
+  await d1MigrateSchema();
   _schemaReady = true;
 }
 
@@ -120,6 +135,7 @@ export async function d1InitSchemaOnce(): Promise<void> {
  */
 export async function d1InitSchema(): Promise<void> {
   await d1BatchExec(D1_INIT_SQL);
+  await d1MigrateSchema();
 }
 
 /**

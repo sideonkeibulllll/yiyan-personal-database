@@ -19,7 +19,6 @@ const EntryViewPage = lazy(() => import('@/features/entry/EntryViewPage').then(m
 const ChatPage = lazy(() => import('@/features/chat/ChatPage').then(m => ({ default: m.ChatPage })));
 const TodoPage = lazy(() => import('@/features/todo/TodoPage').then(m => ({ default: m.TodoPage })));
 const TodoEditPage = lazy(() => import('@/features/todo/TodoEditPage').then(m => ({ default: m.TodoEditPage })));
-const TodoManagerPage = lazy(() => import('@/features/todo/TodoManagerPage').then(m => ({ default: m.TodoManagerPage })));
 const TodoTemplatePage = lazy(() => import('@/features/todo/TodoTemplatePage').then(m => ({ default: m.TodoTemplatePage })));
 const TodoRecycleBinPage = lazy(() => import('@/features/todo/TodoRecycleBinPage').then(m => ({ default: m.TodoRecycleBinPage })));
 const WheelPage = lazy(() => import('@/features/wheel/WheelPage').then(m => ({ default: m.WheelPage })));
@@ -153,14 +152,6 @@ const router = createHashRouter([
     element: (
       <Suspense fallback={<Loading />}>
         <TodoEditPage />
-      </Suspense>
-    ),
-  },
-  {
-    path: '/todo/manager',
-    element: (
-      <Suspense fallback={<Loading />}>
-        <TodoManagerPage />
       </Suspense>
     ),
   },

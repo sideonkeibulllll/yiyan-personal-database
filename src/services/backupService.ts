@@ -852,6 +852,10 @@ async function restoreFromIndexed(filename: string): Promise<RestoreResult> {
     if (!twi?.template) continue;
     try {
       await todoDb.createTemplate(twi.template.name, { id: twi.template.id });
+      // v3.5.0: 恢复「自动应用」周几规则（旧备份无该字段 → 跳过）
+      if (twi.template.autoWeekdays) {
+        await todoDb.updateTemplate(twi.template.id, { autoWeekdays: twi.template.autoWeekdays });
+      }
       if (Array.isArray(twi.items)) {
         for (const item of twi.items) {
           await todoDb.addTemplateItem({
@@ -1283,6 +1287,10 @@ async function restoreFromZip(zip: JSZip, overwrite: boolean): Promise<RestoreRe
       if (!tpl || existingTplNames.has(tpl.name)) continue;
 
       const newTpl = await todoDb.createTemplate(tpl.name);
+      // v3.5.0: 恢复「自动应用」周几规则（旧备份无该字段 → 跳过）
+      if (tpl.autoWeekdays) {
+        await todoDb.updateTemplate(newTpl.id, { autoWeekdays: tpl.autoWeekdays });
+      }
       if (item.items && Array.isArray(item.items)) {
         for (const tplItem of item.items) {
           await todoDb.addTemplateItem({

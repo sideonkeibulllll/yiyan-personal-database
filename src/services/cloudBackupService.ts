@@ -44,7 +44,7 @@ import type {
   CloudRestoreResult,
 } from './cloudBackupTypes';
 
-const APP_VERSION = '3.4.0';
+const APP_VERSION = '3.5.0';
 const SYNC_STATE_KEY = 'last_backup_ts';
 
 /** 并发批处理（限制并发数，避免一次性发起过多 I/O） */
@@ -311,9 +311,9 @@ export async function backupToCloud(): Promise<CloudBackupResult> {
   try {
     await d1BatchInsert(
       `INSERT OR REPLACE INTO templates
-       (id, name, is_deleted, backup_batch_id)
-       VALUES (?, ?, 0, ?)`,
-      changedTemplates.map(t => [t.id, t.name, result.batchId]),
+       (id, name, auto_weekdays, is_deleted, backup_batch_id)
+       VALUES (?, ?, ?, 0, ?)`,
+      changedTemplates.map(t => [t.id, t.name, t.autoWeekdays || null, result.batchId]),
     );
     result.templatesSynced = changedTemplates.length;
     await d1BatchInsert(
@@ -597,6 +597,10 @@ export async function restoreFromCloud(): Promise<CloudRestoreResult> {
     if (existingTplNames.has(row.name)) continue;
     try {
       const newTpl = await todoDb.createTemplate(row.name);
+      // v3.5.0: 恢复「自动应用」周几规则（旧云端数据无该列 → undefined，跳过）
+      if (row.auto_weekdays) {
+        await todoDb.updateTemplate(newTpl.id, { autoWeekdays: row.auto_weekdays });
+      }
       const items = await d1Query(
         'SELECT * FROM template_items WHERE template_id = ? ORDER BY sort_order',
         [row.id]

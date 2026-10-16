@@ -469,11 +469,13 @@ export function WorryFlowPage() {
                       <button className="worry-btn-secondary" onClick={handleFlipTap}>
                         {flipError ? '重试' : '反转这张牌'}
                       </button>
-                      {flipError && (
-                        <button className="worry-btn-ghost" onClick={() => void updateRecord({}, 6)}>
-                          跳过这步
-                        </button>
-                      )}
+                      {/* v3.5.0: 常显「算了，谢谢」——误入反转牌这一步也能直接跳过，不强制 AI 生成 */}
+                      <button
+                        className="worry-btn-ghost"
+                        onClick={() => void updateRecord({ skippedFlip: true }, 6)}
+                      >
+                        算了，谢谢
+                      </button>
                     </>
                   )}
                 </div>

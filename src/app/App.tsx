@@ -10,6 +10,7 @@ import { useEntryStore } from '@/stores/entryStore';
 import { useTagStore } from '@/stores/tagStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useTodoStore } from '@/stores/todoStore';
+import { matchesAutoWeekdays } from '@/utils/todoWeekdays';
 
 /** Triangle alert icon */
 const TriangleAlertSvg = () => (
@@ -127,11 +128,117 @@ function scheduleWheelWidgetSync(): void {
   })();
 }
 
+/** 本地「今天」的日期键（YYYY-MM-DD，本地时区） */
+function todayKeyLocal(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** 「每日维护」最近一次执行的日期键（跨天才重新跑；模块级，双实例防重） */
+let dailyMaintenanceDay = '';
+let dailyMaintenanceRunning = false;
+
+/** 模板「自动应用」当日记录：{ templateId: 'YYYY-MM-DD' }（运行时状态，不进备份/云同步） */
+const TPL_AUTO_APPLIED_KEY = 'yiyan_tpl_auto_applied_v1';
+
+/**
+ * 每日维护（v3.5.0）：启动 / 回到前台时触发，每天只执行一次。
+ * ① 「今日处理」过天自动完成：勾了「今日处理」且未完成的待办，到了第二天
+ *    自动标记为已完成（就不用手动划掉）。
+ *    判定基准 updatedAt —— 两端 updateTodo 都会强制刷新它，
+ *    等价于「最后一次勾选/编辑发生在昨天或更早」；当天再编辑/重新激活、
+ *    手动取消勾选都会自然改变判定结果（详情见需求备注）。
+ * ② 模板「自动应用」：今天是模板勾选的星期（周1~7 多选）→ 自动把该模板
+ *    落到今天；每个模板每天仅生成一次（localStorage 记录去重）。
+ */
+async function runDailyMaintenance(): Promise<void> {
+  const today = todayKeyLocal();
+  if (dailyMaintenanceDay === today || dailyMaintenanceRunning) return;
+  dailyMaintenanceRunning = true;
+  try {
+    const db = await getTodoDatabase();
+    let todoChanged = false;
+
+    // ① 「今日处理」过天自动完成
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const threshold = todayStart.getTime();
+    const all = await db.getAllTodos();
+    let completed = 0;
+    for (const t of all) {
+      if (t.isToday && t.status === 'pending' && !t.deletedAt && t.updatedAt < threshold) {
+        try {
+          await db.updateTodo(t.id, { status: 'done', completedAt: Date.now() });
+          completed++;
+        } catch (e) {
+          console.warn('[每日维护] 自动完成失败:', t.id, e);
+        }
+      }
+    }
+    if (completed > 0) {
+      todoChanged = true;
+      console.info(`[每日维护] 「今日处理」过天自动完成 ${completed} 条`);
+    }
+
+    // ② 模板「自动应用」（今天命中的模板 → 生成到今天的待办）
+    try {
+      const templates = await db.getAllTemplates();
+      let applied: Record<string, string> = {};
+      try {
+        applied = JSON.parse(localStorage.getItem(TPL_AUTO_APPLIED_KEY) || '{}') || {};
+      } catch {
+        applied = {};
+      }
+      let generated = 0;
+      let appliedChanged = false;
+      for (const tpl of templates) {
+        if (!matchesAutoWeekdays(tpl.autoWeekdays)) continue;
+        if (applied[tpl.id] === today) continue;
+        try {
+          await db.importTemplateToDate(tpl.id, today);
+          applied[tpl.id] = today;
+          appliedChanged = true;
+          generated++;
+        } catch (e) {
+          console.warn('[每日维护] 模板自动应用失败:', tpl.id, e);
+        }
+      }
+      if (appliedChanged) {
+        // 顺手清掉非今天的旧记录（防无限增长）
+        for (const key of Object.keys(applied)) {
+          if (applied[key] !== today) delete applied[key];
+        }
+        try {
+          localStorage.setItem(TPL_AUTO_APPLIED_KEY, JSON.stringify(applied));
+        } catch { /* 忽略（记录失败仅会导致下次重复生成，无碍） */ }
+      }
+      if (generated > 0) {
+        todoChanged = true;
+        console.info(`[每日维护] 模板自动应用：生成 ${generated} 个模板的今日待办`);
+      }
+    } catch (e) {
+      console.warn('[每日维护] 模板自动应用检查失败:', e);
+    }
+
+    if (todoChanged) {
+      useTodoStore.getState().refreshAllTodos().catch(() => {});
+    }
+    dailyMaintenanceDay = today;
+  } catch (e) {
+    console.warn('[每日维护] 执行失败（下次触发时重试）:', e);
+  } finally {
+    dailyMaintenanceRunning = false;
+  }
+}
+
 /**
  * 后台维护任务：过期归档
  * 不阻塞界面显示，启动关键路径之外执行
  */
 async function runBackgroundTasks(): Promise<void> {
+  // v3.5.0: 每日维护（「今日处理」过天自动完成）
+  await runDailyMaintenance();
+
   // 过期自动归档：将过期满 1 个月的待办移入回收站
   try {
     const db = await getTodoDatabase();
@@ -191,12 +298,13 @@ export function App() {
             initTodoAutoSyncSafe();
             // v2.14.0: 转盘小组件盘序同步 + 消费原生转动结果
             scheduleWheelWidgetSync();
+            // v3.5.0: 后台维护任务挪到数据加载完成后执行，避免「每日维护」的
+            // refreshAllTodos 与 loadAllTodos 竞态（旧数据覆盖自动完成结果）
+            if (!backgroundTasksStarted) {
+              backgroundTasksStarted = true;
+              void runBackgroundTasks();
+            }
           });
-
-        if (!backgroundTasksStarted) {
-          backgroundTasksStarted = true;
-          runBackgroundTasks();
-        }
       } catch (err) {
         console.error('初始化失败:', err);
         setError((err as Error).message);
@@ -206,6 +314,16 @@ export function App() {
 
     init();
   }, [loadEntriesProgressive, loadTags, loadSettings, loadAllTodos]);
+
+  // v3.5.0: 回到前台时跑「每日维护」——移动端 App 常驻后台，隔天回前台也能触发
+  //（跨天判定幂等：当天已执行过则直接跳过）
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void runDailyMaintenance();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, []);
 
   // v2.12.0: 记忆来信——点击通知直达卡片浏览页。
   // 冷启动可靠：框架在 onCreate 即把启动意图递给插件，事件保留至监听注册后重放。

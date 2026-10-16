@@ -251,6 +251,11 @@ export interface TodoTag {
 export interface TodoTemplate {
   id: string;
   name: string;
+  /**
+   * 自动应用规则（v3.5.0）：周几多选，逗号分隔的 ISO 数字（1=周一 … 7=周日）。
+   * 例："1,2,3,4,5" = 工作日每天自动应用；空/undefined = 不自动应用。
+   */
+  autoWeekdays?: string;
   createdAt: number;
   updatedAt: number;
 }

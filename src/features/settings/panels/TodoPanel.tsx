@@ -80,13 +80,6 @@ export function TodoPanel({ markDirty }: TodoPanelProps) {
       </div>
 
       <div className="settings-subsection-title">高级</div>
-      <button className="settings-item glass" onClick={() => navigate('/todo/manager')}>
-        <div className="item-left">
-          <span className="item-title">待办管理器</span>
-          <span className="item-desc">时间轴视图 · 批量操作</span>
-        </div>
-        <span className="item-arrow"><IconChevronRight /></span>
-      </button>
       <button className="settings-item glass" onClick={() => navigate('/todo/templates')}>
         <div className="item-left">
           <span className="item-title">模板管理</span>

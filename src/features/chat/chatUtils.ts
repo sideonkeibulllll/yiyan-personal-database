@@ -225,3 +225,51 @@ export function truncateApiMessagesSafely(
   }
   return result;
 }
+
+/* === v3.5.0: 输入框草稿（按会话隔离，localStorage 持久化） ===
+ * 独立于聊天会话数据库/备份体系：草稿是高频临时内容，单独存 localStorage
+ *（不进云备份/设备互传，参照转盘先例），退出聊天页再回来也不丢。
+ */
+const CHAT_DRAFTS_KEY = 'yiyan_chat_drafts_v1';
+
+/** 读取全部草稿表（解析失败时容错为空表） */
+export function loadChatDrafts(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(CHAT_DRAFTS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+}
+
+/** 写入某会话的草稿（空文本 → 删除该键，保持存储干净） */
+export function saveChatDraft(sessionId: string, text: string): void {
+  try {
+    const drafts = loadChatDrafts();
+    if (text) {
+      drafts[sessionId] = text;
+    } else if (sessionId in drafts) {
+      delete drafts[sessionId];
+    } else {
+      return;
+    }
+    localStorage.setItem(CHAT_DRAFTS_KEY, JSON.stringify(drafts));
+  } catch {
+    /* 静默：草稿写入失败不阻塞输入 */
+  }
+}
+
+/** 删除某会话的草稿（删除会话时清理孤儿） */
+export function deleteChatDraft(sessionId: string): void {
+  try {
+    const drafts = loadChatDrafts();
+    if (sessionId in drafts) {
+      delete drafts[sessionId];
+      localStorage.setItem(CHAT_DRAFTS_KEY, JSON.stringify(drafts));
+    }
+  } catch {
+    /* 静默 */
+  }
+}

@@ -176,6 +176,7 @@ CREATE TABLE IF NOT EXISTS todo_tag_relations (
 CREATE TABLE IF NOT EXISTS templates (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
+  auto_weekdays TEXT,
   is_deleted INTEGER DEFAULT 0,
   backup_batch_id TEXT
 );

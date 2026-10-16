@@ -170,6 +170,7 @@ class NativeTodoDatabaseService implements ITodoDatabaseService {
       `CREATE TABLE IF NOT EXISTS todo_templates (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
+        auto_weekdays TEXT,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
       )`,
@@ -195,6 +196,14 @@ class NativeTodoDatabaseService implements ITodoDatabaseService {
 
     // 批量执行：一次跨桥提交全部 DDL，替代原来 5 次串行 db.run()
     await this.db.execute(schemas.join(';\n') + ';');
+
+    // v3.5.0 列迁移：旧库的 todo_templates 补 auto_weekdays（模板「自动应用」星期规则）。
+    // SQLite 的 ALTER TABLE ADD COLUMN 不支持 IF NOT EXISTS，用 try/catch 幂等处理。
+    try {
+      await this.db.run('ALTER TABLE todo_templates ADD COLUMN auto_weekdays TEXT');
+    } catch {
+      // 列已存在（新库 / 已迁移）→ 忽略
+    }
   }
 
   // ==================== 待办 CRUD ====================
@@ -516,6 +525,7 @@ class NativeTodoDatabaseService implements ITodoDatabaseService {
     return result.values?.map(row => ({
       id: row.id as string,
       name: row.name as string,
+      autoWeekdays: (row.auto_weekdays as string) || undefined,
       createdAt: row.created_at as number,
       updatedAt: row.updated_at as number,
     })) || [];
@@ -528,6 +538,7 @@ class NativeTodoDatabaseService implements ITodoDatabaseService {
     return {
       id: result.values[0].id as string,
       name: result.values[0].name as string,
+      autoWeekdays: (result.values[0].auto_weekdays as string) || undefined,
       createdAt: result.values[0].created_at as number,
       updatedAt: result.values[0].updated_at as number,
     };
@@ -538,6 +549,8 @@ class NativeTodoDatabaseService implements ITodoDatabaseService {
     const fields: string[] = [];
     const values: unknown[] = [];
     if (updates.name !== undefined) { fields.push('name = ?'); values.push(updates.name); }
+    // v3.5.0: 「自动应用」周几规则（key 存在即更新，传空串/undefined 写 NULL 清空）
+    if ('autoWeekdays' in updates) { fields.push('auto_weekdays = ?'); values.push(updates.autoWeekdays || null); }
     fields.push('updated_at = ?'); values.push(Date.now()); values.push(id);
     await this.db.run(`UPDATE todo_templates SET ${fields.join(', ')} WHERE id = ?`, values);
   }
@@ -600,11 +613,13 @@ class NativeTodoDatabaseService implements ITodoDatabaseService {
     const fields: string[] = [];
     const values: unknown[] = [];
     if (updates.title !== undefined) { fields.push('title = ?'); values.push(updates.title); }
-    if (updates.note !== undefined) { fields.push('note = ?'); values.push(updates.note); }
-    if (updates.startTime !== undefined) { fields.push('start_time = ?'); values.push(updates.startTime); }
-    if (updates.endTime !== undefined) { fields.push('end_time = ?'); values.push(updates.endTime); }
+    // v3.5.0：可空字段用「key 存在即更新」判断（对齐 todos 的 v3.2.1 修复）：
+    // 传 undefined 表示清空（写 SQL NULL），否则「清空备注/时间/标签」会被静默跳过。
+    if ('note' in updates) { fields.push('note = ?'); values.push(updates.note ?? null); }
+    if ('startTime' in updates) { fields.push('start_time = ?'); values.push(updates.startTime ?? null); }
+    if ('endTime' in updates) { fields.push('end_time = ?'); values.push(updates.endTime ?? null); }
     if (updates.isToday !== undefined) { fields.push('is_today = ?'); values.push(updates.isToday ? 1 : 0); }
-    if (updates.tagIds !== undefined) { fields.push('tag_ids = ?'); values.push(updates.tagIds); }
+    if ('tagIds' in updates) { fields.push('tag_ids = ?'); values.push(updates.tagIds ?? null); }
     if (updates.sortOrder !== undefined) { fields.push('sort_order = ?'); values.push(updates.sortOrder); }
     values.push(id);
     await this.db.run(`UPDATE todo_template_items SET ${fields.join(', ')} WHERE id = ?`, values);

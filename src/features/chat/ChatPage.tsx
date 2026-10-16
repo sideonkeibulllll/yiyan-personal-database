@@ -46,7 +46,7 @@ import {
   saveChatSession as saveSessionDb,
   deleteChatSession as deleteSessionDb,
 } from '@/services/chatSessionService';
-import { loadSessionsSync, createId, generateTitle, buildModelOptions, parseModelValue, truncateApiMessagesSafely } from './chatUtils';
+import { loadSessionsSync, createId, generateTitle, buildModelOptions, parseModelValue, truncateApiMessagesSafely, loadChatDrafts, saveChatDraft, deleteChatDraft } from './chatUtils';
 import type { ApiMessage } from './chatUtils';
 import type { ChatMessage, ChatSession, SearchSelectedResult, ThinkingEffort } from './chatTypes';
 import { streamChatCompletion } from './chatStream';
@@ -63,6 +63,8 @@ export function ChatPage() {
   const [sessions, setSessions] = useState<ChatSession[]>(() => loadSessionsSync());
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [input, setInput] = useState('');
+  /** v3.5.0: 输入撤销栈版本号（栈本体在 refs，用它触发按钮可用态刷新） */
+  const [historyVersion, setHistoryVersion] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
@@ -184,6 +186,30 @@ export function ChatPage() {
   /** sessions 最新镜像：流式回调需要在 React state 之外读取/更新最新值 */
   const sessionsRef = useRef<ChatSession[]>(sessions);
 
+  /* === v3.5.0: 输入草稿 & 撤销栈（按会话隔离） ===
+   * - 草稿：localStorage 按会话 id 存档（切换保留、退出不丢）
+   * - 撤销栈：Map<会话 id, {stack,index}>，切换会话各自保留、互不污染
+   * - 空态（未选会话）用 '__none__' 作为虚拟会话键 */
+  const inputHistoryMapRef = useRef<Map<string, { stack: string[]; index: number }>>(new Map());
+  /** 当前撤销栈所属的会话键（用于检测切换，切换轮吞掉压栈） */
+  const historySessionRef = useRef<string | null>(null);
+  /** input 最新值镜像（退出页面时兜底 flush 草稿） */
+  const inputLiveRef = useRef('');
+  /** 上一次参与草稿切换的会话 id（null = 空态） */
+  const lastDraftSessionRef = useRef<string | null>(null);
+  /** 撤销栈的“上次同步值”：判断 input 变化是否要压栈 */
+  const inputRefMirror = useRef('');
+
+  /** 取某会话键的输入撤销栈；不存在则以空串为基线初始化 */
+  const getHistoryByKey = useCallback((key: string) => {
+    let h = inputHistoryMapRef.current.get(key);
+    if (!h) {
+      h = { stack: [''], index: 0 };
+      inputHistoryMapRef.current.set(key, h);
+    }
+    return h;
+  }, []);
+
   const currentSession = sessions.find(s => s.id === currentSessionId) || null;
   const messages = currentSession?.messages ?? [];
   const currentModel = currentSession?.model || '';
@@ -235,10 +261,12 @@ export function ChatPage() {
       delete (window as any).__yiyan_pending_chat_draft__;
       // 与「新建对话」同语义：复用已有空会话，否则新建一个
       const emptySession = base.find(s => s.messages.length === 0);
+      let targetId: string;
       if (emptySession) {
         sessionsRef.current = base;
         setSessions(base);
         setCurrentSessionId(emptySession.id);
+        targetId = emptySession.id;
       } else {
         const newSession: ChatSession = {
           id: createId(),
@@ -252,7 +280,16 @@ export function ChatPage() {
         setSessions(next);
         setCurrentSessionId(newSession.id);
         saveSessionDb(newSession).catch(() => {});
+        targetId = newSession.id;
       }
+      // v3.5.0: 预填内容优先于草稿恢复——先同步草稿/撤销栈基线，防「草稿切换 effect」把预填覆盖掉
+      lastDraftSessionRef.current = targetId;
+      historySessionRef.current = targetId;
+      const pendingHist = getHistoryByKey(targetId);
+      pendingHist.stack = [pending.text];
+      pendingHist.index = 0;
+      inputRefMirror.current = pending.text;
+      setHistoryVersion(v => v + 1);
       setInput(pending.text);
     };
     loadChatSessions().then(dbSessions => {
@@ -447,6 +484,8 @@ export function ChatPage() {
     if (emptySession) {
       // 复用已有空会话时，把当前思考模式同步过去（v2.11.0：新对话继承当前开关，避免"刚开了又关"）
       persistSessions(sessions.map(s => s.id === emptySession.id ? { ...s, thinkingEnabled, thinkingEffort } : s));
+      // v3.5.0: 复用空会话 = 从空白开始，清掉它可能残留的旧草稿（否则切换 effect 会把它恢复回来）
+      deleteChatDraft(emptySession.id);
       setCurrentSessionId(emptySession.id);
     } else {
       const newSession: ChatSession = {
@@ -474,6 +513,8 @@ export function ChatPage() {
 
   const handleDeleteSession = useCallback((id: string, e: React.MouseEvent) => {
     e.stopPropagation();
+    // v3.5.0: 顺手清掉该会话的输入草稿（切走时的 flush 会因“会话已不存在”而跳过，不会写回）
+    deleteChatDraft(id);
     const next = sessions.filter(s => s.id !== id);
     persistSessions(next);
     deleteSessionDb(id).catch(() => {});
@@ -1226,15 +1267,19 @@ export function ChatPage() {
 
   /* === 输入框撤销 / 重做（模拟 Ctrl+Z / Ctrl+Y，供手机端点击）===
    * 浏览器原生撤销栈在受控 textarea 下会被 React 重渲染打断，
-   * 这里自己维护快照栈：记录「上一次 input 变化前的值 + 光标位置」。 */
-  const inputHistoryRef = useRef<{ stack: string[]; index: number }>({ stack: [''], index: 0 });
-  const [historyVersion, setHistoryVersion] = useState(0);
-  const lastInputRef = useRef('');
-  const inputRefMirror = useRef('');
+   * 这里自己维护快照栈：记录「上一次 input 变化前的值」。
+   * v3.5.0：栈按会话隔离（Map 键=会话 id），切换会话各自保留、互不污染。 */
 
-  // 每次 input 变化时压栈（超过 60 步丢弃最旧）
+  // 每次 input 变化时压栈（超过 60 步丢弃最旧）。
+  // ⚠️ 本 effect 必须声明在下方「草稿切换 effect」之前：
+  //    会话切换那一轮由本 effect 先“吞掉”变化并同步键，草稿 effect 再重建全套基线。
   useEffect(() => {
-    const h = inputHistoryRef.current;
+    const key = currentSessionId ?? '__none__';
+    if (historySessionRef.current !== key) {
+      historySessionRef.current = key;
+      return;
+    }
+    const h = getHistoryByKey(key);
     const prevSnapshot = inputRefMirror.current;
     if (prevSnapshot === input) return;
     // 若上一次操作是撤销/重做（index 不在末尾），先截断分叉
@@ -1246,7 +1291,8 @@ export function ChatPage() {
     h.index = h.stack.length - 1;
     inputRefMirror.current = input;
     setHistoryVersion(v => v + 1);
-  }, [input]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [input, currentSessionId]);
 
   const applyHistoryValue = useCallback((value: string) => {
     setInput(value);
@@ -1259,23 +1305,77 @@ export function ChatPage() {
     });
   }, []);
 
-  const canUndo = inputHistoryRef.current.index > 0;
-  const canRedo = inputHistoryRef.current.index < inputHistoryRef.current.stack.length - 1;
+  // 当前会话的撤销栈（render 期间读取；由 historyVersion / 会话切换触发刷新）
+  const activeHistory = inputHistoryMapRef.current.get(currentSessionId ?? '__none__');
+  const canUndo = !!activeHistory && activeHistory.index > 0;
+  const canRedo = !!activeHistory && activeHistory.index < activeHistory.stack.length - 1;
 
   const handleUndo = useCallback(() => {
-    const h = inputHistoryRef.current;
-    if (h.index <= 0) return;
+    const h = inputHistoryMapRef.current.get(currentSessionId ?? '__none__');
+    if (!h || h.index <= 0) return;
     h.index -= 1;
     applyHistoryValue(h.stack[h.index]);
-  }, [applyHistoryValue]);
+  }, [currentSessionId, applyHistoryValue]);
 
   const handleRedo = useCallback(() => {
-    const h = inputHistoryRef.current;
-    if (h.index >= h.stack.length - 1) return;
+    const h = inputHistoryMapRef.current.get(currentSessionId ?? '__none__');
+    if (!h || h.index >= h.stack.length - 1) return;
     h.index += 1;
     applyHistoryValue(h.stack[h.index]);
-  }, [applyHistoryValue]);
+  }, [currentSessionId, applyHistoryValue]);
   void historyVersion; // 仅用于触发按钮可用态刷新
+
+  /* === v3.5.0: 输入框草稿 —— 按会话隔离（切换保留、退出不丢）===
+   * 切换会话：旧会话立即落盘 → 新会话恢复草稿 → 重建该会话撤销栈基线。
+   * （必须放在压栈 effect 之后：压栈 effect 先把切换轮吞掉，这里再统一处理。） */
+  useEffect(() => {
+    if (lastDraftSessionRef.current === currentSessionId) return;
+    const prevId = lastDraftSessionRef.current;
+    const prevKey = prevId ?? '__none__';
+    lastDraftSessionRef.current = currentSessionId;
+    // 离开旧会话：立即落盘当前输入（仅当会话仍存在；已删除会话不写孤儿草稿）
+    if (!prevId || sessionsRef.current.some(s => s.id === prevId)) {
+      saveChatDraft(prevKey, input);
+    }
+    // 进入新会话：恢复草稿。
+    // 撤销栈：该会话的旧栈仍保留在 Map 里（指针值 == 草稿时原样续用，
+    // 切走再切回可继续撤销）；否则（首次进入/栈不存在）以草稿为基线重建。
+    // ⚠️ 无论如何都要刷新 mirror，否则恢复动作本身会被压栈、污染撤销历史。
+    const drafts = loadChatDrafts();
+    const draft = currentSessionId ? (drafts[currentSessionId] ?? '') : (drafts.__none__ ?? '');
+    const h = getHistoryByKey(currentSessionId ?? '__none__');
+    if (h.stack[h.index] !== draft) {
+      h.stack = [draft];
+      h.index = 0;
+    }
+    inputRefMirror.current = draft;
+    historySessionRef.current = currentSessionId ?? '__none__';
+    setHistoryVersion(v => v + 1);
+    setInput(draft);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentSessionId]);
+
+  // 输入变化 → 500ms 防抖落盘（会话切换/页面卸载时另有立即 flush）
+  useEffect(() => {
+    const key = currentSessionId ?? '__none__';
+    const timer = window.setTimeout(() => saveChatDraft(key, input), 500);
+    return () => window.clearTimeout(timer);
+  }, [input, currentSessionId]);
+
+  // input 最新值镜像（供卸载兜底 flush 读取）
+  useEffect(() => {
+    inputLiveRef.current = input;
+  }, [input]);
+
+  // 退出聊天页（组件卸载）：把最新输入兜底落盘，防抖窗口内退出不丢
+  useEffect(() => {
+    return () => {
+      const prevId = lastDraftSessionRef.current;
+      if (prevId && !sessionsRef.current.some(s => s.id === prevId)) return;
+      saveChatDraft(prevId ?? '__none__', inputLiveRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleClearMessages = useCallback(() => {
     if (!currentSession) return;

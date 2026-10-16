@@ -3,7 +3,7 @@
  *
  * v2.6.0 状态拆分（性能优化）：
  * - `todos`     全量未删除待办，供 HomePage 顶部卡片 / RandomPage 等使用
- * - `dateTodos` 当前选中日期的待办，供 TodoPage / TodoManagerPage 使用
+ * - `dateTodos` 当前选中日期的待办，供 TodoPage 使用
  *
  * 拆分前两个页面共用同一个 `todos` 数组，`loadTodosByDate` 会把全量数据覆盖成
  * 单日数据，导致首页卡片丢失其他日期的待办；为了兜底只能每次进页面重新全量查询，
