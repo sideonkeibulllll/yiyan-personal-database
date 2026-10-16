@@ -143,11 +143,14 @@ const TPL_AUTO_APPLIED_KEY = 'yiyan_tpl_auto_applied_v1';
 
 /**
  * 每日维护（v3.5.0）：启动 / 回到前台时触发，每天只执行一次。
- * ① 「今日处理」过天自动完成：勾了「今日处理」且未完成的待办，到了第二天
- *    自动标记为已完成（就不用手动划掉）。
- *    判定基准 updatedAt —— 两端 updateTodo 都会强制刷新它，
- *    等价于「最后一次勾选/编辑发生在昨天或更早」；当天再编辑/重新激活、
- *    手动取消勾选都会自然改变判定结果（详情见需求备注）。
+ * ① 「今日处理」过天自动完成：勾了「今日处理」且未完成的待办，在它挂的日期
+ *    过去之后的次日首次打开时，自动标记为已完成（就不用手动划掉）。
+ *    两道闸（日期闸为 v3.5.2 新增）：
+ *    - 日期闸：folderDate 必须已过去 —— 挂 20 号 → 21 号首个自然日才允许划掉；
+ *      挂未来日期的不再提前被划；folderDate 缺失（异常数据）不拦。
+ *    - updatedAt 闸：两端 updateTodo 都会强制刷新它，等价于「最后一次勾选/
+ *      编辑发生在昨天或更早」；当天再编辑/重新激活、手动取消勾选都会自然
+ *      改变判定结果（详情见需求备注）。
  * ② 模板「自动应用」：今天是模板勾选的星期（周1~7 多选）→ 自动把该模板
  *    落到今天；每个模板每天仅生成一次（localStorage 记录去重）。
  */
@@ -166,7 +169,11 @@ async function runDailyMaintenance(): Promise<void> {
     const all = await db.getAllTodos();
     let completed = 0;
     for (const t of all) {
-      if (t.isToday && t.status === 'pending' && !t.deletedAt && t.updatedAt < threshold) {
+      // v3.5.2 日期闸：它挂的日期（folderDate）还没过去时不划——挂 20 号的
+      // 「今日处理」要到 21 号（首个自然日之后）才可能被自动完成；
+      // 缺失 folderDate 的异常数据不拦（保持旧的 updatedAt 判定）。
+      const dayPassed = !t.folderDate || t.folderDate < today;
+      if (t.isToday && t.status === 'pending' && !t.deletedAt && dayPassed && t.updatedAt < threshold) {
         try {
           await db.updateTodo(t.id, { status: 'done', completedAt: Date.now() });
           completed++;
