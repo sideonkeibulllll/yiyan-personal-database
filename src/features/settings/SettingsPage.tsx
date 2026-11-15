@@ -7,7 +7,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { BottomNav } from '@/components/BottomNav';
 import { incrementalImport } from '@/utils/import';
-import { IconSave } from '@/components/icons';
+import { IconSave, IconChevronRight } from '@/components/icons';
 import type { ImportResult } from '@/features/datamanager/types';
 import {
   createBackup,
@@ -77,6 +77,7 @@ import { NotifyPanel } from './panels/NotifyPanel';
 import { WidgetPanel } from './panels/WidgetPanel';
 import { WidgetStylePanel } from './panels/WidgetStylePanel';
 import './SettingsPage.css';
+import './SettingsNavMobile.css';
 
 /** 设置面板类型 */
 type SettingsTab =
@@ -98,37 +99,173 @@ type SettingsTab =
   | 'mcpGroups'
   | 'glm';
 
-/** 左侧栏配置项 */
-const TAB_LIST: { key: SettingsTab; label: string }[] = [
-  { key: 'ai', label: 'AI 配置' },
-  { key: 'todo', label: '待办配置' },
-  { key: 'random', label: '随机浏览' },
-  { key: 'notify', label: '记忆来信' },
-  { key: 'widget', label: '桌面橱窗' },
-  { key: 'widgetStyle', label: '桌面组件样式' },
-  { key: 'dataManager', label: '数据管理' },
-  { key: 'import', label: '导入' },
-  { key: 'export', label: '导出' },
-  { key: 'backup', label: '本地备份' },
-  { key: 'restore', label: '数据恢复' },
-  { key: 'cloud', label: '云端备份' },
-  { key: 'sync', label: '设备互通' },
-  { key: 'prompts', label: '提示词' },
-  { key: 'promptLib', label: '提示词库' },
-  { key: 'mcpGroups', label: 'MCP 分组' },
-  { key: 'glm', label: 'GLM 配置' },
+/** 导航叶子项 */
+interface NavLeaf {
+  key: SettingsTab;
+  label: string;
+  /** 搜索时可命中的别名（如「ai」能搜到 AI 配置） */
+  alias?: string;
+}
+
+/**
+ * 设置导航分组（v3.6.1）
+ *
+ * 为什么分组：移动端原本是 17 个平级 tab 横向滚动，要滑三屏才到「MCP 分组」，
+ * 而且每加一个面板就更长一节。现在移动端是「分组 → 子页 → 面板」三级，
+ * 首页固定 4 行；桌面端仍是左侧栏（只是条目从 17 减到 14）。
+ */
+interface NavGroup {
+  key: string;
+  label: string;
+  desc: string;
+  items: NavLeaf[];
+}
+
+const NAV_GROUPS: NavGroup[] = [
+  {
+    key: 'ai',
+    label: 'AI 与提示词',
+    desc: '模型配置 · 功能提示词 · 提示词库 · MCP',
+    items: [
+      { key: 'ai', label: 'AI 配置', alias: 'api key model 模型' },
+      { key: 'glm', label: 'GLM 配置', alias: '免费 智谱' },
+      { key: 'prompts', label: '功能提示词', alias: '标签建议 连线建议 上下文' },
+      { key: 'promptLib', label: '提示词库', alias: '常用 模板 教学' },
+      { key: 'mcpGroups', label: 'MCP 分组', alias: '工具 分组' },
+    ],
+  },
+  {
+    key: 'data',
+    label: '数据与备份',
+    desc: '数据管理 · 备份恢复 · 设备互通',
+    items: [
+      { key: 'dataManager', label: '数据管理', alias: '标签 组' },
+      { key: 'backup', label: '本地备份', alias: 'zip 导出' },
+      { key: 'cloud', label: '云端备份', alias: 'r2 d1 中转站' },
+      { key: 'sync', label: '设备互通', alias: '局域网 互传' },
+    ],
+  },
+  {
+    key: 'daily',
+    label: '日常与通知',
+    desc: '待办 · 随机浏览 · 记忆来信',
+    items: [
+      { key: 'todo', label: '待办配置', alias: '模板 自动' },
+      { key: 'random', label: '随机浏览', alias: '权重 卡片' },
+      { key: 'notify', label: '记忆来信', alias: '提醒 推送' },
+    ],
+  },
+  {
+    key: 'desktop',
+    label: '桌面组件',
+    desc: '橱窗筛选与外观',
+    items: [
+      { key: 'widget', label: '桌面橱窗', alias: '小组件 候选' },
+      { key: 'widgetStyle', label: '桌面组件样式', alias: '外观 配色' },
+    ],
+  },
 ];
 
+/** 桌面端左侧栏与搜索用的扁平列表（按分组顺序展开） */
+const NAV_LEAVES: NavLeaf[] = NAV_GROUPS.flatMap(g => g.items);
+
+/**
+ * 降级为子入口的面板：不再出现在导航里，统一从「数据管理」进。
+ * key 保留 —— 旧的 `#/settings?tab=import` 深链照样能用。
+ */
+const SUB_ENTRY_TABS: NavLeaf[] = [
+  { key: 'import', label: '导入数据', alias: '合并 增量' },
+  { key: 'export', label: '导出数据', alias: 'json 备份' },
+  { key: 'restore', label: '恢复数据', alias: 'zip 还原' },
+];
+
+/** 搜索范围：导航项 + 子入口 */
+const SEARCHABLE: NavLeaf[] = [...NAV_LEAVES, ...SUB_ENTRY_TABS];
+
+/** 任意 tab（含子入口）→ 所属分组 key */
+const TAB_GROUP: Record<string, string> = (() => {
+  const map: Record<string, string> = {};
+  for (const g of NAV_GROUPS) for (const it of g.items) map[it.key] = g.key;
+  for (const s of SUB_ENTRY_TABS) map[s.key] = 'data';
+  return map;
+})();
+
+/** tab → 导航高亮项（子入口高亮它的父项「数据管理」） */
+const TAB_HIGHLIGHT: Record<string, SettingsTab> = (() => {
+  const map: Record<string, SettingsTab> = {};
+  for (const it of NAV_LEAVES) map[it.key] = it.key;
+  for (const s of SUB_ENTRY_TABS) map[s.key] = 'dataManager';
+  return map;
+})();
+
 /** 合法的 tab 值集合（供 ?tab= 深链校验，防止脏参数把面板渲染成空白） */
-const TAB_KEYS = new Set<string>(TAB_LIST.map(t => t.key));
+const TAB_KEYS = new Set<string>(SEARCHABLE.map(i => i.key));
+
+/** 移动端设置断点（与 SettingsPage.css 的 @media (max-width: 768px) 对齐） */
+const MOBILE_QUERY = '(max-width: 768px)';
 
 export function SettingsPage() {
   // 当前选中的面板（支持 /settings?tab=promptLib 这类深链，供 Chat 里的「管理」直达）
   const [searchParams] = useSearchParams();
-  const [activeTab, setActiveTab] = useState<SettingsTab>(() => {
+  /** 深链带了合法 tab → 移动端直接落到详情页，而不是先看分组列表 */
+  const deepLinkTab = (() => {
     const fromUrl = searchParams.get('tab');
-    return fromUrl && TAB_KEYS.has(fromUrl) ? (fromUrl as SettingsTab) : 'ai';
-  });
+    return fromUrl && TAB_KEYS.has(fromUrl) ? (fromUrl as SettingsTab) : null;
+  })();
+  const [activeTab, setActiveTab] = useState<SettingsTab>(deepLinkTab ?? 'ai');
+
+  /* === 移动端三级导航（v3.6.1）：分组列表 → 组内子页 → 面板 === */
+  const [isMobileLayout, setIsMobileLayout] = useState(() => window.matchMedia(MOBILE_QUERY).matches);
+  const [mobileView, setMobileView] = useState<'index' | 'group' | 'detail'>(deepLinkTab ? 'detail' : 'index');
+  const [openGroupKey, setOpenGroupKey] = useState<string | null>(deepLinkTab ? (TAB_GROUP[deepLinkTab] ?? null) : null);
+  const [navKeyword, setNavKeyword] = useState('');
+
+  useEffect(() => {
+    const mq = window.matchMedia(MOBILE_QUERY);
+    const onChange = () => setIsMobileLayout(mq.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+
+  /**
+   * URL 里的 ?tab= 变化时跟随（v3.6.1）。
+   * 场景：已经在设置页，又被深链指到另一个面板 —— 同一路由不会重挂组件，
+   * 光靠 useState 初始化器是不够的，会「点了没反应」。
+   */
+  useEffect(() => {
+    const fromUrl = searchParams.get('tab');
+    if (!fromUrl || !TAB_KEYS.has(fromUrl)) return;
+    const tab = fromUrl as SettingsTab;
+    if (tab === activeTab) return;
+    setActiveTab(tab);
+    setOpenGroupKey(TAB_GROUP[tab] ?? null);
+    if (window.matchMedia(MOBILE_QUERY).matches) setMobileView('detail');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
+  /** 当前 tab 在导航里应该高亮哪一项（子入口高亮「数据管理」） */
+  const highlightTab = TAB_HIGHLIGHT[activeTab] ?? activeTab;
+  const currentGroup = NAV_GROUPS.find(g => g.key === (openGroupKey ?? TAB_GROUP[activeTab]));
+
+  /** 移动端：进面板 */
+  const openPanel = (key: SettingsTab) => {
+    setActiveTab(key);
+    setOpenGroupKey(TAB_GROUP[key] ?? null);
+    setMobileView('detail');
+  };
+
+  /** 移动端：从面板退回（有分组就回组内页，否则回首页） */
+  const closePanel = () => {
+    const g = TAB_GROUP[activeTab];
+    setOpenGroupKey(g ?? null);
+    setMobileView(g ? 'group' : 'index');
+  };
+
+  const navMatches = (() => {
+    const kw = navKeyword.trim().toLowerCase();
+    if (!kw) return null;
+    return SEARCHABLE.filter(i => i.label.toLowerCase().includes(kw) || (i.alias ?? '').toLowerCase().includes(kw));
+  })();
 
   // 保存状态
   const [saveMessage, setSaveMessage] = useState('');
@@ -718,7 +855,7 @@ export function SettingsPage() {
         return <WidgetStylePanel />;
 
       case 'dataManager':
-        return <DataManagerPanel />;
+        return <DataManagerPanel onOpenTab={openPanel} />;
 
       case 'import':
         return (
@@ -836,42 +973,123 @@ export function SettingsPage() {
         <h1 className="settings-title">设置</h1>
       </header>
 
-      {/* 主体布局：左侧栏 + 右侧配置项 */}
-      <div className="settings-layout">
-        {/* 左侧导航栏 */}
-        <nav className="settings-sidebar">
-          {TAB_LIST.map(tab => (
-            <button
-              key={tab.key}
-              className={`settings-nav-item ${activeTab === tab.key ? 'active' : ''}`}
-              onClick={() => setActiveTab(tab.key)}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </nav>
+      {/* 主体布局：桌面端左栏 + 右面板；移动端「分组 → 子页 → 面板」三级导航 */}
+      <div className={`settings-layout ${isMobileLayout ? 'settings-layout-mobile' : ''}`}>
+        {/* 桌面端：左侧栏 */}
+        {!isMobileLayout && (
+          <nav className="settings-sidebar">
+            {NAV_LEAVES.map(tab => (
+              <button
+                key={tab.key}
+                className={`settings-nav-item ${highlightTab === tab.key ? 'active' : ''}`}
+                onClick={() => setActiveTab(tab.key)}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </nav>
+        )}
 
-        {/* 右侧配置面板 */}
-        <main className="settings-content">
-          {renderPanel()}
-        </main>
-      </div>
-
-      {/* 底部保存按钮 */}
-      <footer className="settings-footer">
-        <button
-          className={`settings-save-btn ${dirtyFields.size > 0 ? 'has-changes' : ''}`}
-          onClick={handleSave}
-        >
-          <IconSave />
-          <span>{dirtyFields.size > 0 ? `保存更改 (${dirtyFields.size})` : '保存'}</span>
-        </button>
-        {showSaveToast && (
-          <div className="settings-save-toast">
-            ✅ {saveMessage}
+        {/* 移动端：分组首页 / 组内子页 */}
+        {isMobileLayout && mobileView !== 'detail' && (
+          <div className="settings-mobile-nav">
+            {mobileView === 'index' ? (
+              <>
+                <input
+                  className="settings-nav-search"
+                  type="text"
+                  placeholder="搜索设置项…（提示词 / 备份 / 模型）"
+                  value={navKeyword}
+                  onChange={e => setNavKeyword(e.target.value)}
+                />
+                {navMatches ? (
+                  navMatches.length === 0 ? (
+                    <div className="settings-nav-empty">没有匹配的设置项</div>
+                  ) : (
+                    <div className="settings-nav-list">
+                      {navMatches.map(item => (
+                        <button key={item.key} className="settings-nav-row" onClick={() => openPanel(item.key)}>
+                          <span className="settings-nav-row-label">{item.label}</span>
+                          <span className="settings-nav-row-hint">
+                            {NAV_GROUPS.find(g => g.key === TAB_GROUP[item.key])?.label}
+                          </span>
+                          <IconChevronRight />
+                        </button>
+                      ))}
+                    </div>
+                  )
+                ) : (
+                  <div className="settings-nav-list">
+                    {NAV_GROUPS.map(g => (
+                      <button
+                        key={g.key}
+                        className="settings-nav-group"
+                        onClick={() => { setOpenGroupKey(g.key); setMobileView('group'); }}
+                      >
+                        <span className="settings-nav-group-main">
+                          <span className="settings-nav-group-label">{g.label}</span>
+                          <span className="settings-nav-group-desc">{g.desc}</span>
+                        </span>
+                        <span className="settings-nav-group-count">{g.items.length}</span>
+                        <IconChevronRight />
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <button className="settings-nav-back" onClick={() => { setMobileView('index'); setNavKeyword(''); }}>
+                  ← 设置
+                </button>
+                <h2 className="settings-nav-group-title">{currentGroup?.label}</h2>
+                <div className="settings-nav-list">
+                  {currentGroup?.items.map(item => (
+                    <button
+                      key={item.key}
+                      className={`settings-nav-row ${activeTab === item.key ? 'active' : ''}`}
+                      onClick={() => openPanel(item.key)}
+                    >
+                      <span className="settings-nav-row-label">{item.label}</span>
+                      <IconChevronRight />
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         )}
-      </footer>
+
+        {/* 配置面板（移动端只在详情页显示） */}
+        {(!isMobileLayout || mobileView === 'detail') && (
+          <main className={`settings-content ${isMobileLayout ? 'settings-content-mobile' : ''}`}>
+            {isMobileLayout && (
+              <button className="settings-nav-back settings-detail-back" onClick={closePanel}>
+                ← {currentGroup ? currentGroup.label : '设置'}
+              </button>
+            )}
+            {renderPanel()}
+          </main>
+        )}
+      </div>
+
+      {/* 底部保存按钮（移动端导航页没有可保存的东西，不显示） */}
+      {(!isMobileLayout || mobileView === 'detail') && (
+        <footer className="settings-footer">
+          <button
+            className={`settings-save-btn ${dirtyFields.size > 0 ? 'has-changes' : ''}`}
+            onClick={handleSave}
+          >
+            <IconSave />
+            <span>{dirtyFields.size > 0 ? `保存更改 (${dirtyFields.size})` : '保存'}</span>
+          </button>
+          {showSaveToast && (
+            <div className="settings-save-toast">
+              ✅ {saveMessage}
+            </div>
+          )}
+        </footer>
+      )}
 
       <BottomNav />
     </div>

@@ -1,5 +1,9 @@
 /**
- * 设置面板 - 提示词配置
+ * 设置面板 - 功能提示词
+ *
+ * v3.6.1：从「提示词」改名「功能提示词」，和「提示词库」区分开 ——
+ * 这里放的是**功能内部用**的提示词（标签建议 / 连线建议 / 对话上下文等），
+ * 不是你自己攒来复用的那批。
  *
  * settings 数据在 zustand store 中，面板直接订阅，行为与原先一致。
  */
@@ -37,7 +41,11 @@ export function PromptsPanel({ markDirty }: PromptsPanelProps) {
 
   return (
     <div className="settings-panel-content">
-      <h2 className="panel-title">提示词配置</h2>
+      <h2 className="panel-title">功能提示词</h2>
+      <p className="form-hint" style={{ marginTop: 0 }}>
+        这些是<strong>功能内部</strong>用的提示词（标签建议、连线建议、对话上下文等），改错了对应功能会变差。
+        想攒自己复用的提示词，请去「提示词库」—— 那边才是给 Chat 挂载用的。
+      </p>
       {(['tagSuggestion', 'relationSuggestion', 'dialogueContext', 'autoLink', 'groupSuggestion', 'connectionSuggestion'] as const).map(key => (
         <div key={key} className="form-group">
           <label className="form-label">{PROMPT_LABELS[key]}</label>
