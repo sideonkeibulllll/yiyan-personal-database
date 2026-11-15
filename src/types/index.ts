@@ -494,6 +494,11 @@ export interface ProviderEntry {
    * 缺省或空数组表示「全部启用」，保证老配置升级后行为不变。
    */
   enabledModels?: string[];
+  /**
+   * TRAE 多账号时当前手动选中的账号 uid（v3.5.0）。
+   * 缺省表示未指定，行为回落到「列表第一个」。
+   */
+  activeCredentialUid?: string;
 }
 
 /** 取某提供商实际可用的模型列表（未配置启停时回落到全量候选）。 */

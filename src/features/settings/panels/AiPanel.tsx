@@ -12,10 +12,10 @@ import { countActiveSoulFacts } from '@/services/soulFacts';
 import type { AIProviderId, ProviderEntry } from '@/types';
 import { AI_PROVIDER_ORDER, PROVIDER_PRESETS, getProviderPreset, getEnabledModels } from '@/types';
 import {
-  parseCredential,
-  fetchCreditsInfo,
-  claimCheckin,
-  type TraeCreditsInfo,
+  parseCredentials,
+  fetchAllCredits,
+  claimAllCheckin,
+  type TraeAccountCredits,
 } from '@/services/aiProviders/trae';
 
 interface AiPanelProps {
@@ -40,8 +40,8 @@ export function AiPanel({ markDirty }: AiPanelProps) {
   // v3.4.0: Soul 事实库管理面板
   const [showSoulManager, setShowSoulManager] = useState(false);
   const [soulFactCount, setSoulFactCount] = useState(() => countActiveSoulFacts());
-  // TRAE：积分余额与签到（仅在该提供商下初始化）
-  const [credits, setCredits] = useState<TraeCreditsInfo | null>(null);
+  // TRAE：多账号积分与签到（查询/签到对所有账号生效，调用模型时手动选一个）
+  const [credits, setCredits] = useState<TraeAccountCredits[] | null>(null);
   const [creditsBusy, setCreditsBusy] = useState(false);
   const [creditsMsg, setCreditsMsg] = useState('');
 
@@ -111,23 +111,25 @@ export function AiPanel({ markDirty }: AiPanelProps) {
 
   /* === TRAE：凭据解析 + 积分/签到 === */
 
-  const traeCredential = useMemo(
-    () => (providerId === 'trae' ? parseCredential(entry.apiKey) : null),
+  /** 已配置的 TRAE 账号（每行一个）。 */
+  const traeAccounts = useMemo(
+    () => (providerId === 'trae' ? parseCredentials(entry.apiKey) : []),
     [providerId, entry.apiKey],
   );
+  const traeAccountCount = traeAccounts.length;
 
   /** 当前提供商实际可选的模型（受「启用」勾选约束，未配置时等于全量）。 */
   const selectableModels = getEnabledModels(entry);
 
   const refreshCredits = async () => {
-    if (traeCredential === null) {
+    if (traeAccountCount === 0) {
       setCreditsMsg('请先粘贴有效的 TRAE 凭据');
       return;
     }
     setCreditsBusy(true);
     setCreditsMsg('');
     try {
-      setCredits(await fetchCreditsInfo(traeCredential));
+      setCredits(await fetchAllCredits(entry.apiKey));
     } catch (error) {
       setCreditsMsg(error instanceof Error ? error.message : '读取积分失败');
     } finally {
@@ -135,21 +137,18 @@ export function AiPanel({ markDirty }: AiPanelProps) {
     }
   };
 
-  const handleCheckin = async () => {
-    if (traeCredential === null) {
+  const handleCheckinAll = async () => {
+    if (traeAccountCount === 0) {
       setCreditsMsg('请先粘贴有效的 TRAE 凭据');
       return;
     }
     setCreditsBusy(true);
     setCreditsMsg('');
     try {
-      const result = await claimCheckin(traeCredential);
-      setCreditsMsg(
-        result.credits > 0
-          ? `签到成功，获得 ${result.credits} 积分`
-          : result.message || '今日已签到',
-      );
-      setCredits(await fetchCreditsInfo(traeCredential));
+      const results = await claimAllCheckin(entry.apiKey);
+      const gained = results.reduce((sum, item) => sum + item.credits, 0);
+      setCreditsMsg(gained > 0 ? `签到完成，共获得 ${gained} 积分` : '所有账号今日均已签到');
+      setCredits(await fetchAllCredits(entry.apiKey));
     } catch (error) {
       setCreditsMsg(error instanceof Error ? error.message : '签到失败');
     } finally {
@@ -210,46 +209,78 @@ export function AiPanel({ markDirty }: AiPanelProps) {
         )}
         {providerId === 'trae' && (
           <span className="form-hint">
-            粘贴含 access_token / refresh_token / machine_id / device_id 的 JSON，只存本机
+            每行一个账号的 JSON（含 access_token / refresh_token / machine_id / device_id），
+            多账号自动轮换
+            {traeAccountCount > 1 ? `；当前已配置 ${traeAccountCount} 个` : ''}
           </span>
         )}
       </div>
 
-      {/* TRAE：积分余额与每日签到 */}
+      {/* TRAE：多账号积分与签到 */}
       {providerId === 'trae' && (
         <>
           <div className="settings-subsection-title">TRAE 账户</div>
+
+          <div className="form-group">
+            <label className="form-label">当前使用账号</label>
+            <select
+              className="form-input glass"
+              value={entry.activeCredentialUid ?? ''}
+              onChange={e => { patchProvider({ activeCredentialUid: e.target.value }); markDirty('ai.providers'); }}
+              disabled={traeAccountCount === 0}
+            >
+              {traeAccountCount === 0 && <option value="">（未配置账号）</option>}
+              {traeAccountCount > 1 && <option value="">自动轮换</option>}
+              {traeAccounts.map(account => {
+                const info = credits?.find(item => item.uid === account.uid);
+                const label = info?.label ?? `账号 ${account.uid.slice(-6)}`;
+                return <option key={account.uid} value={account.uid}>{label}</option>;
+              })}
+            </select>
+            <span className="form-hint">调用模型时用这个账号；选「自动轮换」则每次轮流使用</span>
+          </div>
+
           <div className="form-group">
             <div className="model-manage-row">
               <span className="model-manage-name">
-                {credits === null
-                  ? '积分余额：未读取'
-                  : `积分余额：${credits.totalBalance.toFixed(2)}｜今日签到：${credits.checkedIn ? '已签' : '未签'}`}
+                {credits === null ? '积分：未读取' : `共 ${credits.length} 个账号`}
               </span>
               <button
                 type="button"
                 className="model-manage-add-btn"
                 onClick={refreshCredits}
-                disabled={creditsBusy || traeCredential === null}
+                disabled={creditsBusy || traeAccountCount === 0}
               >
-                刷新
+                {creditsBusy ? '处理中…' : '刷新全部'}
               </button>
             </div>
+
+            {credits?.map(item => (
+              <div key={item.uid} className="model-manage-row">
+                <span className="model-manage-name">
+                  {item.error !== undefined
+                    ? `${item.label}｜${item.error}`
+                    : `${item.label}｜${item.totalBalance.toFixed(2)} 积分｜${item.checkedIn ? '已签到' : '未签到'}`}
+                </span>
+              </div>
+            ))}
+
             <div className="model-manage-row">
               <span className="model-manage-name">
-                {credits === null ? '每日签到可得积分' : `今日可得：${credits.dailyCredits}`}
+                {credits === null ? '每日签到可得积分' : '对所有账号执行签到'}
               </span>
               <button
                 type="button"
                 className="model-manage-add-btn"
-                onClick={handleCheckin}
-                disabled={creditsBusy || traeCredential === null || credits?.checkedIn === true}
+                onClick={handleCheckinAll}
+                disabled={creditsBusy || traeAccountCount === 0}
               >
-                {credits?.checkedIn === true ? '已签到' : '签到'}
+                一键签到
               </button>
             </div>
+
             {creditsMsg.length > 0 && <span className="form-hint">{creditsMsg}</span>}
-            <span className="form-hint">签到每天一次，积分用于 TRAE 模型的调用额度</span>
+            <span className="form-hint">签到与积分查询对全部账号生效，每天一次</span>
           </div>
         </>
       )}
@@ -290,8 +321,8 @@ export function AiPanel({ markDirty }: AiPanelProps) {
         </span>
       </div>
 
-      {/* TRAE：勾选要启用的模型（22 个模型全列出来太长，默认全开，按需关掉） */}
-      {providerId === 'trae' && (
+      {/* 勾选要启用的模型（模型多的提供商才需要，避免 chat 页下拉过长） */}
+      {(providerId === 'trae' || providerId === 'openrouter') && (
         <>
           <div className="settings-subsection-title">启用模型</div>
           <div className="form-group">

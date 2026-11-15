@@ -126,6 +126,73 @@ export function serializeCredential(credential: TraeCredential): string {
   return JSON.stringify(credential)
 }
 
+/**
+ * 解析凭据列表。
+ *
+ * 支持两种输入：整段只有一个 JSON，或**一行一个 JSON**（多账号）。
+ * 多账号时按轮询使用，用于分摊单账号的每日积分。
+ */
+export function parseCredentials(raw: string): TraeCredential[] {
+  const text = raw.trim()
+  if (text.length === 0) return []
+
+  const single = parseCredential(text)
+  if (single !== null) return [single]
+
+  const list: TraeCredential[] = []
+  for (const line of text.split(/\r?\n/)) {
+    const credential = parseCredential(line)
+    if (credential !== null) list.push(credential)
+  }
+  return list
+}
+
+/** 多账号轮询游标（仅在未指定账号时用于分摊额度，重启后从第一个开始）。 */
+let credentialCursor = 0;
+
+/**
+ * 取一个可用凭据。
+ *
+ * - 指定了 `preferredUid` 且列表里有这个账号 → 用那个账号（手动指定，不轮换）
+ * - 没指定 → 用列表第一个（保持可预期，避免"充值了却随机用到另一个号"）
+ * - 只有一个账号 → 直接用
+ */
+export function pickCredential(raw: string, preferredUid?: string): TraeCredential | null {
+  const list = parseCredentials(raw)
+  if (list.length === 0) return null
+  if (preferredUid !== undefined && preferredUid.length > 0) {
+    const hit = list.find(credential => credential.uid === preferredUid)
+    if (hit !== undefined) return hit
+  }
+  if (list.length === 1) return list[0]!
+  // 未指定且有多个：轮询分摊，同时把游标留在模块内
+  const chosen = list[credentialCursor % list.length]!
+  credentialCursor = (credentialCursor + 1) % list.length
+  return chosen
+}
+
+/**
+ * 把轮换后的凭据写回原始多行文本（按 uid 定位那一行替换）。
+ *
+ * refresh_token 每次续期都会轮换，写错行会让另一个账号的凭据被覆盖，
+ * 所以这里必须按 uid 精确匹配。
+ */
+export function replaceCredential(raw: string, updated: TraeCredential): string {
+  const lines = raw.split(/\r?\n/)
+  let replaced = false
+  const next = lines.map((line) => {
+    const credential = parseCredential(line)
+    if (credential === null) return line
+    if (credential.uid === updated.uid) {
+      replaced = true
+      return serializeCredential(updated)
+    }
+    return line
+  })
+  if (!replaced) next.push(serializeCredential(updated))
+  return next.filter((line, index) => line.trim().length > 0 || index < next.length - 1).join('\n')
+}
+
 /** 凭据是否已经/即将过期。 */
 export function isCredentialExpiring(credential: TraeCredential): boolean {
   if (credential.access_token.length === 0) return true
@@ -231,30 +298,25 @@ export async function refreshCredential(
 /**
  * 构造对话请求头。
  *
- * 三处 token（Authorization / X-Cloudide-Token / X-Ide-Token）必须同值，
- * 这是实测出来的硬要求。
+ * ## 为什么只有三个头（重要）
+ *
+ * TRAE 的 CORS 预检返回的是**固定白名单**：
+ * `Content-Type, Authorization, X-Tt-Logid, X-Tt-Env, X-Jwt-Token,
+ *  X-Use-Ppe, Pragma, Cache-Control, Expires, X-App-Id`
+ *
+ * 官方客户端会带 `X-Cloudide-Token` / `X-Ide-Token` / `X-Uid` /
+ * `X-Machine-Id` / `X-Device-Id` 等十几个自定义头，但这些**都不在白名单里**，
+ * 浏览器会直接拒发实际请求（表现为 `TypeError: Failed to fetch`）。
+ *
+ * 实测结论：上游真正校验的 `app_version_code` 走的是 **body 字段（数字）**，
+ * 不是 header。所以精简到三个头 + body 补字段就能 200，且能真流式。
  */
 export function buildHeaders(credential: TraeCredential, stream: boolean): Record<string, string> {
   return {
     'Content-Type': 'application/json',
     Accept: stream ? 'text/event-stream' : 'application/json',
-    'User-Agent': TRAE_USER_AGENT,
     Authorization: `Cloud-IDE-JWT ${credential.access_token}`,
-    'X-Cloudide-Token': credential.access_token,
-    'X-Ide-Token': credential.access_token,
-    'X-Uid': credential.uid,
     'X-App-Id': TRAE_APP_ID,
-    'X-App-Version': 'default',
-    'X-Ide-Version': TRAE_IDE_VERSION,
-    'X-Ide-Version-Code': TRAE_IDE_VERSION_CODE,
-    'X-App-Version-Code': TRAE_IDE_VERSION_CODE,
-    'X-Ide-Version-Type': 'stable',
-    'X-Device-Type': 'macos',
-    'X-OS-Version': TRAE_OS_VERSION,
-    'X-Device-Brand': TRAE_DEVICE_BRAND,
-    'Request-Traffic-Type': 'prod',
-    'X-Machine-Id': credential.machine_id,
-    'X-Device-Id': credential.device_id,
   }
 }
 
@@ -367,6 +429,9 @@ export function transformToSOLO(
     ...openaiBody,
     stream: true,
     function: channel.length > 0 ? channel : TRAE_FUNCTION,
+    // 上游做参数绑定校验，缺了直接 400（binding: expr_path=app_version_code）。
+    // 注意必须是数字，传字符串会报 unmarshal 错误。
+    app_version_code: Number(TRAE_IDE_VERSION_CODE),
   }
 
   if (Array.isArray(body.messages)) {
@@ -737,4 +802,85 @@ export async function claimCheckin(
   const credits = typeof creditsRaw === 'number' ? creditsRaw : Number(creditsRaw) || 0
   const message = typeof body.message === 'string' ? body.message : ''
   return { ok: body.code === 0 || body.code === undefined, credits, message }
+}
+
+/** 单个账号的积分视图（多账号批量查询用）。 */
+export interface TraeAccountCredits extends TraeCreditsInfo {
+  uid: string
+  /** 展示名：昵称，缺省用 uid 后 6 位。 */
+  label: string
+  /** 查询失败时的错误文案。 */
+  error?: string
+}
+
+/** 账号展示名。 */
+function accountLabel(credential: TraeCredential): string {
+  if (credential.nickname !== undefined && credential.nickname.length > 0) return credential.nickname
+  return `账号 ${credential.uid.slice(-6)}`
+}
+
+/**
+ * 批量读取所有账号的积分与签到状态。
+ *
+ * 单个账号失败不影响其它账号，失败信息写进该项的 `error`。
+ */
+export async function fetchAllCredits(
+  raw: string,
+  fetchFn: typeof fetch = fetch,
+): Promise<TraeAccountCredits[]> {
+  const list = parseCredentials(raw)
+  const out: TraeAccountCredits[] = []
+  for (const credential of list) {
+    const label = accountLabel(credential)
+    try {
+      const info = await fetchCreditsInfo(credential, fetchFn)
+      out.push({ ...info, uid: credential.uid, label })
+    } catch (error) {
+      out.push({
+        uid: credential.uid,
+        label,
+        totalBalance: 0,
+        checkedIn: false,
+        dailyCredits: 0,
+        checkinEnabled: false,
+        error: error instanceof Error ? error.message : '查询失败',
+      })
+    }
+  }
+  return out
+}
+
+/** 批量签到结果。 */
+export interface TraeCheckinResult {
+  uid: string
+  label: string
+  credits: number
+  message: string
+}
+
+/**
+ * 一键签到所有账号（顺序执行，避免并发触发风控）。
+ * 已签到的账号会返回 credits = 0 与上游的提示语。
+ */
+export async function claimAllCheckin(
+  raw: string,
+  fetchFn: typeof fetch = fetch,
+): Promise<TraeCheckinResult[]> {
+  const list = parseCredentials(raw)
+  const out: TraeCheckinResult[] = []
+  for (const credential of list) {
+    const label = accountLabel(credential)
+    try {
+      const result = await claimCheckin(credential, fetchFn)
+      out.push({ uid: credential.uid, label, credits: result.credits, message: result.message })
+    } catch (error) {
+      out.push({
+        uid: credential.uid,
+        label,
+        credits: 0,
+        message: error instanceof Error ? error.message : '签到失败',
+      })
+    }
+  }
+  return out
 }

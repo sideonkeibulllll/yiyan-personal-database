@@ -9,7 +9,7 @@
  */
 import type { AIConfig, PromptConfig, GLMConfig, AIProviderId } from '@/types';
 import { GLM_FREE_MODEL_POOL } from '@/types';
-import { parseCredential, serializeCredential, traeChat } from '@/services/aiProviders/trae';
+import { pickCredential, replaceCredential, traeChat } from '@/services/aiProviders/trae';
 
 /**
  * 凭据轮换回调。
@@ -129,7 +129,8 @@ class AIService {
     model: string,
   ): Promise<string | null> {
     const raw = this.config?.providers?.trae?.apiKey ?? '';
-    const credential = parseCredential(raw);
+    const preferredUid = this.config?.providers?.trae?.activeCredentialUid;
+    const credential = pickCredential(raw, preferredUid);
     if (credential === null) {
       throw new Error(
         'TRAE 凭据格式不正确：需要包含 access_token / refresh_token / machine_id / device_id 的 JSON',
@@ -151,7 +152,8 @@ class AIService {
         model,
         body,
         onCredentialRotated: (next) => {
-          credentialUpdateHandler?.('trae', serializeCredential(next));
+          // 多账号时按 uid 定位替换，绝不整体覆盖
+          credentialUpdateHandler?.('trae', replaceCredential(raw, next));
         },
       });
     } catch (error) {

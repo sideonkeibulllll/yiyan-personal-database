@@ -1304,6 +1304,8 @@ export function ChatPage() {
             },
           },
           abortCtrl.signal,
+          // TRAE 多账号时用设置页手动指定的账号，其它提供商忽略
+          effectiveProvider?.activeCredentialUid,
         );
 
         // 本轮流式内容定稿（把合帧中未落地的增量先写进消息，再处理工具/结束）

@@ -4,7 +4,7 @@
 import type { ToolCallDelta } from '@/services/chatBridge';
 import type { ThinkingEffort } from './chatTypes';
 import type { ApiContentPart } from './chatUtils';
-import { parseCredential, serializeCredential, streamTraeChat } from '@/services/aiProviders/trae';
+import { pickCredential, replaceCredential, streamTraeChat } from '@/services/aiProviders/trae';
 import { notifyTraeCredentialRotated } from '@/services/ai';
 
 /** 判断本轮是否该走 TRAE 通道（凭据格式与 OpenAI 不兼容，需要独立实现）。 */
@@ -36,6 +36,8 @@ export async function streamChatCompletion(
   toolsPayload: Array<{ type: 'function'; function: { name: string; description: string; parameters: unknown } }>,
   callbacks: StreamCallbacks,
   signal: AbortSignal,
+  /** TRAE 多账号时手动指定的账号 uid（其它提供商忽略）。 */
+  traeCredentialUid?: string,
 ): Promise<{ finishReason: string | null }> {
   // TRAE 的请求体与 SSE 事件都不是 OpenAI 形状，交给独立实现；
   // 这里用 baseURL 识别，调用方无需感知 provider 差异。
@@ -49,6 +51,7 @@ export async function streamChatCompletion(
       toolsPayload,
       callbacks,
       signal,
+      traeCredentialUid,
     );
   }
 
@@ -177,8 +180,9 @@ export async function streamTraeCompletion(
   toolsPayload: Array<{ type: 'function'; function: { name: string; description: string; parameters: unknown } }>,
   callbacks: StreamCallbacks,
   signal: AbortSignal,
+  traeCredentialUid?: string,
 ): Promise<{ finishReason: string | null }> {
-  const credential = parseCredential(apiKey);
+  const credential = pickCredential(apiKey, traeCredentialUid);
   if (credential === null) {
     throw new Error(
       'TRAE 凭据格式不正确：需要包含 access_token / refresh_token / machine_id / device_id 的 JSON',
@@ -214,6 +218,6 @@ export async function streamTraeCompletion(
       onContent: callbacks.onContent,
       onToolCall: (deltas) => callbacks.onToolCall?.(deltas as ToolCallDelta[]),
     },
-    onCredentialRotated: (next) => notifyTraeCredentialRotated(serializeCredential(next)),
+    onCredentialRotated: (next) => notifyTraeCredentialRotated(replaceCredential(apiKey, next)),
   });
 }
