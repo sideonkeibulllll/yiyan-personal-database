@@ -3,14 +3,20 @@
  *
  * settings 数据在 zustand store 中，面板直接订阅，行为与原先一致。
  */
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { MemoryManagerPanel } from './MemoryManagerPanel';
 import { SoulManagerPanel } from './SoulManagerPanel';
 import { listMemories } from '@/services/aiMemory';
 import { countActiveSoulFacts } from '@/services/soulFacts';
 import type { AIProviderId, ProviderEntry } from '@/types';
-import { AI_PROVIDER_ORDER, PROVIDER_PRESETS, getProviderPreset } from '@/types';
+import { AI_PROVIDER_ORDER, PROVIDER_PRESETS, getProviderPreset, getEnabledModels } from '@/types';
+import {
+  parseCredential,
+  fetchCreditsInfo,
+  claimCheckin,
+  type TraeCreditsInfo,
+} from '@/services/aiProviders/trae';
 
 interface AiPanelProps {
   markDirty: (field: string) => void;
@@ -34,6 +40,10 @@ export function AiPanel({ markDirty }: AiPanelProps) {
   // v3.4.0: Soul 事实库管理面板
   const [showSoulManager, setShowSoulManager] = useState(false);
   const [soulFactCount, setSoulFactCount] = useState(() => countActiveSoulFacts());
+  // TRAE：积分余额与签到（仅在该提供商下初始化）
+  const [credits, setCredits] = useState<TraeCreditsInfo | null>(null);
+  const [creditsBusy, setCreditsBusy] = useState(false);
+  const [creditsMsg, setCreditsMsg] = useState('');
 
   // v2.5.1: openai 已移除，兜底为 deepseek
   const providerId: AIProviderId = settings.ai.provider || 'deepseek';
@@ -99,6 +109,67 @@ export function AiPanel({ markDirty }: AiPanelProps) {
     markDirty('ai.provider');
   };
 
+  /* === TRAE：凭据解析 + 积分/签到 === */
+
+  const traeCredential = useMemo(
+    () => (providerId === 'trae' ? parseCredential(entry.apiKey) : null),
+    [providerId, entry.apiKey],
+  );
+
+  /** 当前提供商实际可选的模型（受「启用」勾选约束，未配置时等于全量）。 */
+  const selectableModels = getEnabledModels(entry);
+
+  const refreshCredits = async () => {
+    if (traeCredential === null) {
+      setCreditsMsg('请先粘贴有效的 TRAE 凭据');
+      return;
+    }
+    setCreditsBusy(true);
+    setCreditsMsg('');
+    try {
+      setCredits(await fetchCreditsInfo(traeCredential));
+    } catch (error) {
+      setCreditsMsg(error instanceof Error ? error.message : '读取积分失败');
+    } finally {
+      setCreditsBusy(false);
+    }
+  };
+
+  const handleCheckin = async () => {
+    if (traeCredential === null) {
+      setCreditsMsg('请先粘贴有效的 TRAE 凭据');
+      return;
+    }
+    setCreditsBusy(true);
+    setCreditsMsg('');
+    try {
+      const result = await claimCheckin(traeCredential);
+      setCreditsMsg(
+        result.credits > 0
+          ? `签到成功，获得 ${result.credits} 积分`
+          : result.message || '今日已签到',
+      );
+      setCredits(await fetchCreditsInfo(traeCredential));
+    } catch (error) {
+      setCreditsMsg(error instanceof Error ? error.message : '签到失败');
+    } finally {
+      setCreditsBusy(false);
+    }
+  };
+
+  /** 切换某个模型的启用状态（取消勾选即从 chat 页下拉里移除）。 */
+  const toggleModel = (name: string) => {
+    const current = getEnabledModels(entry);
+    const next = current.includes(name)
+      ? current.filter(m => m !== name)
+      : [...current, name];
+    if (next.length === 0) return;
+    // 当前选用的模型被取消时，自动切到剩下的第一个
+    const nextSelected = next.includes(entry.model) ? entry.model : next[0];
+    patchProvider({ enabledModels: next, model: nextSelected });
+    markDirty('ai.providers');
+  };
+
   return (
     <div className="settings-panel-content">
       <h2 className="panel-title">AI 配置</h2>
@@ -118,26 +189,84 @@ export function AiPanel({ markDirty }: AiPanelProps) {
       </div>
 
       <div className="form-group">
-        <label className="form-label">API Key</label>
-        <input
-          type="password"
-          className="form-input glass"
-          value={entry.apiKey}
-          onChange={e => { patchProvider({ apiKey: e.target.value }); markDirty('ai.providers'); }}
-          placeholder={preset.keyPlaceholder}
-        />
+        <label className="form-label">{providerId === 'trae' ? 'TRAE 凭据' : 'API Key'}</label>
+        {providerId === 'trae' ? (
+          <textarea
+            className="form-input glass"
+            rows={4}
+            value={entry.apiKey}
+            onChange={e => { patchProvider({ apiKey: e.target.value }); markDirty('ai.providers'); setCredits(null); setCreditsMsg(''); }}
+            placeholder={preset.keyPlaceholder}
+            spellCheck={false}
+          />
+        ) : (
+          <input
+            type="password"
+            className="form-input glass"
+            value={entry.apiKey}
+            onChange={e => { patchProvider({ apiKey: e.target.value }); markDirty('ai.providers'); }}
+            placeholder={preset.keyPlaceholder}
+          />
+        )}
+        {providerId === 'trae' && (
+          <span className="form-hint">
+            粘贴含 access_token / refresh_token / machine_id / device_id 的 JSON，只存本机
+          </span>
+        )}
       </div>
 
-      <div className="form-group">
-        <label className="form-label">API 地址</label>
-        <input
-          type="text"
-          className="form-input glass"
-          value={entry.baseURL}
-          onChange={e => { patchProvider({ baseURL: e.target.value }); markDirty('ai.providers'); }}
-          placeholder={preset.baseURL}
-        />
-      </div>
+      {/* TRAE：积分余额与每日签到 */}
+      {providerId === 'trae' && (
+        <>
+          <div className="settings-subsection-title">TRAE 账户</div>
+          <div className="form-group">
+            <div className="model-manage-row">
+              <span className="model-manage-name">
+                {credits === null
+                  ? '积分余额：未读取'
+                  : `积分余额：${credits.totalBalance.toFixed(2)}｜今日签到：${credits.checkedIn ? '已签' : '未签'}`}
+              </span>
+              <button
+                type="button"
+                className="model-manage-add-btn"
+                onClick={refreshCredits}
+                disabled={creditsBusy || traeCredential === null}
+              >
+                刷新
+              </button>
+            </div>
+            <div className="model-manage-row">
+              <span className="model-manage-name">
+                {credits === null ? '每日签到可得积分' : `今日可得：${credits.dailyCredits}`}
+              </span>
+              <button
+                type="button"
+                className="model-manage-add-btn"
+                onClick={handleCheckin}
+                disabled={creditsBusy || traeCredential === null || credits?.checkedIn === true}
+              >
+                {credits?.checkedIn === true ? '已签到' : '签到'}
+              </button>
+            </div>
+            {creditsMsg.length > 0 && <span className="form-hint">{creditsMsg}</span>}
+            <span className="form-hint">签到每天一次，积分用于 TRAE 模型的调用额度</span>
+          </div>
+        </>
+      )}
+
+      {/* TRAE 的接口地址固定，不给用户改的机会，免得填错 */}
+      {providerId !== 'trae' && (
+        <div className="form-group">
+          <label className="form-label">API 地址</label>
+          <input
+            type="text"
+            className="form-input glass"
+            value={entry.baseURL}
+            onChange={e => { patchProvider({ baseURL: e.target.value }); markDirty('ai.providers'); }}
+            placeholder={preset.baseURL}
+          />
+        </div>
+      )}
 
       <div className="form-group">
         <label className="form-label">模型</label>
@@ -147,15 +276,45 @@ export function AiPanel({ markDirty }: AiPanelProps) {
           onChange={e => { patchProvider({ model: e.target.value }); markDirty('ai.providers'); }}
         >
           {/* 若当前模型不在候选里（历史手填值），补一个选项避免它被吞掉 */}
-          {!entry.models.includes(entry.model) && entry.model && (
+          {!selectableModels.includes(entry.model) && entry.model && (
             <option value={entry.model}>{entry.model}</option>
           )}
-          {entry.models.map(m => (
+          {selectableModels.map(m => (
             <option key={m} value={m}>{m}</option>
           ))}
         </select>
-        <span className="form-hint">选择该提供商下要使用的模型</span>
+        <span className="form-hint">
+          {providerId === 'trae'
+            ? '只有下方勾选的模型会出现在这里，以及 chat 页的模型下拉中'
+            : '选择该提供商下要使用的模型'}
+        </span>
       </div>
+
+      {/* TRAE：勾选要启用的模型（22 个模型全列出来太长，默认全开，按需关掉） */}
+      {providerId === 'trae' && (
+        <>
+          <div className="settings-subsection-title">启用模型</div>
+          <div className="form-group">
+            {entry.models.map(name => {
+              const checked = selectableModels.includes(name);
+              return (
+                <label key={name} className="model-manage-row" style={{ cursor: 'pointer' }}>
+                  <span className="model-manage-name">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleModel(name)}
+                      style={{ marginRight: 8 }}
+                    />
+                    {name}
+                  </span>
+                </label>
+              );
+            })}
+            <span className="form-hint">至少保留一个；取消勾选当前使用中的模型会自动切到剩下的第一个</span>
+          </div>
+        </>
+      )}
 
       {/* v2.5.1: 模型列表编辑（仅硅基流动开放，其余提供商模型固定） */}
       {providerId === 'siliconflow' && (

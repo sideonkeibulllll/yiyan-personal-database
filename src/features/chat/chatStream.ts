@@ -3,6 +3,14 @@
  */
 import type { ToolCallDelta } from '@/services/chatBridge';
 import type { ThinkingEffort } from './chatTypes';
+import type { ApiContentPart } from './chatUtils';
+import { parseCredential, serializeCredential, streamTraeChat } from '@/services/aiProviders/trae';
+import { notifyTraeCredentialRotated } from '@/services/ai';
+
+/** 判断本轮是否该走 TRAE 通道（凭据格式与 OpenAI 不兼容，需要独立实现）。 */
+export function isTraeEndpoint(baseURL: string): boolean {
+  return baseURL.includes('trae-api-cn.mchost.guru');
+}
 
 export interface StreamCallbacks {
   onReasoning: (chunk: string) => void;
@@ -22,13 +30,28 @@ export async function streamChatCompletion(
   baseURL: string,
   apiKey: string,
   model: string,
-  messages: Array<{ role: string; content?: string; tool_calls?: unknown[]; tool_call_id?: string; name?: string }>,
+  messages: Array<{ role: string; content?: string | ApiContentPart[]; tool_calls?: unknown[]; tool_call_id?: string; name?: string }>,
   thinkingEnabled: boolean,
   reasoningEffort: ThinkingEffort | null,
   toolsPayload: Array<{ type: 'function'; function: { name: string; description: string; parameters: unknown } }>,
   callbacks: StreamCallbacks,
   signal: AbortSignal,
 ): Promise<{ finishReason: string | null }> {
+  // TRAE 的请求体与 SSE 事件都不是 OpenAI 形状，交给独立实现；
+  // 这里用 baseURL 识别，调用方无需感知 provider 差异。
+  if (isTraeEndpoint(baseURL)) {
+    return streamTraeCompletion(
+      apiKey,
+      model,
+      messages,
+      thinkingEnabled,
+      reasoningEffort,
+      toolsPayload,
+      callbacks,
+      signal,
+    );
+  }
+
   const body: Record<string, unknown> = {
     model,
     messages,
@@ -131,4 +154,66 @@ export async function streamChatCompletion(
   }
 
   return { finishReason };
+}
+
+/**
+ * TRAE 通道的流式实现。
+ *
+ * 对外契约与上面的 OpenAI 版完全一致（同样的回调、同样的 finishReason），
+ * 差别只在协议层：
+ * - 凭据是一整包 JSON，不是单个 key
+ * - 请求体要转成 SOLO 格式（由 trae.ts 内部完成）
+ * - 响应是自定义 SSE 事件（output / done / error）
+ *
+ * 流式必须走 CapacitorWebFetch（原生 HTTP 不支持 response.body.getReader），
+ * 而 TRAE 端点开放了 CORS，所以这条路是通的。
+ */
+export async function streamTraeCompletion(
+  apiKey: string,
+  model: string,
+  messages: Array<{ role: string; content?: string | ApiContentPart[]; tool_calls?: unknown[]; tool_call_id?: string; name?: string }>,
+  thinkingEnabled: boolean,
+  reasoningEffort: ThinkingEffort | null,
+  toolsPayload: Array<{ type: 'function'; function: { name: string; description: string; parameters: unknown } }>,
+  callbacks: StreamCallbacks,
+  signal: AbortSignal,
+): Promise<{ finishReason: string | null }> {
+  const credential = parseCredential(apiKey);
+  if (credential === null) {
+    throw new Error(
+      'TRAE 凭据格式不正确：需要包含 access_token / refresh_token / machine_id / device_id 的 JSON',
+    );
+  }
+
+  const body: Record<string, unknown> = { messages };
+
+  if (toolsPayload.length > 0) {
+    body.tools = toolsPayload;
+    body.tool_choice = 'auto';
+  }
+
+  if (thinkingEnabled) {
+    body.thinking = { type: 'enabled' };
+    if (reasoningEffort) body.reasoning_effort = reasoningEffort;
+  } else {
+    body.temperature = 0.7;
+    body.max_tokens = 4096;
+  }
+
+  const webFetch = (window as any).CapacitorWebFetch as typeof fetch | undefined;
+  const fetchFn = webFetch ?? fetch;
+
+  return streamTraeChat({
+    credential,
+    model,
+    body,
+    signal,
+    fetchFn,
+    callbacks: {
+      onReasoning: callbacks.onReasoning,
+      onContent: callbacks.onContent,
+      onToolCall: (deltas) => callbacks.onToolCall?.(deltas as ToolCallDelta[]),
+    },
+    onCredentialRotated: (next) => notifyTraeCredentialRotated(serializeCredential(next)),
+  });
 }

@@ -466,8 +466,8 @@ export interface AIConfig {
   providers?: AIProvidersConfig;
 }
 
-/** 付费 AI 提供商 ID */
-export type AIProviderId = 'deepseek' | 'siliconflow';
+/** AI 提供商 ID */
+export type AIProviderId = 'deepseek' | 'siliconflow' | 'trae' | 'openrouter';
 
 /** 单个提供商的独立配置 */
 export interface ProviderEntry {
@@ -479,6 +479,23 @@ export interface ProviderEntry {
   model: string;
   /** 可选模型候选列表（用于设置页与 chat 页下拉） */
   models: string[];
+  /**
+   * 已启用的模型子集（v3.5.0 新增）。
+   * 缺省或空数组表示「全部启用」，保证老配置升级后行为不变。
+   */
+  enabledModels?: string[];
+}
+
+/** 取某提供商实际可用的模型列表（未配置启停时回落到全量候选）。 */
+export function getEnabledModels(entry: ProviderEntry | undefined): string[] {
+  if (!entry) return [];
+  const enabled = entry.enabledModels;
+  if (Array.isArray(enabled) && enabled.length > 0) {
+    const known = new Set(entry.models);
+    const kept = enabled.filter(m => known.has(m));
+    if (kept.length > 0) return kept;
+  }
+  return entry.models;
 }
 
 /** 各提供商的配置集合 */
@@ -520,10 +537,61 @@ export const PROVIDER_PRESETS: Record<AIProviderId, ProviderPreset> = {
     models: ['deepseek-ai/DeepSeek-V4-Flash'],
     keyPlaceholder: 'sk-...',
   },
+  /**
+   * TRAE（字节）—— 手机内直连。
+   * 凭据不是单个 key，而是一整包 JSON（access_token / refresh_token /
+   * machine_id / device_id），因此提示语直接说明粘贴格式。
+   */
+  trae: {
+    id: 'trae',
+    label: 'TRAE（字节·免 Key）',
+    baseURL: 'https://trae-api-cn.mchost.guru',
+    defaultModel: 'DeepSeek-V4-Pro',
+    models: [
+      'DeepSeek-V4-Pro',
+      'DeepSeek-V4-Flash',
+      'DeepSeek-V4-Flash-Official',
+      'kimi-k3',
+      'kimi-k2.7-code',
+      'kimi-k2.6',
+      'glm-5.2',
+      'glm-5-turbo',
+      'glm-5',
+      'Doubao-Seed-2.1-Pro',
+      'Doubao-Seed-2.1-Turbo',
+      'Doubao-Seed-2.0-Code',
+      'minimax-m3',
+      'qwen-3.7-plus',
+      'sagitta',
+      'aquila',
+    ],
+    keyPlaceholder: '粘贴 TRAE 凭据 JSON（含 access_token / refresh_token / machine_id / device_id）',
+  },
+  /**
+   * OpenRouter —— 标准 OpenAI 协议且开放 CORS，手机端可直接流式调用。
+   * 模型只放实测能跑的免费池（`:free` 后缀），付费模型可自行添加。
+   */
+  openrouter: {
+    id: 'openrouter',
+    label: 'OpenRouter（免费池）',
+    baseURL: 'https://openrouter.ai/api/v1',
+    defaultModel: 'nvidia/nemotron-3-ultra-550b-a55b:free',
+    models: [
+      'nvidia/nemotron-3-ultra-550b-a55b:free',
+      'nvidia/nemotron-3.5-lightning:free',
+      'nvidia/nemotron-3.5-super-vl:free',
+      'inclusionai/ling-3.2-flash:free',
+      'baidu/ernie-5.5-flash-preview:free',
+      'google/gemma-4-31b-it:free',
+      'google/gemma-4-26b-a4b-it:free',
+      'liquid/lfm-3-1.7b:free',
+    ],
+    keyPlaceholder: 'sk-or-v1-...',
+  },
 };
 
 /** 提供商的稳定遍历顺序 */
-export const AI_PROVIDER_ORDER: AIProviderId[] = ['deepseek', 'siliconflow'];
+export const AI_PROVIDER_ORDER: AIProviderId[] = ['trae', 'openrouter', 'deepseek', 'siliconflow'];
 
 /** 根据 ID 取预设（找不到回落到 deepseek） */
 export function getProviderPreset(id: AIProviderId): ProviderPreset {
@@ -542,10 +610,12 @@ export function migrateAIConfig(config: AIConfig): AIConfig {
   // 避免 providers 里出现已不存在的 key 导致读写 undefined。
   const rawProvider = config.provider as string | undefined;
   const providerId: AIProviderId =
-    rawProvider === 'siliconflow' ? 'siliconflow'
-      : rawProvider === 'deepseek' ? 'deepseek'
-        : (rawProvider === 'openai' || config.isDeepSeek === false) ? 'deepseek'
-          : (config.isDeepSeek ? 'deepseek' : 'deepseek');
+    rawProvider === 'trae' ? 'trae'
+      : rawProvider === 'openrouter' ? 'openrouter'
+        : rawProvider === 'siliconflow' ? 'siliconflow'
+          : rawProvider === 'deepseek' ? 'deepseek'
+            : (rawProvider === 'openai' || config.isDeepSeek === false) ? 'deepseek'
+              : (config.isDeepSeek ? 'deepseek' : 'deepseek');
 
   const existing = config.providers as Record<string, ProviderEntry> | undefined;
   const providers = {} as AIProvidersConfig;
@@ -808,6 +878,18 @@ export const DEFAULT_SETTINGS: Settings = {
         baseURL: PROVIDER_PRESETS.siliconflow.baseURL,
         model: PROVIDER_PRESETS.siliconflow.defaultModel,
         models: [...PROVIDER_PRESETS.siliconflow.models],
+      },
+      trae: {
+        apiKey: '',
+        baseURL: PROVIDER_PRESETS.trae.baseURL,
+        model: PROVIDER_PRESETS.trae.defaultModel,
+        models: [...PROVIDER_PRESETS.trae.models],
+      },
+      openrouter: {
+        apiKey: '',
+        baseURL: PROVIDER_PRESETS.openrouter.baseURL,
+        model: PROVIDER_PRESETS.openrouter.defaultModel,
+        models: [...PROVIDER_PRESETS.openrouter.models],
       },
     },
     chatSoul: '',

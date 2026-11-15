@@ -9,6 +9,31 @@
  */
 import type { AIConfig, PromptConfig, GLMConfig, AIProviderId } from '@/types';
 import { GLM_FREE_MODEL_POOL } from '@/types';
+import { parseCredential, serializeCredential, traeChat } from '@/services/aiProviders/trae';
+
+/**
+ * 凭据轮换回调。
+ *
+ * TRAE 的 refresh_token 每次续期都会轮换，刷完必须写回设置，
+ * 否则下次启动就是一把废钥匙。这里用模块级钩子避免 ai.ts 反向依赖
+ * settings store（由 App 初始化时注册一次）。
+ */
+export type AICredentialUpdateHandler = (providerId: AIProviderId, apiKey: string) => void;
+
+let credentialUpdateHandler: AICredentialUpdateHandler | null = null;
+
+/** 注册凭据回写钩子（App 启动时调用一次）。 */
+export function setAICredentialUpdateHandler(handler: AICredentialUpdateHandler | null): void {
+  credentialUpdateHandler = handler;
+}
+
+/**
+ * 把轮换后的 TRAE 凭据交给回写钩子。
+ * 流式路径在 chatStream 里直接调用本函数，避免重复实现一遍钩子查找。
+ */
+export function notifyTraeCredentialRotated(credentialJson: string): void {
+  credentialUpdateHandler?.('trae', credentialJson);
+}
 
 /** 解析后的生效请求参数 */
 interface ResolvedEndpoint {
@@ -94,6 +119,48 @@ class AIService {
   }
 
   /**
+   * 走 TRAE 通道（内部仍读 SSE，对外表现为非流式一次性返回）。
+   *
+   * 返回 `null` 表示本轮不可用（额度耗尽 / 网络失败），调用方应当回落到
+   * GLM 免费池；凭据格式错误则直接抛异常，因为那是需要用户动手修的配置问题。
+   */
+  private async chatViaTrae(
+    options: { systemPrompt: string; userMessage: string; temperature?: number; maxTokens?: number },
+    model: string,
+  ): Promise<string | null> {
+    const raw = this.config?.providers?.trae?.apiKey ?? '';
+    const credential = parseCredential(raw);
+    if (credential === null) {
+      throw new Error(
+        'TRAE 凭据格式不正确：需要包含 access_token / refresh_token / machine_id / device_id 的 JSON',
+      );
+    }
+
+    const body: Record<string, unknown> = {
+      messages: [
+        { role: 'system', content: options.systemPrompt },
+        { role: 'user', content: options.userMessage },
+      ],
+      temperature: options.temperature ?? 0.7,
+      max_tokens: options.maxTokens ?? 2000,
+    };
+
+    try {
+      return await traeChat({
+        credential,
+        model,
+        body,
+        onCredentialRotated: (next) => {
+          credentialUpdateHandler?.('trae', serializeCredential(next));
+        },
+      });
+    } catch (error) {
+      console.warn('[ai] TRAE 调用失败，回落到 GLM 免费池：', error);
+      return null;
+    }
+  }
+
+  /**
    * 发送聊天请求
    * e.4: 支持智能模型切换（非 chat 场景）
    * v2.5.0: 支持多提供商（provider）解析
@@ -106,6 +173,31 @@ class AIService {
     /** 是否为 chat 场景（false 时启用 GLM 智能切换） */
     isChat?: boolean;
   }): Promise<string> {
+    // TRAE 走独立协议（非 OpenAI 兼容）。成功就直接返回；失败则记一条警告，
+    // 继续往下走 GLM 免费池 / 付费提供商，保证功能不会因为额度用尽而断掉。
+    //
+    // 省积分策略：标签建议 / 关系建议 / 自动连线这类非 chat 的高频小任务，
+    // 只要 GLM 免费池可用就走 GLM，把积分留给真正的对话；
+    // 没配 GLM 时非 chat 也只能走 TRAE，否则这些功能会直接失败。
+    /** TRAE 不可用而 GLM 可兜底时置真，强制本轮走免费池而不是回到 TRAE 的端点 */
+    let forceSmart = false;
+
+    if (this.config?.provider === 'trae') {
+      const entry = this.config.providers?.trae;
+      const raw = entry?.apiKey ?? '';
+      if (raw.trim().length === 0) {
+        throw new Error('TRAE 凭据未配置：请在 设置 → AI 中粘贴 TRAE 凭据 JSON');
+      }
+      const glmAvailable = Boolean(this.config.glm?.enabled && this.config.glm.apiKey);
+      const preferTrae = options.isChat === true || !glmAvailable;
+      if (preferTrae) {
+        const viaTrae = await this.chatViaTrae(options, entry?.model || 'DeepSeek-V4-Pro');
+        if (viaTrae !== null) return viaTrae;
+        // TRAE 失败：有 GLM 就用 GLM 收尾，绝不能用 OpenAI 协议去打 TRAE 的端点
+        if (glmAvailable) forceSmart = true;
+      }
+    }
+
     const active = this.getActiveProvider();
     if (!active.apiKey) {
       throw new Error('AI API Key 未配置');
@@ -116,7 +208,7 @@ class AIService {
     let baseURL: string;
     let apiKey: string;
 
-    if (options.isChat) {
+    if (options.isChat && !forceSmart) {
       // chat 场景用当前激活的付费提供商
       model = active.model;
       baseURL = active.baseURL;

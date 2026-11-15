@@ -2,7 +2,7 @@
  * Chat 页面工具函数与常量
  */
 import type { ChatSession } from './chatTypes';
-import { AI_PROVIDER_ORDER, PROVIDER_PRESETS } from '@/types';
+import { AI_PROVIDER_ORDER, PROVIDER_PRESETS, getEnabledModels } from '@/types';
 
 /** 旧 key，仅用于兼容性检查 */
 const SESSIONS_KEY = 'yiyan_chat_sessions';
@@ -59,7 +59,8 @@ export function buildModelOptions(ai: {
   for (const pid of AI_PROVIDER_ORDER) {
     const entry = ai.providers?.[pid];
     const preset = PROVIDER_PRESETS[pid];
-    const models = entry?.models?.length ? entry.models : preset.models;
+    // 尊重设置页的「启用模型」勾选；未配置时回落到全量候选
+    const models = entry ? getEnabledModels(entry) : preset.models;
     const groupLabel = preset.label;
 
     for (const m of models) {
@@ -115,12 +116,52 @@ export interface ApiToolCall {
   function: { name: string; arguments: string };
 }
 
+/**
+ * 多模态内容块（v3.5.3）
+ *
+ * 纯文本消息仍用 string（改动面最小、兼容所有网关）；
+ * 只有「带图片的用户消息」才升级成块数组 —— OpenAI / DeepSeek /
+ * OpenRouter 的标准格式，SiliconFlow 同样兼容。
+ */
+export type ApiContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } };
+
 /** 传给大模型 API 的消息（OpenAI 兼容格式，含 tool_calls / tool_call_id） */
 export interface ApiMessage {
   role: string;
-  content?: string;
+  content?: string | ApiContentPart[];
   tool_calls?: ApiToolCall[];
   tool_call_id?: string;
+}
+
+/**
+ * 构造 user 消息的 content（v3.5.3）。
+ *
+ * 三条分支：
+ *  1. 本轮带图 → 多模态块数组（纯图消息补一句占位文本，避免空 text 块被网关拒）
+ *  2. 历史带图 → 只留 `[图片 × N]` 占位：图片不重发，否则 agent loop 每轮
+ *     都把图重新塞进上下文，token 成倍增长，且历史越长越贵
+ *  3. 无图 → 原样返回字符串（保持老行为，兼容所有网关）
+ */
+export function buildUserMessageContent(opts: {
+  text: string;
+  /** 本轮图片块（已从本地文件读成 base64） */
+  imageParts?: ApiContentPart[];
+  /** 历史消息里的图片数量（>0 时走占位分支） */
+  historicalImageCount?: number;
+}): string | ApiContentPart[] {
+  const { text, imageParts, historicalImageCount = 0 } = opts;
+  if (imageParts && imageParts.length > 0) {
+    return [
+      { type: 'text', text: text || '请看这张图片。' },
+      ...imageParts,
+    ];
+  }
+  if (historicalImageCount > 0) {
+    return `${text}${text ? '\n' : ''}[图片 × ${historicalImageCount}]`;
+  }
+  return text;
 }
 
 /** 因上下文截断而缺失的工具结果占位文本 */
