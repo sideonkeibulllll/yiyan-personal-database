@@ -333,6 +333,114 @@ export async function deleteAttachmentFiles(att: Attachment): Promise<void> {
   await Promise.all(tasks);
 }
 
+/* ============================================================
+ *  聊天图片（v3.5.3）
+ *
+ *  与条目附件完全独立的一套存储：
+ *    chat-images/<sessionId>/<fileName>_orig.jpg   （长边≤1600，给「看大图」用）
+ *    chat-images/<sessionId>/<fileName>_thumb.jpg  （长边≤400，消息里显示）
+ *
+ *  为什么不复用条目附件表：聊天图片属于「对话」而非「记忆库卡片」，
+ *  没有 entryId 可言，且删会话时要整目录清理。消息 JSON 里只存两个路径，
+ *  不存 base64 —— 否则 chat_sessions.messages 会随图片爆炸。
+ * ============================================================ */
+
+const CHAT_IMAGE_DIR = 'chat-images';
+/** 聊天原图压缩：比条目附件略小（1600 足够看细节，省磁盘） */
+const CHAT_ORIG_COMPRESS: CompressOptions = { maxSize: 1600, quality: 0.85 };
+/** 发给模型的中图：长边 1024（DeepSeek 单图折算 ≤384 tokens，尺寸再大也无收益） */
+const MODEL_IMAGE_COMPRESS: CompressOptions = { maxSize: 1024, quality: 0.82 };
+/** base64 字符数上限（≈ 480KB 二进制）；未超限的原图直接发，省一次重编码 */
+const MODEL_BASE64_LIMIT = 650_000;
+
+/** 已落盘的聊天图片引用（写进 ChatMessage.images） */
+export interface ChatImageRef {
+  path: string;
+  thumbPath: string;
+  mimeType: string;
+}
+
+/**
+ * 保存一张聊天图片（原图 + 缩略图，双份落盘）
+ */
+export async function saveChatImage(
+  sessionId: string,
+  image: SelectedImage
+): Promise<ChatImageRef> {
+  const fileName = genFileName();
+  const dir = `${CHAT_IMAGE_DIR}/${sessionId}`;
+  const origPath = `${dir}/${fileName}_orig.jpg`;
+  const thumbPath = `${dir}/${fileName}_thumb.jpg`;
+
+  const [orig, thumb] = await Promise.all([
+    compressImage(image, CHAT_ORIG_COMPRESS),
+    compressImage(image, THUMB_COMPRESS),
+  ]);
+
+  await Filesystem.writeFile({
+    path: origPath,
+    data: orig.base64,
+    directory: Directory.Data,
+    recursive: true,
+  });
+  await Filesystem.writeFile({
+    path: thumbPath,
+    data: thumb.base64,
+    directory: Directory.Data,
+    recursive: true,
+  });
+
+  return { path: origPath, thumbPath, mimeType: orig.mimeType };
+}
+
+/**
+ * 读取聊天原图并转成「可直接喂给模型」的 base64。
+ * 原图已足够小（≤约 480KB）时原样返回，否则压到长边 1024 再返回。
+ * @returns null 表示文件缺失/读取失败（调用方降级为纯文本）
+ */
+export async function readChatImageForModel(path: string): Promise<SelectedImage | null> {
+  try {
+    const { data } = await Filesystem.readFile({ path, directory: Directory.Data });
+    const base64 = typeof data === 'string' ? data : '';
+    if (!base64) return null;
+    if (base64.length <= MODEL_BASE64_LIMIT) {
+      return { base64, mimeType: 'image/jpeg' };
+    }
+    return await compressImage(
+      { base64, mimeType: 'image/jpeg' },
+      MODEL_IMAGE_COMPRESS
+    );
+  } catch (err) {
+    console.warn('[attachment] readChatImageForModel failed:', path, err);
+    return null;
+  }
+}
+
+/**
+ * 删除某会话的全部聊天图片（删除会话时级联清理）。
+ * Filesystem 没有 rmdir，只能 readdir + 逐个删；空目录留着不影响功能。
+ */
+export async function deleteChatImageDir(sessionId: string): Promise<void> {
+  const dir = `${CHAT_IMAGE_DIR}/${sessionId}`;
+  try {
+    const result = await Filesystem.readdir({ path: dir, directory: Directory.Data });
+    const files = Array.isArray(result?.files) ? result.files : [];
+    await Promise.all(
+      files.map(async f => {
+        const name = f?.name;
+        if (!name) return;
+        try {
+          await Filesystem.deleteFile({ path: `${dir}/${name}`, directory: Directory.Data });
+        } catch {
+          /* 单文件删除失败不阻塞其余 */
+        }
+      })
+    );
+  } catch {
+    /* 目录不存在（从未发过图）或读取失败，忽略 */
+  }
+}
+
 /**
  * 删除某条目所有附件文件（级联删除，删完整条 entry 时调用）
  */

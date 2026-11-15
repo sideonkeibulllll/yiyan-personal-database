@@ -7,12 +7,14 @@
  * 流式期间父组件高频更新 messages 时，只有「正在写入的最后一条」消息重渲染，
  * 历史消息（引用未变）全部跳过 —— 修复长对话下流式卡顿的主因之一。
  */
-import { memo, useMemo } from 'react';
+import { memo, useMemo, useState, useEffect } from 'react';
 import type { RefObject } from 'react';
 import { renderMarkdown } from '@/utils/markdown';
+import { readImageAsSrc } from '@/services/attachmentService';
+import { ImageViewer } from '@/components/ImageViewer';
 import { IconMessage, IconCheck, IconBrain } from '@/components/icons';
 import { formatTime } from '../chatUtils';
-import type { ChatMessage } from '../chatTypes';
+import type { ChatMessage, ChatImage } from '../chatTypes';
 
 interface ChatMessageListProps {
   messages: ChatMessage[];
@@ -25,6 +27,79 @@ interface ChatMessageListProps {
   onToggleSelect: (msgId: string) => void;
   /** 危险操作确认：confirmId + 是否批准 */
   onConfirmAction?: (confirmId: string, approved: boolean) => void;
+}
+
+/* === 消息内的图片网格（v3.5.3）=== */
+/**
+ * 读缩略图先顶上；打开大图后再补读原图并替换（点开不等待）。
+ * 文件缺失（换设备恢复、手动清理）时显示「图片已丢失」占位，不渲染破图。
+ */
+function ChatImageGrid({ images }: { images: ChatImage[] }) {
+  const [thumbs, setThumbs] = useState<string[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [fulls, setFulls] = useState<Record<number, string>>({});
+  const [viewerStart, setViewerStart] = useState<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoaded(false);
+    (async () => {
+      const list = await Promise.all(images.map(img => readImageAsSrc(img.thumbPath)));
+      if (cancelled) return;
+      setThumbs(list);
+      setLoaded(true);
+    })();
+    return () => { cancelled = true; };
+  }, [images]);
+
+  // 观看期间后台补读原图（缩略图仅 400px，放大后糊）
+  useEffect(() => {
+    if (viewerStart === null) return;
+    let cancelled = false;
+    (async () => {
+      for (let i = 0; i < images.length; i++) {
+        const src = await readImageAsSrc(images[i].path);
+        if (cancelled) return;
+        if (src) setFulls(prev => ({ ...prev, [i]: src }));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [viewerStart, images]);
+
+  const viewerImages = images.map((_, i) => fulls[i] || thumbs[i] || '');
+
+  return (
+    <>
+      <div className={`chat-msg-images count-${Math.min(images.length, 3)}`}>
+        {!loaded
+          ? images.map((img, i) => <div key={img.path} className="chat-msg-image skeleton" />)
+          : images.map((img, i) => (
+            thumbs[i] ? (
+              <img
+                key={img.path}
+                src={thumbs[i]}
+                alt={`图片 ${i + 1}`}
+                className="chat-msg-image"
+                onClick={() => setViewerStart(i)}
+                title="点击查看大图"
+              />
+            ) : (
+              <div key={img.path} className="chat-msg-image missing" title="图片文件已不在本机">
+                图片已丢失
+              </div>
+            )
+          ))}
+      </div>
+
+      {viewerStart !== null && (
+        <ImageViewer
+          images={viewerImages}
+          startIndex={viewerStart}
+          onClose={() => setViewerStart(null)}
+        />
+      )}
+    </>
+  );
 }
 
 /* === 单条消息（React.memo 隔离：props 全稳定时跳过重渲染）=== */
@@ -122,8 +197,13 @@ const ChatMessageItem = memo(function ChatMessageItem({
             <summary className="tool-json-fold-summary">查看工具返回详情</summary>
             <div className="message-content markdown-body" dangerouslySetInnerHTML={{ __html: html }} />
           </details>
-        ) : (
+        ) : (msg.content || !msg.images || msg.images.length === 0) ? (
           <div className="message-content markdown-body" dangerouslySetInnerHTML={{ __html: html }} />
+        ) : null}
+
+        {/* 用户消息随附的图片（v3.5.3） */}
+        {msg.role === 'user' && msg.images && msg.images.length > 0 && (
+          <ChatImageGrid images={msg.images} />
         )}
 
         {msg.isThinking && !msg.reasoningContent && (

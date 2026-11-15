@@ -62,6 +62,8 @@ export interface RestoreResult {
   /** 对话会话：新增/跳过（v2.0.0 新增） */
   chatSessionsImported?: number;
   chatSessionsSkipped?: number;
+  /** 聊天图片文件恢复数量（v3.5.3 新增；路径直接沿用备份内路径） */
+  chatImagesRestored?: number;
   /** 错误信息 */
   errors: string[];
 }

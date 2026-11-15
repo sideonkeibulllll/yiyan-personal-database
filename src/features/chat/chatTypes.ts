@@ -5,6 +5,30 @@ import type { ResolvedToolCall } from '@/services/chatBridge';
 
 export type ThinkingEffort = 'high' | 'max';
 
+/**
+ * 消息里的图片引用（v3.5.3）
+ *
+ * 只存路径，不存 base64 —— chat_sessions.messages 是整段 JSON 存 TEXT，
+ * 塞 base64 会让会话表迅速膨胀，且每次流式落库都要重写一遍。
+ * 发送给模型时再按路径读文件、按需压缩（见 attachmentService.readChatImageForModel）。
+ */
+export interface ChatImage {
+  /** 原图相对路径（长边≤1600） */
+  path: string;
+  /** 缩略图相对路径（长边≤400） */
+  thumbPath: string;
+  mimeType: string;
+}
+
+/** 尚未发送的图片（还停在内存里，未落盘；preview 为压缩后的 dataURL） */
+export interface PendingChatImage {
+  id: string;
+  base64: string;
+  mimeType: string;
+  /** 长边 400 的 dataURL，仅用于输入区预览条 */
+  preview: string;
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'tool';
@@ -14,6 +38,9 @@ export interface ChatMessage {
   isThinking?: boolean;
   thinkingEffort?: ThinkingEffort;
   model?: string;  // 该消息使用的模型
+
+  /** 用户消息随附的图片（v3.5.3；只有 role='user' 会用） */
+  images?: ChatImage[];
 
   /** assistant 触发工具调用时的原始 tool_calls（OpenAI 结构，用于重建 apiMessages） */
   toolCalls?: ResolvedToolCall[];

@@ -918,12 +918,16 @@ export async function executeToolCall(
             returned: page.length,
             results: await Promise.all(page.map(async e => {
               const links = await db.getLinksByEntryId(e.id);
+              const imageCount = e.attachments?.length ?? 0;
               return {
                 id: e.id,
                 content: e.content.length > 120 ? e.content.slice(0, 120) + '…' : e.content,
                 source: e.source || undefined,
                 isStarred: e.isStarred,
                 linkCount: links.length,
+                // v3.5.3: 让模型知道这条卡带图（图片本身不进上下文；
+                // 需要看图时由用户手动发送，或向用户说明）
+                ...(imageCount > 0 ? { images: imageCount } : {}),
               };
             })),
             ...(total > page.length

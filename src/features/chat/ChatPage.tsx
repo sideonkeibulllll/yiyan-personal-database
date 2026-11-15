@@ -47,9 +47,13 @@ import {
   saveChatSession as saveSessionDb,
   deleteChatSession as deleteSessionDb,
 } from '@/services/chatSessionService';
-import { loadSessionsSync, createId, generateTitle, buildModelOptions, parseModelValue, truncateApiMessagesSafely, loadChatDrafts, saveChatDraft, deleteChatDraft } from './chatUtils';
-import type { ApiMessage } from './chatUtils';
-import type { ChatMessage, ChatSession, SearchSelectedResult, ThinkingEffort } from './chatTypes';
+import { pickImages, takePhoto, saveChatImage, readChatImageForModel, deleteChatImageDir } from '@/services/attachmentService';
+import { supportsVision, VISION_UNSUPPORTED_HINT } from '@/utils/modelCapability';
+import { Capacitor } from '@capacitor/core';
+import { isElectron } from '@/services/electronAdapter';
+import { loadSessionsSync, createId, generateTitle, buildModelOptions, parseModelValue, truncateApiMessagesSafely, loadChatDrafts, saveChatDraft, deleteChatDraft, buildUserMessageContent } from './chatUtils';
+import type { ApiMessage, ApiContentPart } from './chatUtils';
+import type { ChatMessage, ChatSession, ChatImage, PendingChatImage, SearchSelectedResult, ThinkingEffort } from './chatTypes';
 import { streamChatCompletion } from './chatStream';
 import { ChatSidebar } from './components/ChatSidebar';
 import { ChatHeader } from './components/ChatHeader';
@@ -64,6 +68,8 @@ export function ChatPage() {
   const [sessions, setSessions] = useState<ChatSession[]>(() => loadSessionsSync());
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [input, setInput] = useState('');
+  /** v3.5.3: 待发送图片（只在内存里，发送时才落盘 —— 选完不发的不会留垃圾文件） */
+  const [pendingImages, setPendingImages] = useState<PendingChatImage[]>([]);
   /** v3.5.0: 输入撤销栈版本号（栈本体在 refs，用它触发按钮可用态刷新） */
   const [historyVersion, setHistoryVersion] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
@@ -251,6 +257,125 @@ export function ChatPage() {
 
   // v2.5.1: 模型选项按 provider 分组（跨提供商可选）
   const modelOptions = useMemo(() => buildModelOptions(settings.ai), [settings.ai]);
+
+  /* === 图片输入（v3.5.3）===
+   * 只对「确认支持看图」的模型放行：不支持时入口置灰、发送前再拦一道，
+   * 避免用户拍完一张才收到 400。
+   * 注意：GLM 免费池（useGlm）一律判否 —— 池内是文本模型，
+   * 且此时 effectiveProviderId 仍指向原提供商，不拦会误判成支持。
+   */
+  const visionSupported = useMemo(
+    () => !useGlm && supportsVision(effectiveProviderId, effectiveModel),
+    [useGlm, effectiveProviderId, effectiveModel]
+  );
+
+  /** 是否展示「拍照」：仅 Android 有原生相机（Web/Electron 走文件选择器） */
+  const showCameraButton = useMemo(
+    () => !isElectron() && Capacitor.getPlatform() === 'android',
+    []
+  );
+
+  /** 把 File 读成 base64（不含 data: 前缀） */
+  const fileToBase64 = useCallback((file: File): Promise<{ base64: string; mimeType: string }> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = String(reader.result || '');
+        const comma = dataUrl.indexOf(',');
+        resolve({
+          base64: comma >= 0 ? dataUrl.slice(comma + 1) : '',
+          mimeType: file.type || 'image/jpeg',
+        });
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }, []);
+
+  /** 生成预览用缩略图（长边 400，避免内存里挂一堆原图 dataURL） */
+  const makePreview = useCallback(async (base64: string, mimeType: string): Promise<string> => {
+    const dataUrl = `data:${mimeType};base64,${base64}`;
+    try {
+      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const el = new Image();
+        el.onload = () => resolve(el);
+        el.onerror = reject;
+        el.src = dataUrl;
+      });
+      const ratio = Math.min(1, 400 / Math.max(img.width, img.height));
+      const w = Math.max(1, Math.round(img.width * ratio));
+      const h = Math.max(1, Math.round(img.height * ratio));
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return dataUrl;
+      ctx.drawImage(img, 0, 0, w, h);
+      return canvas.toDataURL('image/jpeg', 0.75);
+    } catch {
+      return dataUrl; // 压缩失败就用原图（预览而已）
+    }
+  }, []);
+
+  const appendPendingImages = useCallback(async (items: { base64: string; mimeType: string }[]) => {
+    if (items.length === 0) return;
+    const withPreview = await Promise.all(items.map(async it => ({
+      id: createId(),
+      base64: it.base64,
+      mimeType: it.mimeType,
+      preview: await makePreview(it.base64, it.mimeType),
+    })));
+    // 单条消息最多 9 张，超出丢弃（与相册多选上限一致）
+    setPendingImages(prev => [...prev, ...withPreview].slice(0, 9));
+  }, [makePreview]);
+
+  /** 从相册 / 文件选择器选图 */
+  const handlePickImages = useCallback(async () => {
+    if (!visionSupported) {
+      alert(VISION_UNSUPPORTED_HINT);
+      return;
+    }
+    try {
+      const imgs = await pickImages(9);
+      await appendPendingImages(imgs);
+    } catch (err) {
+      console.error('[ChatPage] 选图失败:', err);
+      alert('选图失败，请重试');
+    }
+  }, [visionSupported, appendPendingImages]);
+
+  /** 拍照（仅 Android） */
+  const handleTakePhoto = useCallback(async () => {
+    if (!visionSupported) {
+      alert(VISION_UNSUPPORTED_HINT);
+      return;
+    }
+    try {
+      const img = await takePhoto();
+      if (img) await appendPendingImages([img]);
+    } catch (err) {
+      console.error('[ChatPage] 拍照失败:', err);
+      alert('拍照失败，请重试');
+    }
+  }, [visionSupported, appendPendingImages]);
+
+  /** 粘贴图片（桌面端 Ctrl+V） */
+  const handlePasteImages = useCallback(async (files: File[]) => {
+    if (!visionSupported) {
+      alert(VISION_UNSUPPORTED_HINT);
+      return;
+    }
+    try {
+      const items = await Promise.all(files.map(f => fileToBase64(f)));
+      await appendPendingImages(items.filter(it => it.base64));
+    } catch (err) {
+      console.error('[ChatPage] 粘贴图片失败:', err);
+    }
+  }, [visionSupported, fileToBase64, appendPendingImages]);
+
+  const handleRemovePendingImage = useCallback((id: string) => {
+    setPendingImages(prev => prev.filter(p => p.id !== id));
+  }, []);
 
   // 首次挂载：从数据库异步加载对话历史（覆盖 localStorage 同步初始值）；
   // 并消费「怕了么 → 聊天」来料草稿（v3.3.0：新建对话 + 预填输入框，不自动发送）
@@ -516,6 +641,8 @@ export function ChatPage() {
     e.stopPropagation();
     // v3.5.0: 顺手清掉该会话的输入草稿（切走时的 flush 会因“会话已不存在”而跳过，不会写回）
     deleteChatDraft(id);
+    // v3.5.3: 级联清理该会话的聊天图片（chat-images/<sessionId>/ 整目录）
+    deleteChatImageDir(id).catch(() => {});
     const next = sessions.filter(s => s.id !== id);
     persistSessions(next);
     deleteSessionDb(id).catch(() => {});
@@ -715,10 +842,17 @@ export function ChatPage() {
   /* === 发送消息（流式）=== */
   const handleSend = useCallback(async () => {
     const text = input.trim();
-    if (!text || isLoading) return;
+    const hasImages = pendingImages.length > 0;
+    if ((!text && !hasImages) || isLoading) return;
 
     if (!effectiveAPIKey) {
       alert('请先在设置页面配置 AI API Key');
+      return;
+    }
+
+    // v3.5.3: 不支持看图的模型，发图前就拦住（避免白拍一张再收 400）
+    if (hasImages && !visionSupported) {
+      alert(VISION_UNSUPPORTED_HINT);
       return;
     }
 
@@ -734,10 +868,12 @@ export function ChatPage() {
     let session = sessions.find(s => s.id === sessionId);
     let baseSessions = sessions;
 
+    const titleSeed = text || '图片消息';
+
     if (!session) {
       session = {
         id: sessionId,
-        title: generateTitle(text),
+        title: generateTitle(titleSeed),
         messages: [],
         createdAt: Date.now(),
         updatedAt: Date.now(),
@@ -747,18 +883,51 @@ export function ChatPage() {
       setCurrentSessionId(sessionId);
     }
 
+    /* === v3.5.3: 图片落盘 + 读取给模型的 base64 ===
+     * 先 setIsLoading 再落盘：压缩/写盘要 1~3 秒，期间按钮显示「停止」，
+     * 用户不会以为卡死而重复点发送。
+     * 落盘失败的单张跳过；全部失败则中止本次发送（文字也一起保留在输入框）。
+     */
+    setIsLoading(true);
+    const sentImages: ChatImage[] = [];
+    const imageParts: ApiContentPart[] = [];
+    if (hasImages) {
+      try {
+        for (const p of pendingImages) {
+          const ref = await saveChatImage(sessionId, { base64: p.base64, mimeType: p.mimeType });
+          sentImages.push(ref);
+          const forModel = await readChatImageForModel(ref.path);
+          if (forModel) {
+            imageParts.push({
+              type: 'image_url',
+              image_url: { url: `data:${forModel.mimeType};base64,${forModel.base64}` },
+            });
+          }
+        }
+      } catch (err) {
+        console.error('[ChatPage] 图片保存失败:', err);
+      }
+      if (sentImages.length === 0) {
+        setIsLoading(false);
+        alert('图片处理失败，没有图片能发送。请重试一次。');
+        return;
+      }
+      setPendingImages([]);
+    }
+
     // 添加用户消息
     const userMsg: ChatMessage = {
       id: createId(),
       role: 'user',
       content: text,
       timestamp: Date.now(),
+      ...(sentImages.length > 0 ? { images: sentImages } : {}),
     };
 
     const updatedMessages = [...session.messages, userMsg];
 
     // 更新标题
-    const newTitle = session.messages.length === 0 ? generateTitle(text) : session.title;
+    const newTitle = session.messages.length === 0 ? generateTitle(titleSeed) : session.title;
     const updatedSession: ChatSession = {
       ...session,
       title: newTitle,
@@ -767,7 +936,6 @@ export function ChatPage() {
     };
     persistSessions(baseSessions.map(s => s.id === sessionId ? updatedSession : s));
     setInput('');
-    setIsLoading(true);
 
     // AI 占位消息
     const aiMsgId = createId();
@@ -873,10 +1041,19 @@ export function ChatPage() {
           }
           console.log('[ChatPage] loaded:', { entries: pickerEntries.length, todos: pickerTodos.length, failed: failedIds.length });
           if (pickerEntries.length > 0) {
-            const pickerText = pickerEntries.map((e, i) =>
-              `[${i + 1}] (ID: ${e.id}) ${e.content}${e.source ? ` [来源: ${e.source}]` : ''}${e.supplement ? ` [补充: ${e.supplement}]` : ''}`
-            ).join('\n');
+            const pickerText = pickerEntries.map((e, i) => {
+              const imgCount = e.attachments?.length ?? 0;
+              return `[${i + 1}] (ID: ${e.id}) ${e.content}` +
+                `${e.source ? ` [来源: ${e.source}]` : ''}` +
+                `${e.supplement ? ` [补充: ${e.supplement}]` : ''}` +
+                `${imgCount > 0 ? ` [图片: ${imgCount} 张]` : ''}`;
+            }).join('\n');
             systemPrompt += `\n\n## 用户选择的数据上下文\n用户选择了以下数据卡片作为本次对话的参考：\n${pickerText}\n`;
+            // v3.5.3: 卡片自带图片时，图片本身不随上下文发送（成本与隐私双重考虑），
+            // 明确告知模型「别猜图里的内容」，需要时请用户发图。
+            if (pickerEntries.some(e => (e.attachments?.length ?? 0) > 0)) {
+              systemPrompt += `\n（标注了「图片: N 张」的卡片带有图片附件，但图片内容没有随本次上下文发送。不要猜测图里有什么；若回答确实需要看图，请直接请用户把图片发到对话里。）\n`;
+            }
           }
           if (pickerTodos.length > 0) {
             const todoText = pickerTodos.map((t, i) => {
@@ -930,7 +1107,19 @@ export function ChatPage() {
       // 构建 API 消息，保留 assistant 的 tool_calls 与 tool 消息的 tool_call_id，
       // 以便 agent loop 第二轮起模型能看到完整上下文。
       const buildApiMessage = (m: ChatMessage): ApiMessage | null => {
-        if (m.role === 'user') return { role: 'user', content: m.content };
+        if (m.role === 'user') {
+          // v3.5.3: 只有「本轮」的图片会真正发给模型；历史图片退化成数量占位
+          // （否则 agent loop 每轮都重传图片，token 成倍涨）。构造规则见 chatUtils。
+          const isCurrentTurn = m.id === userMsg.id;
+          return {
+            role: 'user',
+            content: buildUserMessageContent(
+              isCurrentTurn
+                ? { text: m.content, imageParts }
+                : { text: m.content, historicalImageCount: m.images?.length ?? 0 }
+            ),
+          };
+        }
         if (m.role === 'assistant') {
           // 丢弃「无内容且无 tool_calls」的空 assistant（agent loop 命中上限时
           // 会残留一个空占位消息），避免污染上下文 / 触发部分网关的校验错误。
@@ -1264,7 +1453,7 @@ export function ChatPage() {
       // 注意：MCP 工具激活改为对话级持久化（session.mcpEnabledTools），
       // 不再在每次发送后清空，让用户在一次对话内可以连续多次调用工具。
     }
-  }, [input, isLoading, settings, currentSessionId, sessions, persistSessions, updateSessionMessages, thinkingEnabled, thinkingEffort, mcpEnabled, mcpActiveTools, currentModel, pickerSelectedIds]);
+  }, [input, isLoading, settings, currentSessionId, sessions, persistSessions, updateSessionMessages, thinkingEnabled, thinkingEffort, mcpEnabled, mcpActiveTools, currentModel, pickerSelectedIds, pendingImages, visionSupported]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     // 手机端/桌面端统一：裸 Enter 换行（不拦截），仅 Ctrl/Cmd+Enter 发送；
@@ -1549,6 +1738,13 @@ export function ChatPage() {
           onSend={handleSend}
           onStop={handleStop}
           textareaRef={textareaRef}
+          pendingImages={pendingImages}
+          visionSupported={visionSupported}
+          showCameraButton={showCameraButton}
+          onPickImages={handlePickImages}
+          onTakePhoto={handleTakePhoto}
+          onRemovePendingImage={handleRemovePendingImage}
+          onPasteImages={handlePasteImages}
         />
       </main>
 

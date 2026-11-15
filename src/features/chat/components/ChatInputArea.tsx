@@ -1,12 +1,13 @@
 /**
- * Chat 页底部输入区 - 工具栏（数据/最近/思考/MCP）、MCP 工具多选、输入框
+ * Chat 页底部输入区 - 工具栏（数据/图片/拍照/最近/思考/MCP）、MCP 工具多选、输入框
  *
  * 状态与业务逻辑由父组件 ChatPage 持有，本组件只负责展示。
  */
-import type { KeyboardEvent, RefObject } from 'react';
+import type { ClipboardEvent, KeyboardEvent, RefObject } from 'react';
 import { ENTRY_TOOLS, TODO_TOOLS, MEMO_TOOLS, SOUL_TOOLS } from '@/services/chatBridge';
-import { IconUpload, IconBrain, IconTool, IconClose, IconBack, IconSendAlt, IconCheck, IconUndo, IconRedo } from '@/components/icons';
-import type { ThinkingEffort } from '../chatTypes';
+import { IconUpload, IconBrain, IconTool, IconClose, IconBack, IconSendAlt, IconCheck, IconUndo, IconRedo, IconImage, IconCamera } from '@/components/icons';
+import { VISION_UNSUPPORTED_HINT } from '@/utils/modelCapability';
+import type { PendingChatImage, ThinkingEffort } from '../chatTypes';
 
 interface ChatInputAreaProps {
   pickerSelectedCount: number;
@@ -39,6 +40,19 @@ interface ChatInputAreaProps {
   onSend: () => void;
   onStop: () => void;
   textareaRef: RefObject<HTMLTextAreaElement>;
+
+  /* === 图片输入（v3.5.3） === */
+  /** 尚未发送的图片（预览条） */
+  pendingImages: PendingChatImage[];
+  /** 当前模型是否支持看图（false → 图片入口置灰） */
+  visionSupported: boolean;
+  /** 是否展示「拍照」入口（仅 Android 有原生相机） */
+  showCameraButton: boolean;
+  onPickImages: () => void;
+  onTakePhoto: () => void;
+  onRemovePendingImage: (id: string) => void;
+  /** 粘贴图片（桌面端 Ctrl+V / 手机端剪贴板） */
+  onPasteImages: (files: File[]) => void;
 }
 
 /** MCP 工具分组（面板上按组多选，勾选即启用整组工具） */
@@ -78,6 +92,13 @@ export function ChatInputArea({
   onSend,
   onStop,
   textareaRef,
+  pendingImages,
+  visionSupported,
+  showCameraButton,
+  onPickImages,
+  onTakePhoto,
+  onRemovePendingImage,
+  onPasteImages,
 }: ChatInputAreaProps) {
   // 切换某一组工具：选中则全部启用，取消则全部移除（保留其它组）
   const toggleGroup = (tools: string[], enable: boolean) => {
@@ -86,6 +107,24 @@ export function ChatInputArea({
       : mcpActiveTools.filter(t => !tools.includes(t));
     onSetMcpTools(next);
   };
+
+  /** 输入框粘贴：剪贴板里有图片文件时截获（桌面端最顺手的发图方式） */
+  const handlePaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
+    if (!visionSupported) return;
+    const items = Array.from(e.clipboardData?.items || []);
+    const files: File[] = [];
+    for (const item of items) {
+      if (item.kind !== 'file' || !item.type.startsWith('image/')) continue;
+      const f = item.getAsFile();
+      if (f) files.push(f);
+    }
+    if (files.length > 0) {
+      e.preventDefault();
+      onPasteImages(files);
+    }
+  };
+
+  const canSend = input.trim().length > 0 || pendingImages.length > 0;
 
   return (
     <footer className="chat-input-area glass">
@@ -109,6 +148,28 @@ export function ChatInputArea({
           />
           <span>最近</span>
         </label>
+
+        {/* 图片：相册 / 文件选择（全平台） */}
+        <button
+          className={`toolbar-btn ${pendingImages.length > 0 ? 'active image' : ''} ${visionSupported ? '' : 'no-vision'}`}
+          onClick={onPickImages}
+          title={visionSupported ? '选择图片（桌面端可直接 Ctrl+V 粘贴）' : VISION_UNSUPPORTED_HINT}
+        >
+          <IconImage />
+          <span>图片{pendingImages.length > 0 ? ` (${pendingImages.length})` : ''}</span>
+        </button>
+
+        {/* 拍照：仅 Android（原生相机） */}
+        {showCameraButton && (
+          <button
+            className={`toolbar-btn ${visionSupported ? '' : 'no-vision'}`}
+            onClick={onTakePhoto}
+            title={visionSupported ? '拍一张照片发给 AI' : VISION_UNSUPPORTED_HINT}
+          >
+            <IconCamera />
+            <span>拍照</span>
+          </button>
+        )}
 
         {/* 深度思考 */}
         <button
@@ -235,6 +296,29 @@ export function ChatInputArea({
         </div>
       </div>
 
+      {/* 待发送图片预览条 */}
+      {pendingImages.length > 0 && (
+        <div className="chat-pending-images">
+          {pendingImages.map(img => (
+            <div className="chat-pending-image" key={img.id}>
+              <img src={img.preview} alt="待发送图片" />
+              <button
+                type="button"
+                className="pending-image-remove"
+                onClick={() => onRemovePendingImage(img.id)}
+                aria-label="移除这张图片"
+                title="移除"
+              >
+                <IconClose size={9} />
+              </button>
+            </div>
+          ))}
+          <span className="pending-images-hint">
+            {pendingImages.length} 张将随消息发送
+          </span>
+        </div>
+      )}
+
       <div className="input-row">
         <textarea
           ref={textareaRef}
@@ -243,6 +327,7 @@ export function ChatInputArea({
           value={input}
           onChange={e => onInputChange(e.target.value)}
           onKeyDown={onKeyDown}
+          onPaste={handlePaste}
           rows={1}
           disabled={isLoading}
         />
@@ -251,7 +336,7 @@ export function ChatInputArea({
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
           </button>
         ) : (
-          <button className="chat-send-btn" onClick={onSend} disabled={!input.trim()}>
+          <button className="chat-send-btn" onClick={onSend} disabled={!canSend}>
             <IconSendAlt />
           </button>
         )}

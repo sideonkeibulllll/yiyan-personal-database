@@ -988,6 +988,36 @@ export async function buildBackupZip(
   zip.file('attachments.json', JSON.stringify(allAttachments, null, 2));
   zip.file('chatSessions.json', JSON.stringify(chatSessions, null, 2));
 
+  /* === 聊天图片（v3.5.3）===
+   * 消息 JSON 里只存路径，文件本体在这里单独打包。
+   * zip 内路径沿用磁盘相对路径（chat-images/<sessionId>/xxx_orig.jpg），
+   * 恢复时无需任何 id 映射，按原路径写回即可；缺失文件静默跳过。
+   */
+  const chatImagePaths = new Set<string>();
+  for (const cs of chatSessions) {
+    for (const m of (cs.messages || [])) {
+      const imgs = (m as { images?: { path?: string; thumbPath?: string }[] }).images;
+      if (!Array.isArray(imgs)) continue;
+      for (const img of imgs) {
+        if (img?.path) chatImagePaths.add(img.path);
+        if (img?.thumbPath) chatImagePaths.add(img.thumbPath);
+      }
+    }
+  }
+  if (chatImagePaths.size > 0) {
+    const chatImgResults = await runBatch(Array.from(chatImagePaths), 4, async path => {
+      try {
+        const res = await Filesystem.readFile({ path, directory: Directory.Data });
+        return { path, data: res.data as string };
+      } catch {
+        return null; // 文件缺失（换机 / 被清理），跳过
+      }
+    });
+    for (const item of chatImgResults) {
+      if (item) zip.file(item.path, item.data, { base64: true });
+    }
+  }
+
   // 并发读缩略图（I/O 批处理）
   const thumbResults = await runBatch(allAttachments, 4, async (att) => {
     try {
@@ -1443,6 +1473,28 @@ async function restoreFromZip(zip: JSZip, overwrite: boolean): Promise<RestoreRe
       } catch (err) {
         result.errors.push(`对话恢复失败 id=${session.id}: ${String(err)}`);
       }
+    }
+  }
+
+  /* === 恢复聊天图片（v3.5.3）===
+   * 文件名与路径都带 sessionId + 随机串，直接按 zip 内路径写回，
+   * 不需要 id 映射；已存在的同名文件覆盖也无害（内容一致）。
+   */
+  const chatImageKeys = Object.keys(zip.files).filter(
+    p => p.startsWith('chat-images/') && !zip.files[p].dir
+  );
+  for (const relPath of chatImageKeys) {
+    try {
+      const data = await zip.files[relPath].async('base64');
+      await Filesystem.writeFile({
+        path: relPath,
+        data,
+        directory: Directory.Data,
+        recursive: true,
+      });
+      result.chatImagesRestored = (result.chatImagesRestored ?? 0) + 1;
+    } catch (err) {
+      result.errors.push(`聊天图片写入失败 ${relPath}: ${String(err)}`);
     }
   }
 
