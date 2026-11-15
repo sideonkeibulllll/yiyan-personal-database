@@ -1,0 +1,240 @@
+/**
+ * 「提示词」选择面板 + 输入区胶囊样式（v3.6.0）
+ * 面板沿用 .mcp-picker-panel 的浮层定位习惯（锚在工具栏上方）。
+ */
+
+.prompt-picker-panel {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  width: min(360px, 92vw);
+  max-height: min(58vh, 460px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  z-index: 210;
+  animation: fadeIn 0.24s var(--ease-out);
+}
+
+.prompt-picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.prompt-picker-header h4 {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.prompt-picker-count {
+  font-size: var(--text-xs);
+  font-weight: 400;
+  color: var(--color-text-tertiary);
+}
+
+.prompt-picker-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-tertiary);
+  padding: 2px;
+  display: flex;
+  align-items: center;
+}
+
+.prompt-picker-search {
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-primary);
+  color: var(--color-text-primary);
+  font-size: var(--text-xs);
+  outline: none;
+}
+
+.prompt-picker-search:focus {
+  border-color: var(--color-border-accent);
+}
+
+.prompt-picker-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.prompt-picker-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-primary);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--duration-fast) var(--ease-out);
+}
+
+.prompt-picker-item.attached {
+  border-color: var(--color-border-accent);
+  background: rgba(247, 103, 7, 0.1);
+}
+
+.prompt-picker-item-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.prompt-picker-item-title {
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prompt-picker-pin {
+  flex-shrink: 0;
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--color-border-primary);
+  color: var(--color-text-tertiary);
+}
+
+.prompt-picker-item-scene {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prompt-picker-item-meta {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--color-text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.prompt-picker-check {
+  flex-shrink: 0;
+  color: var(--color-accent-primary);
+  font-size: 12px;
+}
+
+.prompt-picker-empty {
+  padding: var(--space-4) var(--space-2);
+  text-align: center;
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  line-height: 1.8;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.prompt-picker-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  border-top: 1px solid var(--color-border-primary);
+  padding-top: var(--space-2);
+}
+
+.prompt-picker-hint {
+  font-size: 10px;
+  color: var(--color-text-tertiary);
+}
+
+.prompt-picker-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--color-accent-primary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+/* === 输入区胶囊行 ===
+ * 作为 .input-toolbar 的最后一个 flex item，flex-basis:100% 让它独占一行。
+ * （不能直接挂在 footer 下：footer 是 row 布局，多一个 flex item 会把
+ *   工具栏和输入框挤成三栏，实测会重叠。）
+ */
+.prompt-chip-row {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: 2px;
+}
+
+.prompt-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 60vw;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-full);
+  background: rgba(247, 103, 7, 0.12);
+  border: 1px solid var(--color-border-accent);
+  color: var(--color-text-primary);
+  font-size: var(--text-xs);
+}
+
+.prompt-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prompt-chip-x {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: transparent;
+  border: none;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  padding: 0;
+}
+
+.prompt-chip-x:hover {
+  color: var(--color-text-primary);
+}
+
+.prompt-chip-hint {
+  font-size: 10px;
+  color: var(--color-text-tertiary);
+}

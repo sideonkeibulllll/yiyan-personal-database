@@ -464,6 +464,16 @@ export interface AIConfig {
   provider?: AIProviderId;
   /** 各付费提供商的独立配置（v2.5.0 新增，互不影响） */
   providers?: AIProvidersConfig;
+  /**
+   * 提示词库（v3.6.0）：手工维护的可复用提示词。
+   * 存在 settings 里 → 随本地备份 zip 与设备互传走（云备份不含设置，这是既有边界）。
+   */
+  promptLibrary?: SavedPrompt[];
+  /**
+   * MCP 分组配置（v3.6.0）：缺省（undefined）表示用 services/mcpGroups 的内置定义。
+   * 只在「选择层」生效，运行时仍是 session.mcpEnabledTools 扁平数组。
+   */
+  mcpGroups?: McpGroupConfig[];
 }
 
 /** AI 提供商 ID */
@@ -716,6 +726,59 @@ export interface PromptConfig {
   connectionSuggestion: string;
 }
 
+/**
+ * 提示词库条目（v3.6.0）
+ *
+ * 定位是「资产台账」而不是聊天记录的缓存：只由用户在设置面板手工录入，
+ * 或经 MCP 的 save_prompt 显式写入。Chat 页只读不写（挂载/插入不改内容）。
+ */
+export interface SavedPrompt {
+  id: string;
+  /** 名称：Chat 面板列表和输入区胶囊上显示的就是它 */
+  title: string;
+  /** 一句话场景说明（列表副标题，方便挑的时候不用点开） */
+  scene?: string;
+  /** 正文：整段原样挂载/插入，不做变量替换 */
+  content: string;
+  /** 置顶：始终排在列表最前 */
+  pinned?: boolean;
+  /**
+   * 归档：不硬删，默认从列表与 Chat 面板里隐藏（0/1）。
+   * 提示词是长期资产，误删代价高，所以给一个「收起来」的中间态。
+   */
+  archived?: 0 | 1;
+  /** 用过几次（挂载即 +1，用于「常用优先」排序与「这条真在用吗」的判断） */
+  useCount?: number;
+  /** 最后一次使用时间（毫秒时间戳） */
+  lastUsedAt?: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/**
+ * MCP 分组成员（v3.6.0）
+ *
+ * 分组只是 Chat 面板的「勾选视图」：真正决定发给模型什么工具的仍然是
+ * session.mcpEnabledTools 这个扁平数组，所以改分组永远不会改坏运行时行为。
+ */
+export interface McpGroupConfig {
+  /** 内置组用固定 id（entry/todo/memo/soul/prompt…），自定义组是 g_xxx */
+  id: string;
+  label: string;
+  /** 图标（沿用现有 MCP 面板的 emoji 风格） */
+  icon: string;
+  desc?: string;
+  tools: string[];
+  /** 内置组不可删除（可以停用、可以改工具集） */
+  builtin: boolean;
+  /**
+   * 是否启用：启用的组才会出现在 Chat 的 MCP 面板，关掉整组就不可用。
+   * 注意：新对话永远是「零工具」起步，不存在「默认勾选」这回事——
+   * 想用哪组就自己点一下（避免自动挂 20+ 工具抬高每轮 token）。
+   */
+  visible: boolean;
+}
+
 export interface ContextConfig {
   recentWindow: number;
   tagContext?: string;
@@ -810,6 +873,10 @@ export const DEFAULT_SETTINGS: Settings = {
       maxTokens: 2000,
     },
     prompts: DEFAULT_PROMPTS,
+    // 提示词库出厂为空（内置 8 条由管理面板「导入内置」显式写入，
+    // 这样删掉之后不会被 normalizeSettings 复活）
+    promptLibrary: [],
+    // mcpGroups 故意不设默认值：undefined = 用 services/mcpGroups 的内置组定义
     toolOptions: {
       maxIterations: 12,
       maxToolCalls: 20,

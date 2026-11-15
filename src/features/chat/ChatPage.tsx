@@ -35,6 +35,8 @@ import {
   type ResolvedToolCall,
 } from '@/services/chatBridge';
 import { getMemoryPromptSection } from '@/services/aiMemory';
+import { composePromptText, touchPromptUse } from '@/services/promptLibrary';
+import { visibleMcpGroups } from '@/services/mcpGroups';
 import { renderSoulPortrait } from '@/services/soulFacts';
 import { localDateKey } from '@/utils/localDate';
 import { getDatabase } from '@/services/database';
@@ -92,6 +94,20 @@ export function ChatPage() {
   const [mcpPickerMode, setMcpPickerMode] = useState<'entry' | 'todo'>('entry');
   // 已激活的 MCP 类型（一次性，发送后清空）
   const [mcpActiveTools, setMcpActiveTools] = useState<string[]>([]);
+
+  /* === v3.6.0: 提示词挂载（只存 id，正文发送时才从库里取 → 改库即时生效） === */
+  const [promptPickerOpen, setPromptPickerOpen] = useState(false);
+  const [attachedPromptIds, setAttachedPromptIds] = useState<string[]>([]);
+  /** 已挂载的条目（库里被删掉的会自动从这里消失） */
+  const attachedPrompts = useMemo(() => {
+    const library = settings.ai.promptLibrary ?? [];
+    return attachedPromptIds
+      .map(id => library.find(p => p.id === id))
+      .filter((p): p is NonNullable<typeof p> => !!p)
+      .map(p => ({ id: p.id, title: p.title, content: p.content }));
+  }, [attachedPromptIds, settings.ai.promptLibrary]);
+  /** Chat 面板要显示的 MCP 分组（隐藏组不出现） */
+  const mcpGroups = useMemo(() => visibleMcpGroups(settings.ai.mcpGroups), [settings.ai.mcpGroups]);
 
   // 重命名
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -618,7 +634,8 @@ export function ChatPage() {
         id: createId(),
         title: '新对话',
         messages: [],
-        // v2.11.0: 新建对话继承当前思考模式（MCP 工具保持从零开始）
+        // v2.11.0: 新建对话继承当前思考模式
+        // v3.6.0: MCP 工具永远从零开始（分组只能「启用/停用」，不做默认勾选）
         thinkingEnabled,
         thinkingEffort,
         createdAt: Date.now(),
@@ -628,6 +645,7 @@ export function ChatPage() {
       setCurrentSessionId(newSession.id);
     }
     setInput('');
+    setAttachedPromptIds([]);
     setMcpSelectedIds(new Set());
     if (isMobile) setSidebarOpen(false);
   }, [sessions, persistSessions, isMobile, thinkingEnabled, thinkingEffort]);
@@ -843,7 +861,9 @@ export function ChatPage() {
   const handleSend = useCallback(async () => {
     const text = input.trim();
     const hasImages = pendingImages.length > 0;
-    if ((!text && !hasImages) || isLoading) return;
+    // v3.6.0: 挂载的提示词正文在发送时才展开（输入框里只有胶囊）
+    const promptText = composePromptText(attachedPrompts);
+    if ((!text && !hasImages && !promptText) || isLoading) return;
 
     if (!effectiveAPIKey) {
       alert('请先在设置页面配置 AI API Key');
@@ -868,7 +888,7 @@ export function ChatPage() {
     let session = sessions.find(s => s.id === sessionId);
     let baseSessions = sessions;
 
-    const titleSeed = text || '图片消息';
+    const titleSeed = text || attachedPrompts.map(p => p.title).join('+') || '图片消息';
 
     if (!session) {
       session = {
@@ -916,10 +936,13 @@ export function ChatPage() {
     }
 
     // 添加用户消息
+    // v3.6.0: 挂载的提示词按顺序拼在用户消息最前面（可见、可回看、重发不丢）
     const userMsg: ChatMessage = {
       id: createId(),
       role: 'user',
-      content: text,
+      content: promptText
+        ? (text ? `${promptText}\n\n${text}` : promptText)
+        : text,
       timestamp: Date.now(),
       ...(sentImages.length > 0 ? { images: sentImages } : {}),
     };
@@ -936,6 +959,8 @@ export function ChatPage() {
     };
     persistSessions(baseSessions.map(s => s.id === sessionId ? updatedSession : s));
     setInput('');
+    // v3.6.0: 胶囊随本次发送清空（正文已经进消息了）
+    setAttachedPromptIds([]);
 
     // AI 占位消息
     const aiMsgId = createId();
@@ -984,6 +1009,11 @@ export function ChatPage() {
       // 仅当本对话启用了 Soul 工具组时，才告知 AI 具备「提议变更」的能力（对话级开关）
       if (mcpEnabled && ((session.mcpEnabledTools ?? mcpActiveTools) || []).includes('update_soul')) {
         systemPrompt += `\n\n（本次对话你具备更新用户「Soul 事实档案」的能力：发现值得长期记录的持久事实时，可调用 update_soul 提议变更（新增/修改/废除；不确定现状可先用 list_soul_facts 查看），系统会先请用户确认。只记录事实与状态，不要记录指令、偏好或倾向；没有重要信息就不要提议。）`;
+      }
+
+      // v3.6.0: 提示词库能力说明（仅当本对话启用了提示词组时才告知，避免无谓的 token 消耗）
+      if (mcpEnabled && ((session.mcpEnabledTools ?? mcpActiveTools) || []).includes('list_prompts')) {
+        systemPrompt += `\n\n（本次对话你可以访问用户的「提示词库」：需要参考某条提示词时先用 list_prompts 看目录、再用 get_prompt 取全文；只有用户明确要求保存或改写提示词时才用 save_prompt，系统会先请用户确认。不要把闲聊内容或临时结论擅自存进库里——那是用户的长期资产。）`;
       }
 
       // v2.11.0: 长期记忆注入（仅当开关打开；全本地数据、用户可在设置页管理）
@@ -1603,6 +1633,27 @@ export function ChatPage() {
     setMcpPickerOpen(prev => !prev);
   }, []);
 
+  /* === v3.6.0: 提示词挂载 === */
+  const handleTogglePromptPicker = useCallback(() => {
+    setPromptPickerOpen(prev => !prev);
+  }, []);
+  const handleClosePromptPicker = useCallback(() => setPromptPickerOpen(false), []);
+
+  /** 点一条：已挂 → 移除；未挂 → 挂上（同一条不重复挂） */
+  const handlePickPrompt = useCallback((id: string) => {
+    if (attachedPromptIds.includes(id)) {
+      setAttachedPromptIds(prev => prev.filter(x => x !== id));
+      return;
+    }
+    // 只在挂载时记一次使用（用于「最近用过的排前面」），不刷 updatedAt
+    touchPromptUse(id);
+    setAttachedPromptIds(prev => [...prev, id]);
+  }, [attachedPromptIds]);
+
+  const handleDetachPrompt = useCallback((id: string) => {
+    setAttachedPromptIds(prev => prev.filter(x => x !== id));
+  }, []);
+
   // 稳定的面板开合回调（供 memo 化子组件使用，避免每次渲染产生新引用）
   const handleOpenSidebar = useCallback(() => setSidebarOpen(true), []);
   const handleCloseSidebar = useCallback(() => setSidebarOpen(false), []);
@@ -1726,6 +1777,13 @@ export function ChatPage() {
           onSetMcpTools={handleSetSessionMcpTools}
           mcpSearchCount={currentSession?.mcpSearchResults?.length ?? 0}
           onOpenMcpResults={handleOpenMcpResults}
+          mcpGroups={mcpGroups}
+          promptPickerOpen={promptPickerOpen}
+          onTogglePromptPicker={handleTogglePromptPicker}
+          onClosePromptPicker={handleClosePromptPicker}
+          onPickPrompt={handlePickPrompt}
+          attachedPrompts={attachedPrompts}
+          onDetachPrompt={handleDetachPrompt}
           input={input}
           onInputChange={setInput}
           onKeyDown={handleKeyDown}

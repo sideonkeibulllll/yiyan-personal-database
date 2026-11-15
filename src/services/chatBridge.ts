@@ -33,6 +33,7 @@ import { getTodoDatabase } from '@/services/todoDatabase';
 import { getAllMemos, getMemo, createMemo, saveMemo, deleteMemo } from '@/services/memoDatabase';
 import { broadcastMemosChanged } from '@/services/memoEvents';
 import { listMemories, saveMemory, updateMemory, deleteMemory } from '@/services/aiMemory';
+import { createPrompt, getPrompt, listPromptsSorted, updatePrompt } from '@/services/promptLibrary';
 import { useEntryStore } from '@/stores/entryStore';
 import { useTagStore } from '@/stores/tagStore';
 import { useTodoStore } from '@/stores/todoStore';
@@ -598,6 +599,44 @@ export const BRIDGE_TOOLS: BridgeTool[] = [
       required: [],
     },
   },
+  {
+    name: 'list_prompts',
+    description: '查看「提示词库」目录（v3.6.0）。返回每条的 id、名称、场景、字数、使用次数，**不含正文**（单条正文常有一两千字，不要一次全读）。\n找提示词、确认某条是否存在、或想在回答里引用某条时先用它，再按需用 get_prompt 取全文。',
+    parameters: {
+      type: 'object',
+      properties: {
+        keyword: { type: 'string', description: '可选：按关键词过滤（匹配名称 / 场景 / 正文）' },
+        includeArchived: { type: 'boolean', description: '可选：是否包含已归档的条目（默认 false）' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'get_prompt',
+    description: '读取一条提示词的完整正文（按 id 或标题定位，标题需唯一匹配）。只在确实需要原文时调用——如果用户只是问「有哪些提示词」，用 list_prompts 就够。',
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: '提示词 id（与 title 二选一）' },
+        title: { type: 'string', description: '提示词名称（与 id 二选一）' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'save_prompt',
+    description: '在「提示词库」里新建或改写一条提示词。传 id（或用 title 精确命中已有条目）= 改写，否则新建。\n只在用户明确要求「把这段存成提示词 / 改一下那条提示词」时使用：提示词是用户的长期资产，不要把闲聊结论或临时内容擅自塞进库里。\ncontent 必须是可直接拿来用的完整正文，不要加「以下是提示词」之类的包装、不要在正文里加解释。\n这是重要操作：系统会先弹确认卡片展示名称/场景/字数与覆盖情况，用户确认后才写入。',
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: '可选：要改写的条目 id（不传则按 title 匹配或新建）' },
+        title: { type: 'string', description: '提示词名称（列表与胶囊上显示的就是它）' },
+        scene: { type: 'string', description: '可选：一句话场景说明（列表副标题）' },
+        content: { type: 'string', description: '完整提示词正文（原样保存，不做变量替换）' },
+      },
+      required: ['title', 'content'],
+    },
+  },
 ];
 
 /** 所有工具名称 */
@@ -627,13 +666,20 @@ export const SOUL_TOOLS = [
   'update_soul',
   'list_soul_facts',
 ];
+/** 提示词库工具（v3.6.0）：列目录 / 读全文 / 新建或改写；save_prompt 走危险确认 */
+export const PROMPT_TOOLS = [
+  'list_prompts',
+  'get_prompt',
+  'save_prompt',
+];
 
 /**
  * 需要用户确认后才执行的重要/危险工具。
  * 删除类：展示「将删除什么」摘要；
- * update_soul：展示理由 + 逐项变更 + 更新后画像预览（见 describeToolPreview）。
+ * update_soul：展示理由 + 逐项变更 + 更新后画像预览（见 describeToolPreview）；
+ * save_prompt：展示名称/场景/字数与「新建还是覆盖哪一条」。
  */
-export const DANGEROUS_TOOLS = new Set(['delete_card', 'delete_todo', 'delete_memo', 'delete_todo_tag', 'delete_ai_memory', 'update_soul']);
+export const DANGEROUS_TOOLS = new Set(['delete_card', 'delete_todo', 'delete_memo', 'delete_todo_tag', 'delete_ai_memory', 'update_soul', 'save_prompt']);
 
 /** 工具名 → 中文显示名（用于确认弹窗） */
 export const TOOL_DISPLAY_NAMES: Record<string, string> = {
@@ -649,11 +695,20 @@ export const TOOL_DISPLAY_NAMES: Record<string, string> = {
   save_ai_memory: '记住一条信息', list_ai_memories: '查看长期记忆',
   update_ai_memory: '修改长期记忆', delete_ai_memory: '删除长期记忆',
   update_soul: '更新人格档案',
+  list_prompts: '查看提示词库', get_prompt: '读取提示词', save_prompt: '保存提示词',
 };
 
 /**
  * 生成危险操作的确认摘要（展示在对话内的确认卡片上）。
  */
+/** save_prompt 的目标解析：显式 id 优先，其次按标题命中已有条目（用于「新建还是覆盖」判断） */
+function resolvePromptTarget(args: Record<string, unknown>) {
+  const id = typeof args.id === 'string' ? args.id.trim() : '';
+  if (id) return getPrompt(id);
+  const title = typeof args.title === 'string' ? args.title.trim() : '';
+  return title ? getPrompt(title) : null;
+}
+
 export function describeToolAction(toolName: string, args: Record<string, unknown>): string {
   const count = (v: unknown) => (Array.isArray(v) ? v.length : typeof v === 'string' && v ? 1 : 0);
   switch (toolName) {
@@ -661,6 +716,14 @@ export function describeToolAction(toolName: string, args: Record<string, unknow
     case 'delete_todo': return `删除 ${count(args.todoIds)} 条待办`;
     case 'delete_memo': return `删除 ${count(args.memoIds)} 篇备忘录`;
     case 'delete_ai_memory': return `删除 ${count(args.memoryIds ?? args.memoryId)} 条长期记忆`;
+    case 'save_prompt': {
+      const title = String(args.title || '').trim() || '未命名提示词';
+      const chars = String(args.content || '').length;
+      const target = resolvePromptTarget(args);
+      return target
+        ? `改写提示词「${title}」（${chars} 字，将覆盖原有「${target.title}」）`
+        : `新建提示词「${title}」（${chars} 字）`;
+    }
     case 'update_soul': {
       const reason = String(args.reason || '').trim();
       const counts = countSoulChanges(parseSoulChanges(args));
@@ -706,6 +769,22 @@ export function describeToolPreview(toolName: string, args: Record<string, unkno
     lines.push('');
     lines.push('——— 更新后画像（注入态预览）———');
     lines.push(renderSoulPortraitForFacts(outcome.next, 'chat') ?? '（暂无事实）');
+    return lines.join('\n');
+  }
+  if (toolName === 'save_prompt') {
+    const title = String(args.title || '').trim() || '未命名提示词';
+    const scene = String(args.scene || '').trim();
+    const content = String(args.content || '');
+    const target = resolvePromptTarget(args);
+    const lines: string[] = [];
+    lines.push(target
+      ? `【改写已有条目】${target.title}（原 ${target.content.length} 字）→ 新 ${content.length} 字`
+      : `【新建条目】${title}（${content.length} 字）`);
+    lines.push(`名称：${title}`);
+    if (scene) lines.push(`场景：${scene}`);
+    lines.push('');
+    lines.push('——— 正文（前 300 字）———');
+    lines.push(content.slice(0, 300) + (content.length > 300 ? '\n…（已截断）' : ''));
     return lines.join('\n');
   }
   return undefined;
@@ -2012,6 +2091,104 @@ export async function executeToolCall(
             hint: facts.length === 0
               ? '档案里还没有事实（或没有符合过滤条件的事实）；可用 update_soul 的 add 提议新增'
               : undefined,
+          },
+        };
+      }
+
+      case 'list_prompts': {
+        const keyword = typeof args.keyword === 'string' ? args.keyword.trim().toLowerCase() : '';
+        const includeArchived = args.includeArchived === true;
+        let prompts = listPromptsSorted({ includeArchived });
+        if (keyword) {
+          prompts = prompts.filter(p =>
+            p.title.toLowerCase().includes(keyword) ||
+            (p.scene ?? '').toLowerCase().includes(keyword) ||
+            p.content.toLowerCase().includes(keyword),
+          );
+        }
+        const total = prompts.length;
+        const page = prompts.slice(0, 30);
+        return {
+          success: true,
+          data: {
+            total,
+            returned: page.length,
+            prompts: page.map(p => ({
+              id: p.id,
+              title: p.title,
+              scene: p.scene,
+              chars: p.content.length,
+              useCount: p.useCount ?? 0,
+              ...(p.archived ? { archived: true } : {}),
+            })),
+            hint: total === 0
+              ? '提示词库没有匹配项；可以在「设置 → 提示词库」新建，或让用户自己点「导入内置」'
+              : total > page.length
+                ? `共 ${total} 条，只返回前 ${page.length} 条；要正文请用 get_prompt`
+                : '目录不含正文；需要某条原文时用 get_prompt（传 id 或标题），不要凭名称猜内容',
+          },
+        };
+      }
+
+      case 'get_prompt': {
+        const id = typeof args.id === 'string' ? args.id.trim() : '';
+        const titleArg = typeof args.title === 'string' ? args.title.trim() : '';
+        const found = getPrompt(id || titleArg);
+        if (!found) {
+          return {
+            success: false,
+            error: `没找到这条提示词（${id || titleArg || '参数为空'}）；先用 list_prompts 看目录`,
+          };
+        }
+        return {
+          success: true,
+          data: {
+            id: found.id,
+            title: found.title,
+            scene: found.scene,
+            chars: found.content.length,
+            updatedAt: localDateKey(new Date(found.updatedAt)),
+            content: found.content,
+          },
+        };
+      }
+
+      case 'save_prompt': {
+        // 只有用户在确认卡片点了「确认执行」才会走到这里（save_prompt 在 DANGEROUS_TOOLS 里）
+        const title = typeof args.title === 'string' ? args.title.trim() : '';
+        const content = typeof args.content === 'string' ? args.content : '';
+        const scene = typeof args.scene === 'string' ? args.scene.trim() : undefined;
+        if (!title || !content.trim()) {
+          return { success: false, error: 'title 与 content 都必填' };
+        }
+        const target = resolvePromptTarget(args);
+        if (target) {
+          const next = updatePrompt(target.id, {
+            title,
+            content,
+            ...(scene !== undefined ? { scene } : {}),
+          });
+          if (!next) return { success: false, error: '改写失败：条目已不存在' };
+          return {
+            success: true,
+            data: {
+              id: next.id,
+              title: next.title,
+              chars: next.content.length,
+              mode: 'updated',
+              message: `已改写提示词「${next.title}」（${next.content.length} 字）`,
+            },
+          };
+        }
+        const created = createPrompt({ title, content, scene });
+        return {
+          success: true,
+          data: {
+            id: created.id,
+            title: created.title,
+            chars: created.content.length,
+            mode: 'created',
+            message: `已新建提示词「${created.title}」（${created.content.length} 字）`,
           },
         };
       }

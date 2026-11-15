@@ -1,0 +1,183 @@
+/**
+ * MCP 分组面板样式（v3.6.0）
+ */
+
+.mcpg-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.mcpg-item {
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-primary);
+}
+
+.mcpg-item.hidden-group {
+  opacity: 0.6;
+}
+
+.mcpg-item.open {
+  border-color: var(--color-border-accent);
+}
+
+.mcpg-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+}
+
+.mcpg-title-btn {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mcpg-icon {
+  flex-shrink: 0;
+  font-size: 16px;
+}
+
+.mcpg-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.mcpg-name {
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.mcpg-badge {
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--color-border-primary);
+  color: var(--color-text-tertiary);
+}
+
+.mcpg-sub {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mcpg-chev {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+}
+
+.mcpg-flags {
+  display: flex;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.mcpg-flags .form-checkbox {
+  font-size: var(--text-xs);
+  gap: 4px;
+}
+
+.mcpg-flags .form-checkbox input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+}
+
+.mcpg-body {
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  border-top: 1px solid var(--color-border-primary);
+}
+
+.mcpg-field-row {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.mcpg-field {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.mcpg-field-icon {
+  flex: 0 0 72px;
+}
+
+.mcpg-tools-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.mcpg-tools-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.mcpg-tools {
+  max-height: 300px;
+  overflow-y: auto;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-primary);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.mcpg-tool-group-label {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  margin-bottom: 2px;
+}
+
+.mcpg-tool-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 2px var(--space-2);
+}
+
+.mcpg-tool {
+  font-size: var(--text-xs);
+  min-width: 0;
+}
+
+.mcpg-tool span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mcpg-danger-row {
+  display: flex;
+  justify-content: flex-end;
+}

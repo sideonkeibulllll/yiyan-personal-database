@@ -4,6 +4,7 @@
  * 各面板内容已拆分为 panels/ 下的子组件，本文件负责状态、业务逻辑与布局
  */
 import { useState, useRef, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { BottomNav } from '@/components/BottomNav';
 import { incrementalImport } from '@/utils/import';
 import { IconSave } from '@/components/icons';
@@ -69,6 +70,8 @@ import { RestorePanel } from './panels/RestorePanel';
 import { CloudPanel } from './panels/CloudPanel';
 import { SyncPanel } from './panels/SyncPanel';
 import { PromptsPanel } from './panels/PromptsPanel';
+import { PromptLibraryPanel } from './panels/PromptLibraryPanel';
+import { McpGroupPanel } from './panels/McpGroupPanel';
 import { GlmPanel } from './panels/GlmPanel';
 import { NotifyPanel } from './panels/NotifyPanel';
 import { WidgetPanel } from './panels/WidgetPanel';
@@ -91,6 +94,8 @@ type SettingsTab =
   | 'cloud'
   | 'sync'
   | 'prompts'
+  | 'promptLib'
+  | 'mcpGroups'
   | 'glm';
 
 /** 左侧栏配置项 */
@@ -109,12 +114,21 @@ const TAB_LIST: { key: SettingsTab; label: string }[] = [
   { key: 'cloud', label: '云端备份' },
   { key: 'sync', label: '设备互通' },
   { key: 'prompts', label: '提示词' },
+  { key: 'promptLib', label: '提示词库' },
+  { key: 'mcpGroups', label: 'MCP 分组' },
   { key: 'glm', label: 'GLM 配置' },
 ];
 
+/** 合法的 tab 值集合（供 ?tab= 深链校验，防止脏参数把面板渲染成空白） */
+const TAB_KEYS = new Set<string>(TAB_LIST.map(t => t.key));
+
 export function SettingsPage() {
-  // 当前选中的面板
-  const [activeTab, setActiveTab] = useState<SettingsTab>('ai');
+  // 当前选中的面板（支持 /settings?tab=promptLib 这类深链，供 Chat 里的「管理」直达）
+  const [searchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState<SettingsTab>(() => {
+    const fromUrl = searchParams.get('tab');
+    return fromUrl && TAB_KEYS.has(fromUrl) ? (fromUrl as SettingsTab) : 'ai';
+  });
 
   // 保存状态
   const [saveMessage, setSaveMessage] = useState('');
@@ -800,6 +814,12 @@ export function SettingsPage() {
 
       case 'prompts':
         return <PromptsPanel markDirty={markDirty} />;
+
+      case 'promptLib':
+        return <PromptLibraryPanel />;
+
+      case 'mcpGroups':
+        return <McpGroupPanel />;
 
       case 'glm':
         return <GlmPanel markDirty={markDirty} />;

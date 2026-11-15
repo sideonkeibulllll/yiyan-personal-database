@@ -1,12 +1,15 @@
 /**
- * Chat 页底部输入区 - 工具栏（数据/图片/拍照/最近/思考/MCP）、MCP 工具多选、输入框
+ * Chat 页底部输入区 - 工具栏（数据/图片/拍照/最近/思考/MCP/提示词）、
+ * MCP 工具多选、提示词挂载胶囊、输入框
  *
  * 状态与业务逻辑由父组件 ChatPage 持有，本组件只负责展示。
+ * MCP 分组与提示词条目都来自 settings（v3.6.0 起不再硬编码分组）。
  */
 import type { ClipboardEvent, KeyboardEvent, RefObject } from 'react';
-import { ENTRY_TOOLS, TODO_TOOLS, MEMO_TOOLS, SOUL_TOOLS } from '@/services/chatBridge';
-import { IconUpload, IconBrain, IconTool, IconClose, IconBack, IconSendAlt, IconCheck, IconUndo, IconRedo, IconImage, IconCamera } from '@/components/icons';
+import { IconUpload, IconBrain, IconTool, IconClose, IconBack, IconSendAlt, IconCheck, IconUndo, IconRedo, IconImage, IconCamera, IconClipboard } from '@/components/icons';
 import { VISION_UNSUPPORTED_HINT } from '@/utils/modelCapability';
+import { PromptPickerPanel } from './PromptPickerPanel';
+import type { McpGroupConfig } from '@/types';
 import type { PendingChatImage, ThinkingEffort } from '../chatTypes';
 
 interface ChatInputAreaProps {
@@ -26,6 +29,18 @@ interface ChatInputAreaProps {
   onSetMcpTools: (toolNames: string[]) => void;
   mcpSearchCount: number;
   onOpenMcpResults: () => void;
+  /** v3.6.0：MCP 分组（来自 settings.ai.mcpGroups，已过滤掉隐藏组） */
+  mcpGroups: McpGroupConfig[];
+
+  /* === 提示词挂载（v3.6.0） === */
+  promptPickerOpen: boolean;
+  onTogglePromptPicker: () => void;
+  onClosePromptPicker: () => void;
+  onPickPrompt: (id: string) => void;
+  /** 已挂载的提示词（只有 id + 名称；正文在发送时才展开） */
+  attachedPrompts: { id: string; title: string }[];
+  onDetachPrompt: (id: string) => void;
+
   input: string;
   onInputChange: (value: string) => void;
   onKeyDown: (e: KeyboardEvent) => void;
@@ -55,14 +70,6 @@ interface ChatInputAreaProps {
   onPasteImages: (files: File[]) => void;
 }
 
-/** MCP 工具分组（面板上按组多选，勾选即启用整组工具） */
-const MCP_GROUPS: { key: string; icon: string; title: string; desc: string; tools: string[] }[] = [
-  { key: 'entry', icon: '📊', title: '数据卡片', desc: '搜索 / 创建 / 编辑 / 标签 / 星标 / 删除', tools: ENTRY_TOOLS },
-  { key: 'todo', icon: '✅', title: '待办事项', desc: '搜索 / 创建 / 编辑 / 完成 / 删除 / 标签管理', tools: TODO_TOOLS },
-  { key: 'memo', icon: '📝', title: '备忘录', desc: '搜索 / 读取 / 新建 / 追加 / 删除', tools: MEMO_TOOLS },
-  { key: 'soul', icon: '🪞', title: 'Soul 事实档案', desc: '让 AI 查看事实库并提议变更（需你确认）', tools: SOUL_TOOLS },
-];
-
 export function ChatInputArea({
   pickerSelectedCount,
   onOpenPicker,
@@ -80,6 +87,13 @@ export function ChatInputArea({
   onSetMcpTools,
   mcpSearchCount,
   onOpenMcpResults,
+  mcpGroups,
+  promptPickerOpen,
+  onTogglePromptPicker,
+  onClosePromptPicker,
+  onPickPrompt,
+  attachedPrompts,
+  onDetachPrompt,
   input,
   onInputChange,
   onKeyDown,
@@ -124,7 +138,7 @@ export function ChatInputArea({
     }
   };
 
-  const canSend = input.trim().length > 0 || pendingImages.length > 0;
+  const canSend = input.trim().length > 0 || pendingImages.length > 0 || attachedPrompts.length > 0;
 
   return (
     <footer className="chat-input-area glass">
@@ -217,13 +231,13 @@ export function ChatInputArea({
               </button>
             </div>
             <div className="mcp-picker-options">
-              {MCP_GROUPS.map(g => {
+              {mcpGroups.map(g => {
                 const selected = g.tools.filter(t => mcpActiveTools.includes(t)).length;
                 const allOn = selected === g.tools.length && g.tools.length > 0;
                 const partial = selected > 0 && !allOn;
                 return (
                   <button
-                    key={g.key}
+                    key={g.id}
                     type="button"
                     className={`mcp-picker-option ${allOn ? 'checked' : ''}`}
                     onClick={() => toggleGroup(g.tools, !allOn)}
@@ -235,7 +249,7 @@ export function ChatInputArea({
                     </span>
                     <div className="mcp-picker-icon">{g.icon}</div>
                     <div className="mcp-picker-text">
-                      <div className="mcp-picker-title">{g.title}</div>
+                      <div className="mcp-picker-title">{g.label}</div>
                       <div className="mcp-picker-desc">{g.desc}</div>
                     </div>
                     {selected > 0 && (
@@ -244,6 +258,11 @@ export function ChatInputArea({
                   </button>
                 );
               })}
+              {mcpGroups.length === 0 && (
+                <div className="mcp-picker-desc" style={{ padding: '8px 4px' }}>
+                  所有分组都被隐藏了 —— 去设置里的「MCP 分组」把要用的组打开。
+                </div>
+              )}
               {mcpActiveTools.length > 0 && (
                 <button
                   className="mcp-picker-clear"
@@ -254,6 +273,45 @@ export function ChatInputArea({
                 </button>
               )}
             </div>
+          </div>
+        )}
+
+        {/* 提示词挂载（v3.6.0）：点开选一条，正文折叠成胶囊，发送时才展开 */}
+        <button
+          className={`toolbar-btn ${attachedPrompts.length > 0 ? 'active prompt' : ''}`}
+          onClick={onTogglePromptPicker}
+          title="挂载提示词（正文不占输入框）"
+        >
+          <IconClipboard />
+          <span>提示词{attachedPrompts.length > 0 ? ` (${attachedPrompts.length})` : ''}</span>
+        </button>
+
+        {promptPickerOpen && (
+          <PromptPickerPanel
+            attachedIds={attachedPrompts.map(p => p.id)}
+            onPick={onPickPrompt}
+            onClose={onClosePromptPicker}
+          />
+        )}
+
+        {/* 已挂载的提示词胶囊（flex-basis:100% 独占工具栏第二行；点小叉移除） */}
+        {attachedPrompts.length > 0 && (
+          <div className="prompt-chip-row">
+            {attachedPrompts.map(p => (
+              <span className="prompt-chip" key={p.id}>
+                <span className="prompt-chip-name">{p.title}</span>
+                <button
+                  type="button"
+                  className="prompt-chip-x"
+                  onClick={() => onDetachPrompt(p.id)}
+                  aria-label={`移除 ${p.title}`}
+                  title="这次不带了"
+                >
+                  ✕
+                </button>
+              </span>
+            ))}
+            <span className="prompt-chip-hint">发送时展开为正文</span>
           </div>
         )}
 
