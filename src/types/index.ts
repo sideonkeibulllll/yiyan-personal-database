@@ -480,6 +480,27 @@ export interface AIConfig {
    * 只在「选择层」生效，运行时仍是 session.mcpEnabledTools 扁平数组。
    */
   mcpGroups?: McpGroupConfig[];
+  /**
+   * 联网搜索配置（v3.6.7）：web_search / web_fetch 走哪个引擎。
+   * 缺省用秘塔；只认这一个引擎，不做自动降级。
+   */
+  webSearch?: WebSearchConfig;
+}
+
+/** 联网搜索可用的引擎 ID（v3.6.7 只留两家，都用 Key 换质量）。 */
+export type WebSearchEngineId = 'metaso' | 'deepseek';
+
+/**
+ * 联网搜索配置（v3.6.7）。
+ *
+ * 只认「你在这里选的那一个」，**不做自动降级**：失败就把上游原因返给 AI，
+ * 速度更快、花费可预期（不会以为在用免费的秘塔，实际在花 DeepSeek 的钱）。
+ */
+export interface WebSearchConfig {
+  /** 用哪个引擎（缺省秘塔） */
+  engine: WebSearchEngineId;
+  /** 秘塔 API Key（mk- 开头，metaso.cn 的 API 页面申请） */
+  metasoKey?: string;
 }
 
 /** AI 提供商 ID */

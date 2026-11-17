@@ -1516,6 +1516,10 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+  /* v3.6.7：工具组涨到 7 组后，面板在手机上会顶出屏幕 → 限高 + 内部滚动 */
+  max-height: min(52vh, 420px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .mcp-picker-option {

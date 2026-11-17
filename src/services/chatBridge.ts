@@ -29,6 +29,7 @@
  */
 
 import { listLibraryFiles, readLibraryFile, writeLibraryFile, deleteLibraryFile, libraryFileExists } from './fileLibrary';
+import { fetchPageText, searchWeb } from './webSearch';
 import { getDatabase } from '@/services/database';
 import { getTodoDatabase } from '@/services/todoDatabase';
 import { getAllMemos, getMemo, createMemo, saveMemo, deleteMemo } from '@/services/memoDatabase';
@@ -39,7 +40,8 @@ import { useEntryStore } from '@/stores/entryStore';
 import { useTagStore } from '@/stores/tagStore';
 import { useTodoStore } from '@/stores/todoStore';
 import { useTodoTagStore } from '@/stores/todoTagStore';
-import type { Entry, Todo, Link, TodoTag } from '@/types';
+import { useSettingsStore } from '@/stores/settingsStore';
+import type { Entry, Todo, Link, TodoTag, WebSearchEngineId } from '@/types';
 import { splitKeywords, rankAndFilter, relevanceScore } from '@/utils/searchRank';
 import { localDateKey } from '@/utils/localDate';
 import {
@@ -678,6 +680,32 @@ export const BRIDGE_TOOLS: BridgeTool[] = [
       required: ['name'],
     },
   },
+  /* === v3.6.7: 联网搜索（引擎由设置决定：秘塔 / DeepSeek 官方 Search） === */
+  {
+    name: 'web_search',
+    description: '搜索互联网，返回标题、摘要和链接。用于获取实时或你不确定的信息（新闻、天气、价格、版本、赛事、政策、人物近况等）。搜索词要简洁具体，支持 site: / lang:zh / after:2025 等运算符。结果只是摘要，回答时请附来源链接；需要读某条结果的正文再用 web_fetch。',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: '搜索关键词（如「原神 7.2 版本上线时间」）' },
+        count: { type: 'number', description: '返回条数 1-8，默认 5' },
+        ori_question: { type: 'string', description: '可选：用户的原始问题，帮助搜索引擎理解意图' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'web_fetch',
+    description: '抓取一个网页并返回正文（最多约 6000 字）。用于 web_search 之后核实细节、读公告 / 文档 / 文章。只支持 http/https 公网地址。',
+    parameters: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: '网页地址（http/https）' },
+        max_chars: { type: 'number', description: '正文截断长度，默认 5000，最大 8000' },
+      },
+      required: ['url'],
+    },
+  },
 ];
 
 /** 所有工具名称 */
@@ -720,6 +748,11 @@ export const FILE_TOOLS = [
   'write_file',
   'delete_file',
 ];
+/** 联网工具（v3.6.7）：搜索 / 抓网页正文；引擎在设置里选，不做自动降级 */
+export const WEB_TOOLS = [
+  'web_search',
+  'web_fetch',
+];
 
 /**
  * 需要用户确认后才执行的重要/危险工具。
@@ -745,6 +778,7 @@ export const TOOL_DISPLAY_NAMES: Record<string, string> = {
   update_soul: '更新人格档案',
   list_prompts: '查看提示词库', get_prompt: '读取提示词', save_prompt: '保存提示词',
   list_files: '查看文件库', read_file: '读取文件', write_file: '写入文件', delete_file: '删除文件',
+  web_search: '联网搜索', web_fetch: '读取网页',
 };
 
 /**
@@ -903,6 +937,28 @@ export function parseToolArguments(argsStr: string): Record<string, unknown> {
     console.warn('[chatBridge] 工具参数 JSON 解析失败:', err, '原始:', argsStr);
     return {};
   }
+}
+
+/**
+ * 联网搜索的引擎与 Key（v3.6.7）。
+ *
+ * 引擎完全由设置决定（不做自动降级）；DeepSeek Key 与「当前激活的提供商」无关：
+ * 哪怕聊天走 TRAE / GLM，只要设置里存过 DeepSeek Key 就能用官方 Search / Fetch
+ * （5 元 / 千次成功请求 ≈ 0.5 分/次）。
+ */
+function resolveWebSearchOptions(): {
+  engine: WebSearchEngineId;
+  metasoKey: string;
+  deepseekKey: string;
+} {
+  const ai = useSettingsStore.getState().settings.ai;
+  const configured = (ai.providers?.deepseek?.apiKey ?? '').trim();
+  const legacy = ai.provider === 'deepseek' ? (ai.apiKey ?? '').trim() : '';
+  return {
+    engine: ai.webSearch?.engine ?? 'metaso',
+    metasoKey: (ai.webSearch?.metasoKey ?? '').trim(),
+    deepseekKey: configured.length > 0 ? configured : legacy,
+  };
 }
 
 /** 执行工具调用 */
@@ -2291,6 +2347,44 @@ export async function executeToolCall(
         if (!name) return { success: false, error: 'name 必填' };
         await deleteLibraryFile(name);
         return { success: true, data: { name, message: `已删除「${name}」` } };
+      }
+
+      /* === v3.6.7: 联网搜索 === */
+      case 'web_search': {
+        const query = typeof args.query === 'string' ? args.query.trim() : '';
+        if (!query) return { success: false, error: 'query 必填' };
+        const rawCount = Number(args.count);
+        const count = Number.isFinite(rawCount) ? Math.min(8, Math.max(1, Math.floor(rawCount))) : 5;
+        const oriQuestion = typeof args.ori_question === 'string' ? args.ori_question.trim() : undefined;
+        const outcome = await searchWeb(query, { ...resolveWebSearchOptions(), count, oriQuestion });
+        return {
+          success: true,
+          data: {
+            engine: outcome.engine,
+            query: outcome.query,
+            count: outcome.hits.length,
+            results: outcome.hits,
+            hint: outcome.hits.length === 0 ? '没有搜到结果，换个更具体的说法再试一次' : undefined,
+          },
+        };
+      }
+      case 'web_fetch': {
+        const url = typeof args.url === 'string' ? args.url.trim() : '';
+        if (!url) return { success: false, error: 'url 必填' };
+        const rawMax = Number(args.max_chars);
+        const maxChars = Number.isFinite(rawMax) ? Math.min(8000, Math.max(500, Math.floor(rawMax))) : 5000;
+        const page = await fetchPageText(url, { ...resolveWebSearchOptions(), maxChars });
+        return {
+          success: true,
+          data: {
+            engine: page.engine,
+            url: page.url,
+            title: page.title.length > 0 ? page.title : undefined,
+            chars: page.chars,
+            truncated: page.truncated,
+            text: page.text,
+          },
+        };
       }
 
       default:
