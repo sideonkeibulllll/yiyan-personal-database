@@ -49,6 +49,35 @@ const TRAE_DEVICE_BRAND = 'Apple'
  */
 const TRAE_FUNCTION = 'solo_work_lite'
 
+/**
+ * UI 展示名 → TRAE SOLO 服务端 config_name 真实 id（v3.7.1）。
+ *
+ * 实测（2026-11-17）：SOLO 服务端配置表的 id **大小写敏感**，且命名不统一——
+ * 大多数模型要用全小写 id，DeepSeek-V4-Flash / V4-Pro 例外用驼峰。
+ * 直接把 UI 的驼峰名发过去（如 `DeepSeek-V4.1-Flash`）会得到
+ * `4001 We're sorry, the param is invalid`，连纯文本都发不出去；
+ * 换成正确 id 后纯文本与图片输入全部正常。
+ *
+ * 这里没列出的模型保持原样透传（部分是 TraeCode 通道模型，SOLO 本就不服务）。
+ */
+const TRAE_MODEL_IDS: Record<string, string> = {
+  'DeepSeek-V4.1-Flash': 'deepseek-v4.1-flash',
+  'GLM-5.3': 'glm-5.3',
+  'GLM-5.3-Flash': 'glm-5.3-flash',
+  'GLM-5.3-FlashX': 'glm-5.3-flashx',
+  'GLM-5.2': 'glm-5.2',
+  'Kimi-K3': 'kimi-k3',
+  'MiMo-V2.6-Flash': 'mimo-v2.6-flash',
+  'MiMo-V2.6-Pro': 'mimo-v2.6-pro',
+  'MiniMax-M3': 'minimax-m3',
+  'Qwen3.8-Max': 'qwen3.8-max',
+}
+
+/** 把 UI 模型名转成 SOLO 服务端的真实 id（未命中则原样返回）。 */
+export function toTraeModelId(model: string): string {
+  return TRAE_MODEL_IDS[model] ?? model
+}
+
 /** 提前多少毫秒判定 token 需要刷新。 */
 const REFRESH_MARGIN_MS = 60_000
 
@@ -351,26 +380,9 @@ function transformMessage(message: Record<string, unknown>): Record<string, unkn
   const content = result.content
   if (typeof content === 'string') {
     result.content = [{ type: 'text', text: content }]
-  } else if (Array.isArray(content)) {
-    // v3.6.10：SOLO 的 solo_work_lite 不接受 image_url 参数，整条请求会 4001
-    // 「We're sorry, the param is invalid」。图片一律降级成文字占位 ——
-    // 这同时能修复历史里已经带着图片块的会话（否则之后每一轮都 4001）。
-    let imageCount = 0
-    const parts: Array<{ type: string; text: string }> = []
-    for (const raw of content) {
-      if (typeof raw !== 'object' || raw === null) continue
-      const part = raw as { type?: string; text?: string }
-      if (part.type === 'text' && typeof part.text === 'string') {
-        parts.push({ type: 'text', text: part.text })
-      } else if (part.type === 'image_url' || part.type === 'image') {
-        imageCount += 1
-      }
-    }
-    if (imageCount > 0) {
-      parts.push({ type: 'text', text: `[图片 × ${imageCount}（TRAE 通道不支持看图，已省略）]` })
-    }
-    result.content = parts.length > 0 ? parts : [{ type: 'text', text: '（空消息）' }]
   }
+  // v3.7.1：不再降级图片。4001 的真因是模型 id 大小写（见 TRAE_MODEL_IDS），
+  // 标准 image_url 块可正常识别图片，原样透传即可。
 
   return result
 }
@@ -465,7 +477,8 @@ export function transformToSOLO(
 
   const model = typeof body.model === 'string' ? body.model : ''
   const baseModel = model.includes('__') ? model.split('__')[0]! : model
-  const configName = baseModel.length > 0 ? baseModel : 'glm-5.2'
+  // v3.7.1：驼峰 UI 名要先映射成 SOLO 真实 id（大小写敏感，错了连纯文本都 4001）
+  const configName = baseModel.length > 0 ? toTraeModelId(baseModel) : 'glm-5.2'
   body.config_name = configName
   body.model = configName
 
