@@ -1305,11 +1305,9 @@ export function ChatPage() {
         ...memoryTools,
       ];
       const toolsPayload = buildToolsPayload(enabledTools);
-      // v3.6.5：本轮没有工具时明确告诉模型，避免它「假装」调用了工具/写了文件
-      // （主人遇到过：关掉 MCP 后 AI 仍宣称已生成 html，实际什么都没有）
-      if (toolsPayload.length === 0) {
-        systemPrompt += `\n\n## 本轮工具状态\n本轮没有启用任何工具：你不能读写文件、不能调用任何函数。不要声称已创建/修改文件或已调用工具；如果用户需要写文件，提醒他在输入区的 MCP 面板勾选「文件库」再发一次。`;
-      }
+      // v3.6.6：不再靠提示词「训话」。本轮允许调用的工具就是这份白名单，
+      // 模型若仍吐出未启用的工具调用，在执行层直接拒绝（见下方 allowedToolNames）。
+      const allowedToolNames = new Set(enabledTools);
 
       // === Agent loop ===
       // 每次 streamChatCompletion 返回 finish_reason='tool_calls' 时，
@@ -1438,6 +1436,23 @@ export function ChatPage() {
         const apiToolMessages: Array<{ role: 'tool'; tool_call_id: string; content: string }> = [];
 
         for (const tc of resolvedToolCalls) {
+          // v3.6.6：白名单校验 —— 未在本轮启用列表里的工具一律不执行。
+          // 防的是「网关把历史调用重放回来」或「模型凭空编个工具名」，
+          // 比在 system prompt 里训话可靠得多。
+          if (!allowedToolNames.has(tc.function.name)) {
+            const rejected = {
+              success: false,
+              error: `工具「${tc.function.name}」本轮未启用（未在 MCP 面板勾选），调用失败、未执行任何操作`,
+            };
+            apiToolMessages.push(formatToolResultMessage(rejected, tc.id));
+            toolCallResults.push({
+              name: tc.function.name,
+              success: false,
+              summary: formatToolResultForUI(rejected, tc.function.name),
+            });
+            continue;
+          }
+
           // 全局工具调用预算：耗尽后不再执行，但仍返回占位结果以保持配对完整
           if (toolCallBudget <= 0) {
             hitLimit = true;
