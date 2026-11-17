@@ -63,6 +63,7 @@ import { AiPanel } from './panels/AiPanel';
 import { TodoPanel } from './panels/TodoPanel';
 import { RandomPanel } from './panels/RandomPanel';
 import { DataManagerPanel } from './panels/DataManagerPanel';
+import { FilesPanel } from './panels/FilesPanel';
 import { ImportPanel } from './panels/ImportPanel';
 import { ExportPanel } from './panels/ExportPanel';
 import { BackupPanel } from './panels/BackupPanel';
@@ -97,6 +98,7 @@ type SettingsTab =
   | 'prompts'
   | 'promptLib'
   | 'mcpGroups'
+  | 'files'
   | 'glm';
 
 /** 导航叶子项 */
@@ -140,6 +142,7 @@ const NAV_GROUPS: NavGroup[] = [
     desc: '数据管理 · 备份恢复 · 设备互通',
     items: [
       { key: 'dataManager', label: '数据管理', alias: '标签 组' },
+      { key: 'files', label: '文件库', alias: 'html 作品 文件 预览' },
       { key: 'backup', label: '本地备份', alias: 'zip 导出' },
       { key: 'cloud', label: '云端备份', alias: 'r2 d1 中转站' },
       { key: 'sync', label: '设备互通', alias: '局域网 互传' },
@@ -856,6 +859,9 @@ export function SettingsPage() {
 
       case 'dataManager':
         return <DataManagerPanel onOpenTab={openPanel} />;
+
+      case 'files':
+        return <FilesPanel />;
 
       case 'import':
         return (

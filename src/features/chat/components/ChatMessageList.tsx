@@ -137,6 +137,28 @@ const ChatMessageItem = memo(function ChatMessageItem({
   );
   const hasFileBlocks = segments.some(seg => seg.type === 'file');
 
+  // v3.6.5：文件类工具结果 → 可点卡片，点一下直接全屏打开（不用绕文件管理器）
+  const toolFiles = useMemo(() => {
+    if (msg.role !== 'tool') return [] as string[];
+    const name = msg.toolName ?? '';
+    if (!['write_file', 'read_file', 'list_files'].includes(name)) return [];
+    try {
+      const parsed = JSON.parse(msg.content) as { success?: boolean; data?: Record<string, unknown> };
+      if (parsed?.success !== true) return [];
+      const data = parsed.data ?? {};
+      const names: string[] = [];
+      if (typeof data.name === 'string' && data.name.trim()) names.push(data.name.trim());
+      if (Array.isArray(data.files)) {
+        for (const item of data.files as Array<{ name?: unknown }>) {
+          if (typeof item?.name === 'string' && item.name.trim()) names.push(item.name.trim());
+        }
+      }
+      return Array.from(new Set(names)).slice(0, 12);
+    } catch {
+      return [];
+    }
+  }, [msg.role, msg.toolName, msg.content]);
+
   // Markdown 渲染结果按 content 缓存：非流式消息的 content 不变 → 不重复解析
   const html = useMemo(
     () => (confirm ? '' : renderMarkdown(msg.role === 'assistant' ? (msg.content || '…') : msg.content)),
@@ -205,11 +227,34 @@ const ChatMessageItem = memo(function ChatMessageItem({
             )}
           </div>
         ) : msg.role === 'tool' ? (
-          /* tool 消息：返回详情（长 JSON）默认折叠，点击展开 */
-          <details className="tool-json-fold">
-            <summary className="tool-json-fold-summary">查看工具返回详情</summary>
-            <div className="message-content markdown-body" dangerouslySetInnerHTML={{ __html: html }} />
-          </details>
+          /* tool 消息：文件类结果给可点卡片；原始 JSON 仍折叠在下面 */
+          <>
+            {toolFiles.length > 0 && (
+              <div className="tool-file-list">
+                {toolFiles.map(fileName => (
+                  <button
+                    key={fileName}
+                    type="button"
+                    className="chat-file-card"
+                    onClick={() => navigate(`/files/${encodeURIComponent(fileName)}`)}
+                  >
+                    <span className="chat-file-card-icon"><IconFile size={16} /></span>
+                    <span className="chat-file-card-main">
+                      <span className="chat-file-card-name">{fileName}</span>
+                      <span className="chat-file-card-meta">
+                        {msg.toolName === 'write_file' ? '已写入 · 点击打开' : '点击打开'}
+                      </span>
+                    </span>
+                    <IconChevronRight size={14} />
+                  </button>
+                ))}
+              </div>
+            )}
+            <details className="tool-json-fold">
+              <summary className="tool-json-fold-summary">查看工具返回详情</summary>
+              <div className="message-content markdown-body" dangerouslySetInnerHTML={{ __html: html }} />
+            </details>
+          </>
         ) : hasFileBlocks ? (
           /* 文件卡片：气泡里只显示文件名与字数，点开跳独立页（避免长文把聊天撑爆） */
           <div className="message-content chat-file-segments">

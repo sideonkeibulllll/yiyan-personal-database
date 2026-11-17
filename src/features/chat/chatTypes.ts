@@ -64,6 +64,8 @@ export interface ChatMessage {
   toolCallResults?: { name: string; success: boolean; summary: string }[];
   /** role='tool' 时关联的 tool_call_id（用于重建 apiMessages） */
   toolCallId?: string;
+  /** role='tool' 时对应的工具名（v3.6.5：用于把文件类结果渲染成可点卡片） */
+  toolName?: string;
 
   /**
    * 危险操作等待用户确认（删除类工具）。

@@ -1305,6 +1305,11 @@ export function ChatPage() {
         ...memoryTools,
       ];
       const toolsPayload = buildToolsPayload(enabledTools);
+      // v3.6.5：本轮没有工具时明确告诉模型，避免它「假装」调用了工具/写了文件
+      // （主人遇到过：关掉 MCP 后 AI 仍宣称已生成 html，实际什么都没有）
+      if (toolsPayload.length === 0) {
+        systemPrompt += `\n\n## 本轮工具状态\n本轮没有启用任何工具：你不能读写文件、不能调用任何函数。不要声称已创建/修改文件或已调用工具；如果用户需要写文件，提醒他在输入区的 MCP 面板勾选「文件库」再发一次。`;
+      }
 
       // === Agent loop ===
       // 每次 streamChatCompletion 返回 finish_reason='tool_calls' 时，
@@ -1488,6 +1493,7 @@ export function ChatPage() {
             role: 'tool',
             content: apiToolMessages[i].content,
             toolCallId: tc.id,
+            toolName: tc.function.name,
             timestamp: Date.now(),
           };
           loopDisplayMsgs = [...loopDisplayMsgs, toolMsg];
@@ -1876,13 +1882,6 @@ export function ChatPage() {
         )}
 
         {/* 底部输入区 */}
-        {externalBusy && (
-          <div className="chat-bg-stream-hint">
-            <span className="chat-bg-dot" />
-            AI 还在后台生成上一条回复，完成后会自动刷新 —— 现在可以去别的页面逛逛
-          </div>
-        )}
-
         <ChatInputArea
           pickerSelectedCount={pickerSelectedIds.size}
           onOpenPicker={handleUploadClick}

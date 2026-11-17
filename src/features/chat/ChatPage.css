@@ -2198,32 +2198,18 @@
   color: var(--color-text-tertiary);
 }
 
-/* === v3.6.4: 后台生成提示（切走页面后回复仍在跑）=== */
-.chat-bg-stream-hint {
+/* v3.6.5: 工具结果里的文件卡片 */
+.tool-file-list {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  max-width: 800px;
-  margin: 0 auto var(--space-2);
-  padding: 7px 12px;
-  border-radius: var(--radius-sm);
-  border: 1px solid rgba(255, 138, 61, 0.28);
-  background: rgba(255, 138, 61, 0.08);
-  color: #ffb27a;
-  font-size: var(--text-xs);
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.mcp-picker-hint {
+  margin: 2px 0 0;
+  font-size: 11px;
   line-height: 1.5;
-}
-
-.chat-bg-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #ff9a4d;
-  flex: 0 0 auto;
-  animation: chat-bg-pulse 1.2s ease-in-out infinite;
-}
-
-@keyframes chat-bg-pulse {
-  0%, 100% { opacity: 0.35; transform: scale(0.9); }
-  50% { opacity: 1; transform: scale(1.15); }
+  color: var(--color-text-tertiary);
+  opacity: 0.85;
 }

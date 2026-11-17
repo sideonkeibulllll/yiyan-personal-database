@@ -231,7 +231,7 @@ export function ChatInputArea({
         <button
           className={`toolbar-btn ${mcpEnabled ? 'active mcp' : ''}`}
           onClick={onToggleMcp}
-          title="MCP 桥梁通道（对话级持久化）"
+          title="MCP 工具面板（关闭面板不会关工具；面板里点「清空已启用工具」才算关）"
         >
           <IconTool />
           <span>MCP{mcpActiveTools.length > 0 ? ` (${mcpActiveTools.length})` : ''}</span>
@@ -247,6 +247,7 @@ export function ChatInputArea({
                   <span className="mcp-picker-count">已启用 {mcpActiveTools.length} 个</span>
                 )}
               </h4>
+              <p className="mcp-picker-hint">关掉这个面板不会关工具；要停用请点最下面的「清空已启用工具」。</p>
               <button className="mcp-picker-close" onClick={onCloseMcpPicker}>
                 <IconClose />
               </button>
