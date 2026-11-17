@@ -74,6 +74,7 @@ import { PromptsPanel } from './panels/PromptsPanel';
 import { PromptLibraryPanel } from './panels/PromptLibraryPanel';
 import { McpGroupPanel } from './panels/McpGroupPanel';
 import { GlmPanel } from './panels/GlmPanel';
+import { SearchPanel } from './panels/SearchPanel';
 import { NotifyPanel } from './panels/NotifyPanel';
 import { WidgetPanel } from './panels/WidgetPanel';
 import { WidgetStylePanel } from './panels/WidgetStylePanel';
@@ -83,6 +84,7 @@ import './SettingsNavMobile.css';
 /** 设置面板类型 */
 type SettingsTab =
   | 'ai'
+  | 'search'
   | 'todo'
   | 'random'
   | 'notify'
@@ -129,10 +131,11 @@ const NAV_GROUPS: NavGroup[] = [
   {
     key: 'ai',
     label: 'AI 与提示词',
-    desc: '模型配置 · 功能提示词 · 提示词库 · MCP',
+    desc: '模型配置 · 联网搜索 · 提示词 · MCP',
     items: [
       { key: 'ai', label: 'AI 配置', alias: 'api key model 模型' },
       { key: 'glm', label: 'GLM 配置', alias: '免费 智谱' },
+      { key: 'search', label: '联网搜索', alias: '搜索引擎 秘塔 metaso deepseek 联网' },
       { key: 'prompts', label: '功能提示词', alias: '标签建议 连线建议 上下文' },
       { key: 'promptLib', label: '提示词库', alias: '常用 模板 教学' },
       { key: 'mcpGroups', label: 'MCP 分组', alias: '工具 分组' },
@@ -983,6 +986,9 @@ export function SettingsPage() {
 
       case 'glm':
         return <GlmPanel markDirty={markDirty} />;
+
+      case 'search':
+        return <SearchPanel markDirty={markDirty} />;
 
       default:
         return null;

@@ -351,6 +351,25 @@ function transformMessage(message: Record<string, unknown>): Record<string, unkn
   const content = result.content
   if (typeof content === 'string') {
     result.content = [{ type: 'text', text: content }]
+  } else if (Array.isArray(content)) {
+    // v3.6.10：SOLO 的 solo_work_lite 不接受 image_url 参数，整条请求会 4001
+    // 「We're sorry, the param is invalid」。图片一律降级成文字占位 ——
+    // 这同时能修复历史里已经带着图片块的会话（否则之后每一轮都 4001）。
+    let imageCount = 0
+    const parts: Array<{ type: string; text: string }> = []
+    for (const raw of content) {
+      if (typeof raw !== 'object' || raw === null) continue
+      const part = raw as { type?: string; text?: string }
+      if (part.type === 'text' && typeof part.text === 'string') {
+        parts.push({ type: 'text', text: part.text })
+      } else if (part.type === 'image_url' || part.type === 'image') {
+        imageCount += 1
+      }
+    }
+    if (imageCount > 0) {
+      parts.push({ type: 'text', text: `[图片 × ${imageCount}（TRAE 通道不支持看图，已省略）]` })
+    }
+    result.content = parts.length > 0 ? parts : [{ type: 'text', text: '（空消息）' }]
   }
 
   return result

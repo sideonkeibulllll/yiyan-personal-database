@@ -9,7 +9,7 @@ import { MemoryManagerPanel } from './MemoryManagerPanel';
 import { SoulManagerPanel } from './SoulManagerPanel';
 import { listMemories } from '@/services/aiMemory';
 import { countActiveSoulFacts } from '@/services/soulFacts';
-import type { AIProviderId, ProviderEntry, WebSearchEngineId } from '@/types';
+import type { AIProviderId, ProviderEntry } from '@/types';
 import { AI_PROVIDER_ORDER, PROVIDER_PRESETS, getProviderPreset, getEnabledModels } from '@/types';
 import { visionKey } from '@/utils/modelCapability';
 import {
@@ -689,55 +689,6 @@ export function AiPanel({ markDirty }: AiPanelProps) {
           min="1" max="100" step="1"
         />
         <span className="form-hint">单次对话累计的工具调用总预算（默认 20，范围 1~100）</span>
-      </div>
-
-      {/* v3.6.7: 联网搜索（web_search / web_fetch 的引擎与 Key） */}
-      <div className="settings-subsection-title">联网搜索</div>
-      <div className="form-group">
-        <label className="form-label">搜索引擎</label>
-        <select
-          className="form-input glass"
-          value={settings.ai.webSearch?.engine ?? 'metaso'}
-          onChange={e => {
-            updateAIConfig({
-              webSearch: {
-                ...settings.ai.webSearch,
-                engine: e.target.value as WebSearchEngineId,
-              },
-            });
-            markDirty('ai.webSearch.engine');
-          }}
-        >
-          <option value="metaso">秘塔 AI 搜索（有免费额度）</option>
-          <option value="deepseek">DeepSeek 官方搜索（约 0.5 分 / 次）</option>
-        </select>
-        <span className="form-hint">
-          固定用你选的这一个引擎，失败不会自动换别家（避免「以为在用免费的，其实在花付费的」）；
-          报错原因会直接返给 AI，一眼能看出是哪边的问题。
-        </span>
-      </div>
-      <div className="form-group">
-        <label className="form-label">秘塔 API Key</label>
-        <input
-          type="password"
-          className="form-input glass"
-          value={settings.ai.webSearch?.metasoKey ?? ''}
-          onChange={e => {
-            updateAIConfig({
-              webSearch: {
-                ...settings.ai.webSearch,
-                engine: settings.ai.webSearch?.engine ?? 'metaso',
-                metasoKey: e.target.value,
-              },
-            });
-            markDirty('ai.webSearch.metasoKey');
-          }}
-          placeholder="mk-..."
-        />
-        <span className="form-hint">
-          在 metaso.cn 的 API 页面申请，每搜一次扣 3 credits。官方提到搜索接口要绑 IP 白名单：
-          家里宽带最稳，切流量时把上面的引擎换成 DeepSeek 就行。
-        </span>
       </div>
 
       {/* f: 数据选择器配置 */}

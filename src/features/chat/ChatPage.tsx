@@ -361,8 +361,13 @@ export function ChatPage() {
     setPendingImages(prev => [...prev, ...withPreview].slice(0, 9));
   }, [makePreview]);
 
+  /** v3.6.10：TRAE（SOLO 协议）不接受 image_url，发图必 4001，直接拦下来别浪费一轮 */
+  const traeBlocksImages = effectiveProviderId === 'trae';
+  const TRAE_IMAGE_HINT = 'TRAE 通道不支持图片输入（会报 4001 参数错误）喵。\n要看图请切到「硅基流动 deepseek-ai/DeepSeek-V4.1-Flash」或 DeepSeek 官方 flash。';
+
   /** 从相册 / 文件选择器选图 */
   const handlePickImages = useCallback(async () => {
+    if (traeBlocksImages) { window.alert(TRAE_IMAGE_HINT); return; }
     try {
       const imgs = await pickImages(9);
       await appendPendingImages(imgs);
@@ -370,10 +375,11 @@ export function ChatPage() {
       console.error('[ChatPage] 选图失败:', err);
       alert('选图失败，请重试');
     }
-  }, [appendPendingImages]);
+  }, [appendPendingImages, traeBlocksImages]);
 
   /** 拍照（仅 Android） */
   const handleTakePhoto = useCallback(async () => {
+    if (traeBlocksImages) { window.alert(TRAE_IMAGE_HINT); return; }
     try {
       const img = await takePhoto();
       if (img) await appendPendingImages([img]);
@@ -381,17 +387,18 @@ export function ChatPage() {
       console.error('[ChatPage] 拍照失败:', err);
       alert('拍照失败，请重试');
     }
-  }, [appendPendingImages]);
+  }, [appendPendingImages, traeBlocksImages]);
 
   /** 粘贴图片（桌面端 Ctrl+V） */
   const handlePasteImages = useCallback(async (files: File[]) => {
+    if (traeBlocksImages) { window.alert(TRAE_IMAGE_HINT); return; }
     try {
       const items = await Promise.all(files.map(f => fileToBase64(f)));
       await appendPendingImages(items.filter(it => it.base64));
     } catch (err) {
       console.error('[ChatPage] 粘贴图片失败:', err);
     }
-  }, [fileToBase64, appendPendingImages]);
+  }, [fileToBase64, appendPendingImages, traeBlocksImages]);
 
   const handleRemovePendingImage = useCallback((id: string) => {
     setPendingImages(prev => prev.filter(p => p.id !== id));
@@ -976,6 +983,10 @@ export function ChatPage() {
     // v3.6.0: 挂载的提示词正文在发送时才展开（输入框里只有胶囊）
     const promptText = composePromptText(attachedPrompts);
     if ((!text && !hasImages && !hasFiles && !promptText) || isLoading) return;
+    if (hasImages && traeBlocksImages) {
+      window.alert(TRAE_IMAGE_HINT);
+      return;
+    }
     if (externalBusy) {
       alert('上一条回复还在后台生成，等它结束再发吧（会自动刷新）。');
       return;
@@ -1635,7 +1646,7 @@ export function ChatPage() {
       // 注意：MCP 工具激活改为对话级持久化（session.mcpEnabledTools），
       // 不再在每次发送后清空，让用户在一次对话内可以连续多次调用工具。
     }
-  }, [input, isLoading, settings, currentSessionId, sessions, persistSessions, updateSessionMessages, thinkingEnabled, thinkingEffort, mcpEnabled, mcpActiveTools, currentModel, pickerSelectedIds, pendingImages, pendingFiles, externalBusy]);
+  }, [input, isLoading, settings, currentSessionId, sessions, persistSessions, updateSessionMessages, thinkingEnabled, thinkingEffort, mcpEnabled, mcpActiveTools, currentModel, pickerSelectedIds, pendingImages, pendingFiles, externalBusy, traeBlocksImages, TRAE_IMAGE_HINT]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     // 手机端/桌面端统一：裸 Enter 换行（不拦截），仅 Ctrl/Cmd+Enter 发送；
