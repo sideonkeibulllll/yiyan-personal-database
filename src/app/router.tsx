@@ -17,6 +17,9 @@ const DataManagerPage = lazy(() => import('@/features/datamanager/DataManagerPag
 const EntryEditPage = lazy(() => import('@/features/entry/EntryEditPage').then(m => ({ default: m.EntryEditPage })));
 const EntryViewPage = lazy(() => import('@/features/entry/EntryViewPage').then(m => ({ default: m.EntryViewPage })));
 const ChatPage = lazy(() => import('@/features/chat/ChatPage').then(m => ({ default: m.ChatPage })));
+const ChatFilePage = lazy(() => import('@/features/chat/ChatFilePage').then(m => ({ default: m.ChatFilePage })));
+const FileManagerPage = lazy(() => import('@/features/files/FileManagerPage').then(m => ({ default: m.FileManagerPage })));
+const FileViewPage = lazy(() => import('@/features/files/FileViewPage').then(m => ({ default: m.FileViewPage })));
 const TodoPage = lazy(() => import('@/features/todo/TodoPage').then(m => ({ default: m.TodoPage })));
 const TodoEditPage = lazy(() => import('@/features/todo/TodoEditPage').then(m => ({ default: m.TodoEditPage })));
 const TodoTemplatePage = lazy(() => import('@/features/todo/TodoTemplatePage').then(m => ({ default: m.TodoTemplatePage })));
@@ -128,6 +131,30 @@ const router = createHashRouter([
     element: (
       <Suspense fallback={<Loading />}>
         <ChatPage />
+      </Suspense>
+    ),
+  },
+  {
+    path: '/chat-file/:sessionId/:msgId/:index',
+    element: (
+      <Suspense fallback={<Loading />}>
+        <ChatFilePage />
+      </Suspense>
+    ),
+  },
+  {
+    path: '/files',
+    element: (
+      <Suspense fallback={<Loading />}>
+        <FileManagerPage />
+      </Suspense>
+    ),
+  },
+  {
+    path: '/files/:name',
+    element: (
+      <Suspense fallback={<Loading />}>
+        <FileViewPage />
       </Suspense>
     ),
   },

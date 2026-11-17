@@ -159,9 +159,67 @@ export function buildUserMessageContent(opts: {
     ];
   }
   if (historicalImageCount > 0) {
-    return `${text}${text ? '\n' : ''}[图片 × ${historicalImageCount}]`;
+    // v3.6.4：注明「历史图片、未重发」——否则模型只会说「我看到有个图片但看不到内容」，
+    // 让人误以为是传输坏了。
+    return `${text}${text ? '\n' : ''}[图片 × ${historicalImageCount}（历史图片，未重发）]`;
   }
   return text;
+}
+
+/**
+ * 把用户消息里的「文件块」切出来（v3.6.4）。
+ *
+ * 发送时会把选中的文本文件拼成 `【文件：name】\n正文\n【文件结束】`，
+ * 消息里保留全文（备份/导出天然带着走），但气泡里只渲染一张卡片，
+ * 点开跳独立页面看全文 —— 否则一屏全是 html，翻都翻不动。
+ */
+export interface ChatFileBlock {
+  /** 文件名（可能带「（内容过长已截断）」后缀） */
+  name: string;
+  /** 文件正文 */
+  body: string;
+}
+
+export type ChatContentSegment =
+  | { type: 'text'; text: string }
+  | { type: 'file'; block: ChatFileBlock; index: number };
+
+const FILE_BLOCK_RE = /【文件：([^】\n]+)】\n([\s\S]*?)\n【文件结束】/g;
+
+/** 按文件块拆分消息正文（没有文件块时返回单个 text 段）。 */
+export function splitChatFileBlocks(content: string): ChatContentSegment[] {
+  if (!content || !content.includes('【文件：')) {
+    return content ? [{ type: 'text', text: content }] : [];
+  }
+  const segments: ChatContentSegment[] = [];
+  let cursor = 0;
+  let index = 0;
+  FILE_BLOCK_RE.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = FILE_BLOCK_RE.exec(content)) !== null) {
+    if (match.index > cursor) {
+      const text = content.slice(cursor, match.index).trim();
+      if (text) segments.push({ type: 'text', text });
+    }
+    segments.push({
+      type: 'file',
+      block: { name: match[1]!.trim(), body: match[2] ?? '' },
+      index: index++,
+    });
+    cursor = match.index + match[0].length;
+  }
+  if (cursor < content.length) {
+    const text = content.slice(cursor).trim();
+    if (text) segments.push({ type: 'text', text });
+  }
+  // 正则没命中（格式被手改过）→ 整体当文本，别把消息吞掉
+  return segments.length > 0 ? segments : [{ type: 'text', text: content }];
+}
+
+/** 文件块在消息里的字符数展示 */
+export function formatCharCount(chars: number): string {
+  if (chars >= 10000) return `${(chars / 10000).toFixed(1)} 万字`;
+  return `${chars} 字`;
 }
 
 /** 因上下文截断而缺失的工具结果占位文本 */

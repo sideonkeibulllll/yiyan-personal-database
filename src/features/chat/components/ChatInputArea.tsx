@@ -7,7 +7,6 @@
  */
 import type { ClipboardEvent, KeyboardEvent, RefObject } from 'react';
 import { IconUpload, IconBrain, IconTool, IconClose, IconBack, IconSendAlt, IconCheck, IconUndo, IconRedo, IconImage, IconCamera, IconClipboard, IconFile } from '@/components/icons';
-import { VISION_UNSUPPORTED_HINT } from '@/utils/modelCapability';
 import { PromptPickerPanel } from './PromptPickerPanel';
 import type { McpGroupConfig } from '@/types';
 import type { PendingChatImage, PendingChatFile, ThinkingEffort } from '../chatTypes';
@@ -66,8 +65,6 @@ interface ChatInputAreaProps {
   /* === 图片输入（v3.5.3） === */
   /** 尚未发送的图片（预览条） */
   pendingImages: PendingChatImage[];
-  /** 当前模型是否支持看图（false → 图片入口置灰） */
-  visionSupported: boolean;
   /** 是否展示「拍照」入口（仅 Android 有原生相机） */
   showCameraButton: boolean;
   onPickImages: () => void;
@@ -120,7 +117,6 @@ export function ChatInputArea({
   onStop,
   textareaRef,
   pendingImages,
-  visionSupported,
   showCameraButton,
   onPickImages,
   onTakePhoto,
@@ -140,7 +136,6 @@ export function ChatInputArea({
 
   /** 输入框粘贴：剪贴板里有图片文件时截获（桌面端最顺手的发图方式） */
   const handlePaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
-    if (!visionSupported) return;
     const items = Array.from(e.clipboardData?.items || []);
     const files: File[] = [];
     for (const item of items) {
@@ -181,9 +176,9 @@ export function ChatInputArea({
 
         {/* 图片：相册 / 文件选择（全平台） */}
         <button
-          className={`toolbar-btn ${pendingImages.length > 0 ? 'active image' : ''} ${visionSupported ? '' : 'no-vision'}`}
+          className={`toolbar-btn ${pendingImages.length > 0 ? 'active image' : ''}`}
           onClick={onPickImages}
-          title={visionSupported ? '选择图片（桌面端可直接 Ctrl+V 粘贴）' : VISION_UNSUPPORTED_HINT}
+          title="选择图片（桌面端可直接 Ctrl+V 粘贴）"
         >
           <IconImage />
           <span>图片{pendingImages.length > 0 ? ` (${pendingImages.length})` : ''}</span>
@@ -192,9 +187,9 @@ export function ChatInputArea({
         {/* 拍照：仅 Android（原生相机） */}
         {showCameraButton && (
           <button
-            className={`toolbar-btn ${visionSupported ? '' : 'no-vision'}`}
+            className="toolbar-btn"
             onClick={onTakePhoto}
-            title={visionSupported ? '拍一张照片发给 AI' : VISION_UNSUPPORTED_HINT}
+            title="拍一张照片发给 AI"
           >
             <IconCamera />
             <span>拍照</span>

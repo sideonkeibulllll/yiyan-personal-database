@@ -28,6 +28,7 @@
  * 解决了「AI 看不到结果」「一次只能调一个」「无 agent loop」等弊端。
  */
 
+import { listLibraryFiles, readLibraryFile, writeLibraryFile, deleteLibraryFile, libraryFileExists } from './fileLibrary';
 import { getDatabase } from '@/services/database';
 import { getTodoDatabase } from '@/services/todoDatabase';
 import { getAllMemos, getMemo, createMemo, saveMemo, deleteMemo } from '@/services/memoDatabase';
@@ -637,6 +638,46 @@ export const BRIDGE_TOOLS: BridgeTool[] = [
       required: ['title', 'content'],
     },
   },
+  /* === v3.6.4: 文件库（AI 可直接写 html，写完在「文件」页全屏看） === */
+  {
+    name: 'list_files',
+    description: '列出「文件库」里的文件（名称、字节数、修改时间）。文件库是用户的本地文件柜，主要放 html / md 作品。想找文件、确认某个名字是否存在时先调它。',
+    parameters: { type: 'object', properties: {}, required: [] },
+  },
+  {
+    name: 'read_file',
+    description: '读取文件库里某个文件的全文（按文件名精确匹配，支持 .html/.md/.txt 等文本文件）。超过 20 万字符会截断并在结果里标注。',
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: '文件名（含扩展名，如 demo.html）' },
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'write_file',
+    description: '在文件库里新建或覆盖一个文本文件（同名即覆盖，常用于迭代同一个 html）。**不需要用户确认**，所以只在用户明确要求写文件、或明显是在做作品时使用；不要拿它当草稿纸。写 html 时请输出完整可运行的单文件（内联样式/脚本）。',
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: '文件名（含扩展名；不接受路径分隔符）' },
+        content: { type: 'string', description: '完整文件内容（原样写入，不做转义）' },
+      },
+      required: ['name', 'content'],
+    },
+  },
+  {
+    name: 'delete_file',
+    description: '删除文件库里的一个文件。这是破坏性操作：系统会先弹确认卡片，用户确认后才真正删除。',
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: '要删除的文件名（含扩展名）' },
+      },
+      required: ['name'],
+    },
+  },
 ];
 
 /** 所有工具名称 */
@@ -672,6 +713,13 @@ export const PROMPT_TOOLS = [
   'get_prompt',
   'save_prompt',
 ];
+/** 文件库工具（v3.6.4）：列表 / 读 / 写（免确认） / 删除（需确认） */
+export const FILE_TOOLS = [
+  'list_files',
+  'read_file',
+  'write_file',
+  'delete_file',
+];
 
 /**
  * 需要用户确认后才执行的重要/危险工具。
@@ -679,7 +727,7 @@ export const PROMPT_TOOLS = [
  * update_soul：展示理由 + 逐项变更 + 更新后画像预览（见 describeToolPreview）；
  * save_prompt：展示名称/场景/字数与「新建还是覆盖哪一条」。
  */
-export const DANGEROUS_TOOLS = new Set(['delete_card', 'delete_todo', 'delete_memo', 'delete_todo_tag', 'delete_ai_memory', 'update_soul', 'save_prompt']);
+export const DANGEROUS_TOOLS = new Set(['delete_card', 'delete_todo', 'delete_memo', 'delete_todo_tag', 'delete_ai_memory', 'update_soul', 'save_prompt', 'delete_file']);
 
 /** 工具名 → 中文显示名（用于确认弹窗） */
 export const TOOL_DISPLAY_NAMES: Record<string, string> = {
@@ -696,6 +744,7 @@ export const TOOL_DISPLAY_NAMES: Record<string, string> = {
   update_ai_memory: '修改长期记忆', delete_ai_memory: '删除长期记忆',
   update_soul: '更新人格档案',
   list_prompts: '查看提示词库', get_prompt: '读取提示词', save_prompt: '保存提示词',
+  list_files: '查看文件库', read_file: '读取文件', write_file: '写入文件', delete_file: '删除文件',
 };
 
 /**
@@ -716,6 +765,7 @@ export function describeToolAction(toolName: string, args: Record<string, unknow
     case 'delete_todo': return `删除 ${count(args.todoIds)} 条待办`;
     case 'delete_memo': return `删除 ${count(args.memoIds)} 篇备忘录`;
     case 'delete_ai_memory': return `删除 ${count(args.memoryIds ?? args.memoryId)} 条长期记忆`;
+    case 'delete_file': return `删除文件「${String(args.name || '未命名')}」`;
     case 'save_prompt': {
       const title = String(args.title || '').trim() || '未命名提示词';
       const chars = String(args.content || '').length;
@@ -2191,6 +2241,56 @@ export async function executeToolCall(
             message: `已新建提示词「${created.title}」（${created.content.length} 字）`,
           },
         };
+      }
+
+      case 'list_files': {
+        const files = await listLibraryFiles();
+        return {
+          success: true,
+          data: {
+            total: files.length,
+            files: files.map(file => ({ name: file.name, bytes: file.size, mtime: file.mtime || undefined })),
+            hint: files.length === 0 ? '文件库是空的；可以先用 write_file 写一个 demo.html' : undefined,
+          },
+        };
+      }
+      case 'read_file': {
+        const name = typeof args.name === 'string' ? args.name.trim() : '';
+        if (!name) return { success: false, error: 'name 必填' };
+        const file = await readLibraryFile(name);
+        if (!file) return { success: false, error: `文件不存在：${name}` };
+        return {
+          success: true,
+          data: {
+            name: file.name,
+            chars: file.text.length,
+            truncated: file.truncated,
+            content: file.text,
+          },
+        };
+      }
+      case 'write_file': {
+        const name = typeof args.name === 'string' ? args.name.trim() : '';
+        const content = typeof args.content === 'string' ? args.content : '';
+        if (!name) return { success: false, error: 'name 必填' };
+        if (!content.trim()) return { success: false, error: 'content 不能为空' };
+        const existed = await libraryFileExists(name);
+        const saved = await writeLibraryFile(name, content);
+        return {
+          success: true,
+          data: {
+            name: saved,
+            chars: content.length,
+            mode: existed ? 'overwritten' : 'created',
+            message: `${existed ? '已覆盖' : '已创建'}「${saved}」（${content.length} 字）`,
+          },
+        };
+      }
+      case 'delete_file': {
+        const name = typeof args.name === 'string' ? args.name.trim() : '';
+        if (!name) return { success: false, error: 'name 必填' };
+        await deleteLibraryFile(name);
+        return { success: true, data: { name, message: `已删除「${name}」` } };
       }
 
       default:

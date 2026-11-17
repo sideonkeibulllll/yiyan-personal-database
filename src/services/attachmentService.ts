@@ -303,6 +303,103 @@ export async function readTextFile(
   }
 }
 
+/** 字节数上限（文档比纯文本大得多，放宽到 15MB） */
+const CHAT_DOC_MAX_BYTES = 15 * 1024 * 1024;
+
+/** 可解析的文档类型（v3.6.4：PDF / Word / Excel 直接读成文本，省得用户自己转） */
+export type ChatDocKind = 'pdf' | 'docx' | 'xlsx';
+
+/** 按扩展名/ MIME 判断文档类型 */
+export function docKindOf(file: File): ChatDocKind | null {
+  const ext = fileExtension(file.name);
+  if (ext === 'pdf' || file.type === 'application/pdf') return 'pdf';
+  if (ext === 'docx' || file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') return 'docx';
+  if (ext === 'xlsx' || ext === 'xls' || file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') return 'xlsx';
+  return null;
+}
+
+/** PDF → 纯文本（逐页抽，最多 300 页） */
+async function extractPdfText(buffer: ArrayBuffer): Promise<string> {
+  const pdfjs: any = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const workerUrl = (await import('pdfjs-dist/legacy/build/pdf.worker.min.mjs?url')).default;
+  pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
+  const doc = await pdfjs.getDocument({
+    data: new Uint8Array(buffer),
+    isEvalSupported: false,
+    useWorkerFetch: false,
+  }).promise;
+  const pages: string[] = [];
+  const limit = Math.min(doc.numPages, 300);
+  for (let i = 1; i <= limit; i++) {
+    const page = await doc.getPage(i);
+    const content = await page.getTextContent();
+    const line = content.items
+      .map((item: { str?: string }) => (typeof item.str === 'string' ? item.str : ''))
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (line) pages.push(`--- 第 ${i} 页 ---\n${line}`);
+  }
+  try { await doc.destroy(); } catch { /* ignore */ }
+  return pages.join('\n\n');
+}
+
+/** DOCX → 纯文本（mammoth 只抽正文，不保留样式） */
+async function extractDocxText(buffer: ArrayBuffer): Promise<string> {
+  // @ts-expect-error 浏览器构建没有独立类型声明，运行时导出与主包一致
+  const mammoth: any = await import('mammoth/mammoth.browser.js');
+  const result = await (mammoth.default ?? mammoth).extractRawText({ arrayBuffer: buffer });
+  return String(result?.value ?? '').trim();
+}
+
+/** XLSX/XLS → 文本（每个工作表转 CSV） */
+async function extractSheetText(buffer: ArrayBuffer): Promise<string> {
+  const XLSX: any = await import('xlsx');
+  const book = XLSX.read(new Uint8Array(buffer), { type: 'array' });
+  const parts: string[] = [];
+  for (const sheetName of book.SheetNames as string[]) {
+    const sheet = book.Sheets[sheetName];
+    if (!sheet) continue;
+    const csv = XLSX.utils.sheet_to_csv(sheet, { blankrows: false }).trim();
+    if (csv) parts.push(`--- 工作表：${sheetName} ---\n${csv}`);
+  }
+  return parts.join('\n\n');
+}
+
+/**
+ * 读取 PDF / Word / Excel 并抽成文本（v3.6.4）。
+ *
+ * @returns null 表示读不出来（扫描版 PDF、加密文档、损坏文件等）
+ */
+export async function readDocumentFile(
+  file: File,
+  maxChars: number = CHAT_FILE_MAX_CHARS,
+): Promise<SelectedTextFile | null> {
+  const kind = docKindOf(file);
+  if (kind === null) return null;
+  if (file.size <= 0 || file.size > CHAT_DOC_MAX_BYTES) return null;
+  try {
+    const buffer = await file.arrayBuffer();
+    const raw = kind === 'pdf'
+      ? await extractPdfText(buffer)
+      : kind === 'docx'
+        ? await extractDocxText(buffer)
+        : await extractSheetText(buffer);
+    const text = raw.replace(/\n{3,}/g, '\n\n').trim();
+    if (text.length === 0) return null;
+    const truncated = text.length > maxChars;
+    return {
+      name: file.name,
+      size: file.size,
+      text: truncated ? text.slice(0, maxChars) : text,
+      truncated,
+    };
+  } catch (error) {
+    console.warn('[attachment] 文档解析失败:', file.name, error);
+    return null;
+  }
+}
+
 /** File 转 base64 */
 function fileToBase64(file: File): Promise<SelectedImage> {
   return new Promise((resolve, reject) => {

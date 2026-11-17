@@ -554,8 +554,12 @@ export const PROVIDER_PRESETS: Record<AIProviderId, ProviderPreset> = {
     id: 'siliconflow',
     label: '硅基流动 SiliconFlow',
     baseURL: 'https://api.siliconflow.cn/v1',
-    defaultModel: 'deepseek-ai/DeepSeek-V4-Flash',
-    models: ['deepseek-ai/DeepSeek-V4-Flash'],
+    defaultModel: 'deepseek-ai/DeepSeek-V4.1-Flash',
+    models: [
+      'deepseek-ai/DeepSeek-V4.1-Flash',
+      'deepseek-ai/DeepSeek-V4-Flash',
+      'deepseek-ai/DeepSeek-V4-Pro',
+    ],
     keyPlaceholder: 'sk-...',
   },
   /**
@@ -567,24 +571,29 @@ export const PROVIDER_PRESETS: Record<AIProviderId, ProviderPreset> = {
     id: 'trae',
     label: 'TRAE（字节·免 Key）',
     baseURL: 'https://trae-api-cn.mchost.guru',
-    defaultModel: 'DeepSeek-V4-Pro',
+    defaultModel: 'DeepSeek-V4.1-Flash',
+    // v3.6.4：对齐 TRAE 官方「内置模型」文档（docs.trae.cn/ide_trae-built-in-models）
     models: [
-      'DeepSeek-V4-Pro',
+      'DeepSeek-V4.1-Flash',
       'DeepSeek-V4-Flash',
-      'DeepSeek-V4-Flash-Official',
-      'kimi-k3',
-      'kimi-k2.7-code',
-      'kimi-k2.6',
-      'glm-5.2',
-      'glm-5-turbo',
-      'glm-5',
-      'Doubao-Seed-2.1-Pro',
-      'Doubao-Seed-2.1-Turbo',
-      'Doubao-Seed-2.0-Code',
-      'minimax-m3',
-      'qwen-3.7-plus',
-      'sagitta',
-      'aquila',
+      'DeepSeek-V4-Pro',
+      'GLM-5.3',
+      'GLM-5.3-Flash',
+      'GLM-5.3-FlashX',
+      'GLM-5.2',
+      'Kimi-K3',
+      'Kimi-K2.8-Preview',
+      'MiMo-V2.6-Flash',
+      'MiMo-V2.6-Pro',
+      'MiniMax-M3',
+      'Qwen3.8-Flash',
+      'Qwen3.8-Max',
+      'Qwen3.7-Plus',
+      'Seed-2.1-Pro-0915',
+      'Seed-2.1-Turbo',
+      'Seed-Code',
+      'Seed-Evolving',
+      'Step-5-Preview',
     ],
     keyPlaceholder: '粘贴 TRAE 凭据 JSON（含 access_token / refresh_token / machine_id / device_id）',
   },
@@ -647,7 +656,11 @@ export function migrateAIConfig(config: AIConfig): AIConfig {
     // 老配置：只把旧扁平字段灌入当前 provider，其它用 preset 默认值
     const isLegacySlot = !prev && id === providerId;
     const model = prev?.model ?? (isLegacySlot && config.model ? config.model : preset.defaultModel);
-    const models = prev?.models?.length ? prev.models : [...preset.models];
+    // v3.6.4：官方模型表会新增（如 DeepSeek-V4.1-Flash），老配置不能因为「已有 models」
+    // 就永远看不到新模型 —— 取并集：预设在前，老配置里多出来的（自定义/旧名）保留在后。
+    const models = prev?.models?.length
+      ? [...new Set([...preset.models, ...prev.models])]
+      : [...preset.models];
     // v3.6.3：模型多的提供商不再默认「全部勾选」（TRAE 16 个 / OpenRouter 8 个，
     // 全勾会把 chat 页模型下拉撑爆）。首次迁移时只勾当前模型，其余由用户按需勾选。
     const collapseEnabled = id === 'trae' || id === 'openrouter';

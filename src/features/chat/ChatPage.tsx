@@ -55,19 +55,21 @@ import {
   pickChatFiles,
   isTextLikeFile,
   readTextFile,
+  docKindOf,
+  readDocumentFile,
   CHAT_FILE_MAX_CHARS,
   CHAT_FILES_TOTAL_MAX_CHARS,
   saveChatImage,
   readChatImageForModel,
   deleteChatImageDir,
 } from '@/services/attachmentService';
-import { supportsVision, VISION_UNSUPPORTED_HINT } from '@/utils/modelCapability';
 import { Capacitor } from '@capacitor/core';
 import { isElectron } from '@/services/electronAdapter';
 import { loadSessionsSync, createId, generateTitle, buildModelOptions, parseModelValue, truncateApiMessagesSafely, loadChatDrafts, saveChatDraft, deleteChatDraft, buildUserMessageContent } from './chatUtils';
 import type { ApiMessage, ApiContentPart } from './chatUtils';
 import type { ChatMessage, ChatSession, ChatImage, PendingChatImage, PendingChatFile, SearchSelectedResult, ThinkingEffort } from './chatTypes';
 import { streamChatCompletion } from './chatStream';
+import { getActiveChatStream, setActiveChatStream, subscribeChatStream } from './chatRuntime';
 import { ChatSidebar } from './components/ChatSidebar';
 import { ChatHeader } from './components/ChatHeader';
 import { ChatMessageList } from './components/ChatMessageList';
@@ -213,6 +215,10 @@ export function ChatPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  /** 当前组件自己发起的流（用来区分「别的页面/后台」的流） */
+  const streamingOwnRef = useRef(false);
+  /** 当前会话是否有一条不属于本组件的后台流在跑（v3.6.4） */
+  const [externalBusy, setExternalBusy] = useState(false);
   /** 危险操作的确认 resolver：confirmId → resolve(approved)。agent loop 停在这里等用户点击 */
   const confirmResolversRef = useRef<Map<string, (approved: boolean) => void>>(new Map());
   // v2.6.3: 本次发送是否实际消费了「预备列表」（决定发送后是否清除）
@@ -287,17 +293,10 @@ export function ChatPage() {
   // v2.5.1: 模型选项按 provider 分组（跨提供商可选）
   const modelOptions = useMemo(() => buildModelOptions(settings.ai), [settings.ai]);
 
-  /* === 图片输入（v3.5.3，v3.6.3 放宽）===
-   * 能力判断只作「提示」：判否时不再一刀切拦死，而是确认后允许发送 ——
-   * 模型名启发式难免漏判（第三方中转的 v4.1-flash 就是典型），
-   * 用户手动勾过「该模型支持看图」的优先放行（settings.ai.visionModels）。
-   * 注意：GLM 免费池（useGlm）一律判否 —— 池内是文本模型，
-   * 且此时 effectiveProviderId 仍指向原提供商，不拦会误判成支持。
+  /* === 图片输入（v3.5.3，v3.6.4 去掉能力拦截）===
+   * 模型能力靠猜必然出错（硅基 V4-Flash 纯文本、V4.1-Flash 支持视觉），
+   * 所以入口不再置灰、不再弹确认：能发就发，服务端不接受时用 400 文案直说。
    */
-  const visionSupported = useMemo(
-    () => !useGlm && supportsVision(effectiveProviderId, effectiveModel, settings.ai.visionModels),
-    [useGlm, effectiveProviderId, effectiveModel, settings.ai.visionModels]
-  );
 
   /** 是否展示「拍照」：仅 Android 有原生相机（Web/Electron 走文件选择器） */
   const showCameraButton = useMemo(
@@ -359,15 +358,8 @@ export function ChatPage() {
     setPendingImages(prev => [...prev, ...withPreview].slice(0, 9));
   }, [makePreview]);
 
-  /** 判否时的软拦截：确认后照发（启发式可能漏判，别把能用的人挡死） */
-  const confirmVisionFallback = useCallback((): boolean => {
-    if (visionSupported) return true;
-    return window.confirm(`${VISION_UNSUPPORTED_HINT}\n\n仍然继续吗？`);
-  }, [visionSupported]);
-
   /** 从相册 / 文件选择器选图 */
   const handlePickImages = useCallback(async () => {
-    if (!confirmVisionFallback()) return;
     try {
       const imgs = await pickImages(9);
       await appendPendingImages(imgs);
@@ -375,11 +367,10 @@ export function ChatPage() {
       console.error('[ChatPage] 选图失败:', err);
       alert('选图失败，请重试');
     }
-  }, [confirmVisionFallback, appendPendingImages]);
+  }, [appendPendingImages]);
 
   /** 拍照（仅 Android） */
   const handleTakePhoto = useCallback(async () => {
-    if (!confirmVisionFallback()) return;
     try {
       const img = await takePhoto();
       if (img) await appendPendingImages([img]);
@@ -387,18 +378,17 @@ export function ChatPage() {
       console.error('[ChatPage] 拍照失败:', err);
       alert('拍照失败，请重试');
     }
-  }, [confirmVisionFallback, appendPendingImages]);
+  }, [appendPendingImages]);
 
   /** 粘贴图片（桌面端 Ctrl+V） */
   const handlePasteImages = useCallback(async (files: File[]) => {
-    if (!confirmVisionFallback()) return;
     try {
       const items = await Promise.all(files.map(f => fileToBase64(f)));
       await appendPendingImages(items.filter(it => it.base64));
     } catch (err) {
       console.error('[ChatPage] 粘贴图片失败:', err);
     }
-  }, [confirmVisionFallback, fileToBase64, appendPendingImages]);
+  }, [fileToBase64, appendPendingImages]);
 
   const handleRemovePendingImage = useCallback((id: string) => {
     setPendingImages(prev => prev.filter(p => p.id !== id));
@@ -420,6 +410,21 @@ export function ChatPage() {
         if (file.type.startsWith('image/')) {
           const img = await fileToBase64(file);
           if (img.base64) images.push(img);
+          continue;
+        }
+        // PDF / Word / Excel：抽成文本再塞进正文（v3.6.4）
+        if (docKindOf(file) !== null) {
+          const doc = await readDocumentFile(file, CHAT_FILE_MAX_CHARS);
+          if (doc === null) {
+            skipped.push(`${file.name}（抽不出文字，可能是扫描版 PDF 或加密文档）`);
+            continue;
+          }
+          if (usedChars + doc.text.length > CHAT_FILES_TOTAL_MAX_CHARS) {
+            skipped.push(`${file.name}（超过合计 ${Math.round(CHAT_FILES_TOTAL_MAX_CHARS / 10000)} 万字上限）`);
+            continue;
+          }
+          usedChars += doc.text.length;
+          texts.push({ id: createId(), ...doc });
           continue;
         }
         if (!isTextLikeFile(file)) {
@@ -910,6 +915,35 @@ export function ChatPage() {
     setMcpSearchOpen(false);
   }, [currentSessionId, mcpSearchResults, mcpSelectedIds, sessions, persistSessions]);
 
+  /* === v3.6.4: 后台流状态订阅 ===
+   * 用户切走页面后流仍在跑；回来时这里负责显示「还在生成」，
+   * 并在流结束时重读会话，把最终内容刷进界面。
+   */
+  useEffect(() => {
+    const sync = () => {
+      const stream = getActiveChatStream();
+      // 回到页面时若还没选中会话，自动接上「正在生成」的那个 —— 否则提示无处可显示，
+      // 用户也容易以为回复丢了（ChatPage 本来不读 URL 里的会话 id）。
+      if (stream && !currentSessionId) {
+        setCurrentSessionId(stream.sessionId);
+        setExternalBusy(true);
+        return;
+      }
+      setExternalBusy(!!stream && !!currentSessionId && stream.sessionId === currentSessionId);
+    };
+    sync();
+    const off = subscribeChatStream(stream => {
+      const busy = !!stream && !!currentSessionId && stream.sessionId === currentSessionId;
+      setExternalBusy(busy);
+      // 别人的流刚结束 → 从库里重读（自己发起的流不用，本地已有最终状态）
+      if (!stream && !streamingOwnRef.current) {
+        // 数据层的 ChatSession 与 UI 的 ChatSession 是两套结构（字段一致），这里按 UI 类型接
+        void loadChatSessions().then(list => setSessions(list as unknown as ChatSession[]));
+      }
+    });
+    return off;
+  }, [currentSessionId]);
+
   /* === 停止生成 === */
   const handleStop = useCallback(() => {
     // 若正卡在危险操作确认上，先放行（当作取消），避免 loop 永久挂起
@@ -926,18 +960,16 @@ export function ChatPage() {
     // v3.6.0: 挂载的提示词正文在发送时才展开（输入框里只有胶囊）
     const promptText = composePromptText(attachedPrompts);
     if ((!text && !hasImages && !hasFiles && !promptText) || isLoading) return;
+    if (externalBusy) {
+      alert('上一条回复还在后台生成，等它结束再发吧（会自动刷新）。');
+      return;
+    }
 
     if (!effectiveAPIKey) {
       alert('请先在设置页面配置 AI API Key');
       return;
     }
 
-    // v3.5.3 / v3.6.3: 不支持看图的模型发图前软拦一道（判断可能漏判，允许确认后继续）
-    if (hasImages && !visionSupported) {
-      if (!window.confirm(`${VISION_UNSUPPORTED_HINT}\n\n仍然发送这 ${pendingImages.length} 张图片吗？`)) {
-        return;
-      }
-    }
 
     // v3.6.3: 待发送文本文件拼成正文块（带文件名与结束标记，模型能分清哪段是文件）
     const fileBlock = pendingFiles
@@ -1279,6 +1311,8 @@ export function ChatPage() {
       // 执行工具→追加 tool 消息→新建 AI 占位→再次请求，循环直到模型不再调用工具。
       const abortCtrl = new AbortController();
       abortRef.current = abortCtrl;
+      streamingOwnRef.current = true;
+      setActiveChatStream({ sessionId, startedAt: Date.now(), abort: () => abortCtrl.abort() });
 
       let loopMessages = [...apiMessages];       // 传给 API 的消息序列（循环中追加）
       let currentAiMsgId = aiMsgId;
@@ -1530,10 +1564,15 @@ export function ChatPage() {
         );
         updateSessionMessages(sessionId, loopDisplayMsgs, 'immediate');
       } else {
+        // v3.6.4：带图请求收到 400，几乎都是「模型不吃图片」——直说，别丢一串原始报错
+        const rawError = (error as Error).message;
+        const errorText = hasImages && /400/.test(rawError)
+          ? '这个模型不接受图片输入'
+          : rawError;
         const errMsg: ChatMessage = {
           id: streamTargetId,
           role: 'assistant',
-          content: `⚠️ 出错了：${(error as Error).message}`,
+          content: `⚠️ ${errorText}`,
           timestamp: Date.now(),
         };
         loopDisplayMsgs = loopDisplayMsgs.map(m => m.id === streamTargetId ? errMsg : m);
@@ -1546,6 +1585,8 @@ export function ChatPage() {
       flushPendingSessionWrites();
       setIsLoading(false);
       abortRef.current = null;
+      if (getActiveChatStream()?.sessionId === sessionId) setActiveChatStream(null);
+      streamingOwnRef.current = false;
       // === 修复 3：发送后清除预备状态（按钮状态结束）===
       setPickerSelectedIds(new Set());
       setPickerInitialEntryId(undefined);
@@ -1557,7 +1598,7 @@ export function ChatPage() {
       // 注意：MCP 工具激活改为对话级持久化（session.mcpEnabledTools），
       // 不再在每次发送后清空，让用户在一次对话内可以连续多次调用工具。
     }
-  }, [input, isLoading, settings, currentSessionId, sessions, persistSessions, updateSessionMessages, thinkingEnabled, thinkingEffort, mcpEnabled, mcpActiveTools, currentModel, pickerSelectedIds, pendingImages, pendingFiles, visionSupported]);
+  }, [input, isLoading, settings, currentSessionId, sessions, persistSessions, updateSessionMessages, thinkingEnabled, thinkingEffort, mcpEnabled, mcpActiveTools, currentModel, pickerSelectedIds, pendingImages, pendingFiles, externalBusy]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     // 手机端/桌面端统一：裸 Enter 换行（不拦截），仅 Ctrl/Cmd+Enter 发送；
@@ -1813,6 +1854,7 @@ export function ChatPage() {
         {/* 消息列表 */}
         <ChatMessageList
           messages={messages}
+          sessionId={currentSessionId}
           selectMode={selectMode}
           selectedMsgIds={selectedMsgIds}
           isLoading={isLoading}
@@ -1834,6 +1876,13 @@ export function ChatPage() {
         )}
 
         {/* 底部输入区 */}
+        {externalBusy && (
+          <div className="chat-bg-stream-hint">
+            <span className="chat-bg-dot" />
+            AI 还在后台生成上一条回复，完成后会自动刷新 —— 现在可以去别的页面逛逛
+          </div>
+        )}
+
         <ChatInputArea
           pickerSelectedCount={pickerSelectedIds.size}
           onOpenPicker={handleUploadClick}
@@ -1871,7 +1920,6 @@ export function ChatPage() {
           onStop={handleStop}
           textareaRef={textareaRef}
           pendingImages={pendingImages}
-          visionSupported={visionSupported}
           showCameraButton={showCameraButton}
           onPickImages={handlePickImages}
           onTakePhoto={handleTakePhoto}

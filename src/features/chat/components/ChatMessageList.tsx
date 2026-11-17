@@ -9,15 +9,18 @@
  */
 import { memo, useMemo, useState, useEffect } from 'react';
 import type { RefObject } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { renderMarkdown } from '@/utils/markdown';
 import { readImageAsSrc } from '@/services/attachmentService';
 import { ImageViewer } from '@/components/ImageViewer';
-import { IconMessage, IconCheck, IconBrain } from '@/components/icons';
-import { formatTime } from '../chatUtils';
+import { IconMessage, IconCheck, IconBrain, IconFile, IconChevronRight } from '@/components/icons';
+import { formatTime, splitChatFileBlocks, formatCharCount } from '../chatUtils';
 import type { ChatMessage, ChatImage } from '../chatTypes';
 
 interface ChatMessageListProps {
   messages: ChatMessage[];
+  /** 当前会话 id（点文件卡片跳独立页时拼路由） */
+  sessionId: string | null;
   selectMode: boolean;
   selectedMsgIds: Set<string>;
   isLoading: boolean;
@@ -105,6 +108,7 @@ function ChatImageGrid({ images }: { images: ChatImage[] }) {
 /* === 单条消息（React.memo 隔离：props 全稳定时跳过重渲染）=== */
 interface ChatMessageItemProps {
   msg: ChatMessage;
+  sessionId: string | null;
   selectMode: boolean;
   isSelected: boolean;
   /** 是否为「正在流式的最后一条消息」（控制思维链默认展开） */
@@ -115,6 +119,7 @@ interface ChatMessageItemProps {
 
 const ChatMessageItem = memo(function ChatMessageItem({
   msg,
+  sessionId,
   selectMode,
   isSelected,
   streamingActive,
@@ -123,6 +128,14 @@ const ChatMessageItem = memo(function ChatMessageItem({
 }: ChatMessageItemProps) {
   const confirm = msg.confirmRequest;
   const isSelectable = selectMode && msg.role !== 'tool' && !confirm;
+  const navigate = useNavigate();
+
+  // v3.6.4：用户消息里的「文件块」单独抽出来做卡片，点开跳独立页看全文
+  const segments = useMemo(
+    () => (msg.role === 'user' && !confirm ? splitChatFileBlocks(msg.content) : []),
+    [msg.role, msg.content, confirm],
+  );
+  const hasFileBlocks = segments.some(seg => seg.type === 'file');
 
   // Markdown 渲染结果按 content 缓存：非流式消息的 content 不变 → 不重复解析
   const html = useMemo(
@@ -197,6 +210,27 @@ const ChatMessageItem = memo(function ChatMessageItem({
             <summary className="tool-json-fold-summary">查看工具返回详情</summary>
             <div className="message-content markdown-body" dangerouslySetInnerHTML={{ __html: html }} />
           </details>
+        ) : hasFileBlocks ? (
+          /* 文件卡片：气泡里只显示文件名与字数，点开跳独立页（避免长文把聊天撑爆） */
+          <div className="message-content chat-file-segments">
+            {segments.map((seg, i) => seg.type === 'file' ? (
+              <button
+                key={`f${i}`}
+                type="button"
+                className="chat-file-card"
+                onClick={() => navigate(`/chat-file/${sessionId ?? ''}/${msg.id}/${seg.index}`)}
+              >
+                <span className="chat-file-card-icon"><IconFile size={16} /></span>
+                <span className="chat-file-card-main">
+                  <span className="chat-file-card-name">{seg.block.name}</span>
+                  <span className="chat-file-card-meta">{formatCharCount(seg.block.body.length)} · 点击查看全文</span>
+                </span>
+                <IconChevronRight size={14} />
+              </button>
+            ) : (
+              <div key={`t${i}`} className="markdown-body" dangerouslySetInnerHTML={{ __html: renderMarkdown(seg.text) }} />
+            ))}
+          </div>
         ) : (msg.content || !msg.images || msg.images.length === 0) ? (
           <div className="message-content markdown-body" dangerouslySetInnerHTML={{ __html: html }} />
         ) : null}
@@ -231,6 +265,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
 
 export function ChatMessageList({
   messages,
+  sessionId,
   selectMode,
   selectedMsgIds,
   isLoading,
@@ -255,6 +290,7 @@ export function ChatMessageList({
           <ChatMessageItem
             key={msg.id}
             msg={msg}
+            sessionId={sessionId}
             selectMode={selectMode}
             isSelected={selectedMsgIds.has(msg.id)}
             streamingActive={isLoading && idx === messages.length - 1}

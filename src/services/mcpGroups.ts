@@ -13,7 +13,7 @@
  * - 配置存在 settings.ai.mcpGroups；undefined 表示「从未配置过」→ 用本文件的内置定义。
  */
 import type { McpGroupConfig } from '@/types';
-import { ENTRY_TOOLS, MEMO_TOOLS, PROMPT_TOOLS, SOUL_TOOLS, TODO_TOOLS } from './chatBridge';
+import { ENTRY_TOOLS, FILE_TOOLS, MEMO_TOOLS, PROMPT_TOOLS, SOUL_TOOLS, TODO_TOOLS } from './chatBridge';
 
 /** 出厂分组：与 v3.5.x 硬编码在 ChatInputArea 的 4 组保持一致，另加提示词组。
  *
@@ -62,6 +62,15 @@ export const DEFAULT_MCP_GROUPS: McpGroupConfig[] = [
     icon: '📋',
     desc: '列目录 / 读全文 / 新建或改写（改写需你确认）',
     tools: [...PROMPT_TOOLS],
+    builtin: true,
+    visible: true,
+  },
+  {
+    id: 'files',
+    label: '文件库',
+    icon: '📁',
+    desc: '列表 / 读取 / 写入（免确认） / 删除（需你确认）',
+    tools: [...FILE_TOOLS],
     builtin: true,
     visible: true,
   },
