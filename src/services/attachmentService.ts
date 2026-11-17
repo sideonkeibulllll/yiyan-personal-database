@@ -154,6 +154,155 @@ function pickImagesViaInput(multiple: boolean): Promise<SelectedImage[]> {
   });
 }
 
+// ==================== 选择文件（v3.6.3）====================
+
+/**
+ * 选中的文本文件（内容只拼进消息正文，不落盘、不进附件表）。
+ *
+ * 为什么不落盘：Chat 历史本来就是 messages 整段 JSON，文本直接进正文
+ * 可以跟着会话一起备份/导出，不需要第二套文件路径映射。
+ */
+export interface SelectedTextFile {
+  /** 原始文件名（拼进消息里给模型看） */
+  name: string;
+  /** 原始字节数（展示用） */
+  size: number;
+  /** 文件内容（已按上限截断） */
+  text: string;
+  /** 是否因为超长被截断 */
+  truncated: boolean;
+}
+
+/** 单文件读取上限（字符） */
+export const CHAT_FILE_MAX_CHARS = 100_000;
+/** 一次发送里所有文件合计上限（字符）——防止一口气把上下文撑爆 */
+export const CHAT_FILES_TOTAL_MAX_CHARS = 300_000;
+/** 超过这个字节数直接不读（绝大多数是二进制/日志，读了也是垃圾） */
+const CHAT_FILE_MAX_BYTES = 5 * 1024 * 1024;
+
+/** 允许按文本读取的扩展名（小写，不含点） */
+const TEXT_EXTENSIONS = [
+  'txt', 'md', 'markdown', 'csv', 'tsv', 'json', 'jsonl', 'log', 'yaml', 'yml',
+  'xml', 'html', 'htm', 'css', 'scss', 'less', 'ini', 'conf', 'toml', 'env',
+  'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'vue', 'py', 'java', 'kt', 'kts', 'c',
+  'h', 'cpp', 'hpp', 'cs', 'go', 'rs', 'rb', 'php', 'swift', 'sh', 'bat', 'ps1',
+  'sql', 'gradle', 'properties', 'srt', 'vtt',
+];
+
+/** 文件名扩展名（小写，不含点；没有扩展名返回空串） */
+function fileExtension(name: string): string {
+  const idx = name.lastIndexOf('.');
+  return idx >= 0 ? name.slice(idx + 1).toLowerCase() : '';
+}
+
+/** 是否是「按文本读」的文件（MIME 为 text/* 或扩展名白名单） */
+export function isTextLikeFile(file: File): boolean {
+  if (file.type.startsWith('text/')) return true;
+  if (file.type === 'application/json' || file.type === 'application/xml') return true;
+  return TEXT_EXTENSIONS.includes(fileExtension(file.name));
+}
+
+/**
+ * 弹出系统文件选择器（多选，不限类型）。
+ *
+ * 只负责拿 File 对象 —— 图片/文本分流由调用方做（ChatPage），
+ * 这样这里不用关心 UI 语义。
+ */
+export function pickChatFiles(): Promise<File[]> {
+  return new Promise(resolve => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.multiple = true;
+    input.style.display = 'none';
+    document.body.appendChild(input);
+
+    let resolved = false;
+    const cleanup = () => {
+      if (resolved) return;
+      resolved = true;
+      try { document.body.removeChild(input); } catch { /* ignore */ }
+    };
+
+    input.onchange = () => {
+      const files = input.files ? Array.from(input.files) : [];
+      cleanup();
+      resolve(files);
+    };
+
+    // 取消兜底（同 pickImagesViaInput：桌面端取消不一定触发 change）
+    const cancelTimeout = setTimeout(() => {
+      if (!resolved && (!input.files || input.files.length === 0)) {
+        cleanup();
+        resolve([]);
+      }
+    }, 10000);
+
+    window.addEventListener('focus', () => {
+      setTimeout(() => {
+        if (!resolved && (!input.files || input.files.length === 0)) {
+          clearTimeout(cancelTimeout);
+          cleanup();
+          resolve([]);
+        }
+      }, 300);
+    }, { once: true });
+
+    input.click();
+  });
+}
+
+/** 解码：先按 UTF-8 严格解，失败退 GBK（国内 txt 很常见），都不行返回 null */
+function decodeTextBuffer(buffer: ArrayBuffer): string | null {
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(buffer);
+  } catch {
+    try {
+      return new TextDecoder('gbk').decode(buffer);
+    } catch {
+      return null;
+    }
+  }
+}
+
+/** 二进制嗅探：前 8KB 里出现 NUL 基本可以判定不是文本 */
+function looksBinary(bytes: Uint8Array): boolean {
+  const limit = Math.min(bytes.length, 8192);
+  for (let i = 0; i < limit; i++) {
+    if (bytes[i] === 0) return true;
+  }
+  return false;
+}
+
+/**
+ * 把 File 读成文本（带上限与编码兜底）。
+ *
+ * @returns null 表示不是可读文本（二进制/超大/解码失败）
+ */
+export async function readTextFile(
+  file: File,
+  maxChars: number = CHAT_FILE_MAX_CHARS,
+): Promise<SelectedTextFile | null> {
+  if (file.size <= 0 || file.size > CHAT_FILE_MAX_BYTES) return null;
+  try {
+    const buffer = await file.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    if (looksBinary(bytes)) return null;
+    const decoded = decodeTextBuffer(buffer);
+    if (decoded === null) return null;
+    const text = decoded.trim();
+    if (text.length === 0) return null;
+    const truncated = text.length > maxChars;
+    return {
+      name: file.name,
+      size: file.size,
+      text: truncated ? text.slice(0, maxChars) : text,
+      truncated,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** File 转 base64 */
 function fileToBase64(file: File): Promise<SelectedImage> {
   return new Promise((resolve, reject) => {

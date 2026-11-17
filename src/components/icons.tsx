@@ -193,3 +193,8 @@ export const IconImage = createIcon('IconImage', 16, 1.5, (
 export const IconCamera = createIcon('IconCamera', 16, 1.5, (
   <><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" /><circle cx="12" cy="13" r="4" /></>
 ));
+
+/** 文件（v3.6.3：chat 输入区「文件」按钮与文件胶囊） */
+export const IconFile = createIcon('IconFile', 16, 1.5, (
+  <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="8" y1="13" x2="16" y2="13" /><line x1="8" y1="17" x2="13" y2="17" /></>
+));

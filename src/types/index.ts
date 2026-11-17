@@ -465,6 +465,12 @@ export interface AIConfig {
   /** 各付费提供商的独立配置（v2.5.0 新增，互不影响） */
   providers?: AIProvidersConfig;
   /**
+   * 手动指定「支持看图」的模型（v3.6.3）。
+   * 键为 `providerId::model`（见 utils/modelCapability 的 visionKey），
+   * 优先于模型名启发式 —— 用来救那些名字看不出来但确实能吃图的第三方模型。
+   */
+  visionModels?: string[];
+  /**
    * 提示词库（v3.6.0）：手工维护的可复用提示词。
    * 存在 settings 里 → 随本地备份 zip 与设备互传走（云备份不含设置，这是既有边界）。
    */
@@ -640,11 +646,21 @@ export function migrateAIConfig(config: AIConfig): AIConfig {
     const prev = existing?.[id];
     // 老配置：只把旧扁平字段灌入当前 provider，其它用 preset 默认值
     const isLegacySlot = !prev && id === providerId;
+    const model = prev?.model ?? (isLegacySlot && config.model ? config.model : preset.defaultModel);
+    const models = prev?.models?.length ? prev.models : [...preset.models];
+    // v3.6.3：模型多的提供商不再默认「全部勾选」（TRAE 16 个 / OpenRouter 8 个，
+    // 全勾会把 chat 页模型下拉撑爆）。首次迁移时只勾当前模型，其余由用户按需勾选。
+    const collapseEnabled = id === 'trae' || id === 'openrouter';
+    // 当前模型不在候选表里时（老配置手填过），勾第一个候选而不是勾一个不存在的名字
+    const collapsed = models.includes(model) ? model : models[0];
+    const enabledModels = prev?.enabledModels
+      ?? (collapseEnabled && collapsed !== undefined ? [collapsed] : undefined);
     providers[id] = {
       apiKey: prev?.apiKey ?? (isLegacySlot ? (config.apiKey || '') : ''),
       baseURL: prev?.baseURL ?? (isLegacySlot && config.baseURL ? config.baseURL : preset.baseURL),
-      model: prev?.model ?? (isLegacySlot && config.model ? config.model : preset.defaultModel),
-      models: prev?.models?.length ? prev.models : [...preset.models],
+      model,
+      models,
+      ...(enabledModels !== undefined ? { enabledModels } : {}),
     };
   }
 

@@ -11,11 +11,13 @@ import { listMemories } from '@/services/aiMemory';
 import { countActiveSoulFacts } from '@/services/soulFacts';
 import type { AIProviderId, ProviderEntry } from '@/types';
 import { AI_PROVIDER_ORDER, PROVIDER_PRESETS, getProviderPreset, getEnabledModels } from '@/types';
+import { visionKey } from '@/utils/modelCapability';
 import {
   parseCredentials,
   fetchAllCredits,
   claimAllCheckin,
   type TraeAccountCredits,
+  type TraeCheckinResult,
 } from '@/services/aiProviders/trae';
 
 interface AiPanelProps {
@@ -44,6 +46,8 @@ export function AiPanel({ markDirty }: AiPanelProps) {
   const [credits, setCredits] = useState<TraeAccountCredits[] | null>(null);
   const [creditsBusy, setCreditsBusy] = useState(false);
   const [creditsMsg, setCreditsMsg] = useState('');
+  /** 上一次「一键签到」的逐账号结果（v3.6.3：不再把失败说成「今日已签」） */
+  const [checkinResults, setCheckinResults] = useState<TraeCheckinResult[] | null>(null);
 
   // v2.5.1: openai 已移除，兜底为 deepseek
   const providerId: AIProviderId = settings.ai.provider || 'deepseek';
@@ -92,21 +96,43 @@ export function AiPanel({ markDirty }: AiPanelProps) {
   const switchProvider = (id: AIProviderId) => {
     if (id === providerId) return;
     const p = PROVIDER_PRESETS[id];
-    const target = settings.ai.providers?.[id] ?? {
+    const saved = settings.ai.providers?.[id];
+    // v3.6.3：模型多的提供商（TRAE / OpenRouter）首次进入只勾当前模型，
+    // 不再「全选」把 chat 页下拉撑爆；其余提供商维持全量。
+    const collapse = id === 'trae' || id === 'openrouter';
+    const base: ProviderEntry = saved ?? {
       apiKey: '',
       baseURL: p.baseURL,
       model: p.defaultModel,
       models: [...p.models],
     };
+    const needDefault = collapse && !(base.enabledModels?.length);
+    const collapsed = base.models.includes(base.model) ? base.model : base.models[0];
+    const target: ProviderEntry = needDefault && collapsed !== undefined
+      ? { ...base, enabledModels: [collapsed] }
+      : base;
     updateAIConfig({
       provider: id,
-      providers: settings.ai.providers,
+      // settings 一定经过 migrateAIConfig 归一化，providers 四项齐全
+      providers: { ...settings.ai.providers!, [id]: target },
       apiKey: target.apiKey,
       baseURL: target.baseURL,
       model: target.model,
       isDeepSeek: id === 'deepseek',
     });
     markDirty('ai.provider');
+  };
+
+  /** v3.6.3：当前模型是否被手动指定为「支持看图」 */
+  const visionOverrideKey = visionKey(providerId, entry.model);
+  const visionOverrideOn = (settings.ai.visionModels ?? []).includes(visionOverrideKey);
+  const toggleVisionOverride = () => {
+    const current = settings.ai.visionModels ?? [];
+    const next = visionOverrideOn
+      ? current.filter(k => k !== visionOverrideKey)
+      : [...current, visionOverrideKey];
+    updateAIConfig({ visionModels: next });
+    markDirty('ai.visionModels');
   };
 
   /* === TRAE：凭据解析 + 积分/签到 === */
@@ -144,10 +170,25 @@ export function AiPanel({ markDirty }: AiPanelProps) {
     }
     setCreditsBusy(true);
     setCreditsMsg('');
+    setCheckinResults(null);
     try {
       const results = await claimAllCheckin(entry.apiKey);
-      const gained = results.reduce((sum, item) => sum + item.credits, 0);
-      setCreditsMsg(gained > 0 ? `签到完成，共获得 ${gained} 积分` : '所有账号今日均已签到');
+      setCheckinResults(results);
+      // 逐账号统计：成功 / 今日已签 / 失败，三类分开说，不再一律显示「均已签到」
+      const success = results.filter(item => item.ok && !item.skipped);
+      const skipped = results.filter(item => item.skipped);
+      const failed = results.filter(item => !item.ok);
+      const gained = success.reduce((sum, item) => sum + item.credits, 0);
+
+      if (failed.length > 0) {
+        setCreditsMsg(
+          `签到结束：成功 ${success.length} 个、已签 ${skipped.length} 个、失败 ${failed.length} 个（失败原因见下方逐条）`
+        );
+      } else if (success.length > 0) {
+        setCreditsMsg(`签到成功 ${success.length} 个账号，共获得 ${gained} 积分`);
+      } else {
+        setCreditsMsg(`${skipped.length} 个账号今日均已签到`);
+      }
       setCredits(await fetchAllCredits(entry.apiKey));
     } catch (error) {
       setCreditsMsg(error instanceof Error ? error.message : '签到失败');
@@ -194,7 +235,7 @@ export function AiPanel({ markDirty }: AiPanelProps) {
             className="form-input glass"
             rows={4}
             value={entry.apiKey}
-            onChange={e => { patchProvider({ apiKey: e.target.value }); markDirty('ai.providers'); setCredits(null); setCreditsMsg(''); }}
+            onChange={e => { patchProvider({ apiKey: e.target.value }); markDirty('ai.providers'); setCredits(null); setCreditsMsg(''); setCheckinResults(null); }}
             placeholder={preset.keyPlaceholder}
             spellCheck={false}
           />
@@ -265,6 +306,19 @@ export function AiPanel({ markDirty }: AiPanelProps) {
               </div>
             ))}
 
+            {/* 上一次签到的逐账号结果（失败原因直接摊开，方便判断是限流还是凭据问题） */}
+            {checkinResults?.map(item => (
+              <div key={`checkin-${item.uid}`} className="model-manage-row">
+                <span className="model-manage-name">
+                  {item.ok
+                    ? (item.skipped
+                      ? `${item.label}｜今日已签到`
+                      : `${item.label}｜签到成功 +${item.credits} 积分`)
+                    : `${item.label}｜签到失败：${item.message}`}
+                </span>
+              </div>
+            ))}
+
             <div className="model-manage-row">
               <span className="model-manage-name">
                 {credits === null ? '每日签到可得积分' : '对所有账号执行签到'}
@@ -321,11 +375,49 @@ export function AiPanel({ markDirty }: AiPanelProps) {
         </span>
       </div>
 
+      {/* v3.6.3：图片能力手动覆盖（模型名看不出来但确实能吃图时用） */}
+      <div className="form-group">
+        <label className="form-checkbox">
+          <input
+            type="checkbox"
+            checked={visionOverrideOn}
+            onChange={toggleVisionOverride}
+          />
+          <span>该模型支持看图</span>
+        </label>
+        <span className="form-hint">
+          只对「{entry.model}」生效。自动判断漏掉的第三方模型（比如中转站的 v4.1-flash）勾上后 chat 里图片入口就会亮起。
+        </span>
+      </div>
+
       {/* 勾选要启用的模型（模型多的提供商才需要，避免 chat 页下拉过长） */}
       {(providerId === 'trae' || providerId === 'openrouter') && (
         <>
           <div className="settings-subsection-title">启用模型</div>
           <div className="form-group">
+            <div className="model-manage-row">
+              <span className="model-manage-name">
+                已勾选 {selectableModels.length} / {entry.models.length}
+              </span>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  type="button"
+                  className="model-manage-add-btn"
+                  onClick={() => { patchProvider({ enabledModels: [...entry.models] }); markDirty('ai.providers'); }}
+                  title="全部勾选（chat 页下拉会变长）"
+                >
+                  全选
+                </button>
+                <button
+                  type="button"
+                  className="model-manage-add-btn"
+                  onClick={() => { patchProvider({ enabledModels: [entry.model] }); markDirty('ai.providers'); }}
+                  title="只保留当前使用的模型"
+                >
+                  仅当前
+                </button>
+              </div>
+            </div>
             {entry.models.map(name => {
               const checked = selectableModels.includes(name);
               return (

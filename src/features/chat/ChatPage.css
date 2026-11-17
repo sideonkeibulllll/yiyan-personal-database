@@ -1978,16 +1978,75 @@
 }
 
 /* 待发送图片预览条 */
+/* === v3.6.3: 待发送文件胶囊 ===
+ * ⚠️ .chat-input-area 是 row flex（工具栏与输入框左右并列），
+ * 胶囊行必须挂在 .input-toolbar 内并用 flex-basis:100% 独占一行，
+ * 否则会被挤成输入框左边的一小条。
+ */
+.chat-pending-files {
+  flex-basis: 100%;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  padding-top: 2px;
+}
+
+.chat-pending-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 3px 6px 3px 8px;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--color-border-primary);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+}
+
+.chat-pending-file .pending-file-name {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-pending-file .pending-file-meta {
+  color: var(--color-text-tertiary);
+  flex: 0 0 auto;
+}
+
+.pending-file-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+}
+
+.pending-file-remove:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--color-text-primary);
+}
+
+/* ⚠️ 同 .chat-pending-files：必须挂在 .input-toolbar 内并独占一行 */
 .chat-pending-images {
+  flex-basis: 100%;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-2) 0;
+  padding-top: var(--space-2);
   overflow-x: auto;
   scrollbar-width: none;
-}
-
-.chat-pending-images::-webkit-scrollbar {
+}.chat-pending-images::-webkit-scrollbar {
   display: none;
 }
 

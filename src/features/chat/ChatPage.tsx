@@ -49,13 +49,24 @@ import {
   saveChatSession as saveSessionDb,
   deleteChatSession as deleteSessionDb,
 } from '@/services/chatSessionService';
-import { pickImages, takePhoto, saveChatImage, readChatImageForModel, deleteChatImageDir } from '@/services/attachmentService';
+import {
+  pickImages,
+  takePhoto,
+  pickChatFiles,
+  isTextLikeFile,
+  readTextFile,
+  CHAT_FILE_MAX_CHARS,
+  CHAT_FILES_TOTAL_MAX_CHARS,
+  saveChatImage,
+  readChatImageForModel,
+  deleteChatImageDir,
+} from '@/services/attachmentService';
 import { supportsVision, VISION_UNSUPPORTED_HINT } from '@/utils/modelCapability';
 import { Capacitor } from '@capacitor/core';
 import { isElectron } from '@/services/electronAdapter';
 import { loadSessionsSync, createId, generateTitle, buildModelOptions, parseModelValue, truncateApiMessagesSafely, loadChatDrafts, saveChatDraft, deleteChatDraft, buildUserMessageContent } from './chatUtils';
 import type { ApiMessage, ApiContentPart } from './chatUtils';
-import type { ChatMessage, ChatSession, ChatImage, PendingChatImage, SearchSelectedResult, ThinkingEffort } from './chatTypes';
+import type { ChatMessage, ChatSession, ChatImage, PendingChatImage, PendingChatFile, SearchSelectedResult, ThinkingEffort } from './chatTypes';
 import { streamChatCompletion } from './chatStream';
 import { ChatSidebar } from './components/ChatSidebar';
 import { ChatHeader } from './components/ChatHeader';
@@ -72,6 +83,8 @@ export function ChatPage() {
   const [input, setInput] = useState('');
   /** v3.5.3: 待发送图片（只在内存里，发送时才落盘 —— 选完不发的不会留垃圾文件） */
   const [pendingImages, setPendingImages] = useState<PendingChatImage[]>([]);
+  /** v3.6.3: 待发送文本文件（内容发送时拼进正文，不落盘） */
+  const [pendingFiles, setPendingFiles] = useState<PendingChatFile[]>([]);
   /** v3.5.0: 输入撤销栈版本号（栈本体在 refs，用它触发按钮可用态刷新） */
   const [historyVersion, setHistoryVersion] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
@@ -274,15 +287,16 @@ export function ChatPage() {
   // v2.5.1: 模型选项按 provider 分组（跨提供商可选）
   const modelOptions = useMemo(() => buildModelOptions(settings.ai), [settings.ai]);
 
-  /* === 图片输入（v3.5.3）===
-   * 只对「确认支持看图」的模型放行：不支持时入口置灰、发送前再拦一道，
-   * 避免用户拍完一张才收到 400。
+  /* === 图片输入（v3.5.3，v3.6.3 放宽）===
+   * 能力判断只作「提示」：判否时不再一刀切拦死，而是确认后允许发送 ——
+   * 模型名启发式难免漏判（第三方中转的 v4.1-flash 就是典型），
+   * 用户手动勾过「该模型支持看图」的优先放行（settings.ai.visionModels）。
    * 注意：GLM 免费池（useGlm）一律判否 —— 池内是文本模型，
    * 且此时 effectiveProviderId 仍指向原提供商，不拦会误判成支持。
    */
   const visionSupported = useMemo(
-    () => !useGlm && supportsVision(effectiveProviderId, effectiveModel),
-    [useGlm, effectiveProviderId, effectiveModel]
+    () => !useGlm && supportsVision(effectiveProviderId, effectiveModel, settings.ai.visionModels),
+    [useGlm, effectiveProviderId, effectiveModel, settings.ai.visionModels]
   );
 
   /** 是否展示「拍照」：仅 Android 有原生相机（Web/Electron 走文件选择器） */
@@ -345,12 +359,15 @@ export function ChatPage() {
     setPendingImages(prev => [...prev, ...withPreview].slice(0, 9));
   }, [makePreview]);
 
+  /** 判否时的软拦截：确认后照发（启发式可能漏判，别把能用的人挡死） */
+  const confirmVisionFallback = useCallback((): boolean => {
+    if (visionSupported) return true;
+    return window.confirm(`${VISION_UNSUPPORTED_HINT}\n\n仍然继续吗？`);
+  }, [visionSupported]);
+
   /** 从相册 / 文件选择器选图 */
   const handlePickImages = useCallback(async () => {
-    if (!visionSupported) {
-      alert(VISION_UNSUPPORTED_HINT);
-      return;
-    }
+    if (!confirmVisionFallback()) return;
     try {
       const imgs = await pickImages(9);
       await appendPendingImages(imgs);
@@ -358,14 +375,11 @@ export function ChatPage() {
       console.error('[ChatPage] 选图失败:', err);
       alert('选图失败，请重试');
     }
-  }, [visionSupported, appendPendingImages]);
+  }, [confirmVisionFallback, appendPendingImages]);
 
   /** 拍照（仅 Android） */
   const handleTakePhoto = useCallback(async () => {
-    if (!visionSupported) {
-      alert(VISION_UNSUPPORTED_HINT);
-      return;
-    }
+    if (!confirmVisionFallback()) return;
     try {
       const img = await takePhoto();
       if (img) await appendPendingImages([img]);
@@ -373,24 +387,71 @@ export function ChatPage() {
       console.error('[ChatPage] 拍照失败:', err);
       alert('拍照失败，请重试');
     }
-  }, [visionSupported, appendPendingImages]);
+  }, [confirmVisionFallback, appendPendingImages]);
 
   /** 粘贴图片（桌面端 Ctrl+V） */
   const handlePasteImages = useCallback(async (files: File[]) => {
-    if (!visionSupported) {
-      alert(VISION_UNSUPPORTED_HINT);
-      return;
-    }
+    if (!confirmVisionFallback()) return;
     try {
       const items = await Promise.all(files.map(f => fileToBase64(f)));
       await appendPendingImages(items.filter(it => it.base64));
     } catch (err) {
       console.error('[ChatPage] 粘贴图片失败:', err);
     }
-  }, [visionSupported, fileToBase64, appendPendingImages]);
+  }, [confirmVisionFallback, fileToBase64, appendPendingImages]);
 
   const handleRemovePendingImage = useCallback((id: string) => {
     setPendingImages(prev => prev.filter(p => p.id !== id));
+  }, []);
+
+  /* === v3.6.3: 选择文件（图片走图片管线，文本读成正文） === */
+  const handlePickFiles = useCallback(async () => {
+    try {
+      const files = await pickChatFiles();
+      if (files.length === 0) return;
+
+      const images: { base64: string; mimeType: string }[] = [];
+      const texts: PendingChatFile[] = [];
+      const skipped: string[] = [];
+      // 已有文件占用的额度也要算进去，避免连选两次突破总量上限
+      let usedChars = pendingFiles.reduce((sum, f) => sum + f.text.length, 0);
+
+      for (const file of files) {
+        if (file.type.startsWith('image/')) {
+          const img = await fileToBase64(file);
+          if (img.base64) images.push(img);
+          continue;
+        }
+        if (!isTextLikeFile(file)) {
+          skipped.push(`${file.name}（暂不支持这种格式）`);
+          continue;
+        }
+        const parsed = await readTextFile(file, CHAT_FILE_MAX_CHARS);
+        if (parsed === null) {
+          skipped.push(`${file.name}（读不出文本，可能不是纯文本）`);
+          continue;
+        }
+        if (usedChars + parsed.text.length > CHAT_FILES_TOTAL_MAX_CHARS) {
+          skipped.push(`${file.name}（超过合计 ${Math.round(CHAT_FILES_TOTAL_MAX_CHARS / 10000)} 万字上限）`);
+          continue;
+        }
+        usedChars += parsed.text.length;
+        texts.push({ id: createId(), ...parsed });
+      }
+
+      if (images.length > 0) await appendPendingImages(images);
+      if (texts.length > 0) setPendingFiles(prev => [...prev, ...texts]);
+      if (skipped.length > 0) {
+        alert(`以下文件没有读入：\n${skipped.join('\n')}\n\n提示：PDF / Word / Excel 需要在原应用里先转成文本。`);
+      }
+    } catch (err) {
+      console.error('[ChatPage] 选择文件失败:', err);
+      alert('读取文件失败，请重试');
+    }
+  }, [appendPendingImages, fileToBase64, pendingFiles]);
+
+  const handleRemovePendingFile = useCallback((id: string) => {
+    setPendingFiles(prev => prev.filter(p => p.id !== id));
   }, []);
 
   // 首次挂载：从数据库异步加载对话历史（覆盖 localStorage 同步初始值）；
@@ -861,20 +922,27 @@ export function ChatPage() {
   const handleSend = useCallback(async () => {
     const text = input.trim();
     const hasImages = pendingImages.length > 0;
+    const hasFiles = pendingFiles.length > 0;
     // v3.6.0: 挂载的提示词正文在发送时才展开（输入框里只有胶囊）
     const promptText = composePromptText(attachedPrompts);
-    if ((!text && !hasImages && !promptText) || isLoading) return;
+    if ((!text && !hasImages && !hasFiles && !promptText) || isLoading) return;
 
     if (!effectiveAPIKey) {
       alert('请先在设置页面配置 AI API Key');
       return;
     }
 
-    // v3.5.3: 不支持看图的模型，发图前就拦住（避免白拍一张再收 400）
+    // v3.5.3 / v3.6.3: 不支持看图的模型发图前软拦一道（判断可能漏判，允许确认后继续）
     if (hasImages && !visionSupported) {
-      alert(VISION_UNSUPPORTED_HINT);
-      return;
+      if (!window.confirm(`${VISION_UNSUPPORTED_HINT}\n\n仍然发送这 ${pendingImages.length} 张图片吗？`)) {
+        return;
+      }
     }
+
+    // v3.6.3: 待发送文本文件拼成正文块（带文件名与结束标记，模型能分清哪段是文件）
+    const fileBlock = pendingFiles
+      .map(f => `【文件：${f.name}${f.truncated ? '（内容过长已截断）' : ''}】\n${f.text}\n【文件结束】`)
+      .join('\n\n');
 
     // v2.6.3: 记录本次是否有预备条目被消费（发送后据此决定是否清除，避免误清）
     const preparedIds: string[] = (window as any)['__yiyan_prepared_entry_ids__'] || [];
@@ -888,7 +956,7 @@ export function ChatPage() {
     let session = sessions.find(s => s.id === sessionId);
     let baseSessions = sessions;
 
-    const titleSeed = text || attachedPrompts.map(p => p.title).join('+') || '图片消息';
+    const titleSeed = text || pendingFiles[0]?.name || attachedPrompts.map(p => p.title).join('+') || '图片消息';
 
     if (!session) {
       session = {
@@ -937,12 +1005,14 @@ export function ChatPage() {
 
     // 添加用户消息
     // v3.6.0: 挂载的提示词按顺序拼在用户消息最前面（可见、可回看、重发不丢）
+    // v3.6.3: 文本文件块排在提示词之后、正文之前
+    const bodyText = [fileBlock, text].filter(part => part.length > 0).join('\n\n');
     const userMsg: ChatMessage = {
       id: createId(),
       role: 'user',
       content: promptText
-        ? (text ? `${promptText}\n\n${text}` : promptText)
-        : text,
+        ? (bodyText ? `${promptText}\n\n${bodyText}` : promptText)
+        : bodyText,
       timestamp: Date.now(),
       ...(sentImages.length > 0 ? { images: sentImages } : {}),
     };
@@ -961,6 +1031,8 @@ export function ChatPage() {
     setInput('');
     // v3.6.0: 胶囊随本次发送清空（正文已经进消息了）
     setAttachedPromptIds([]);
+    // v3.6.3: 文件内容已经拼进消息，清空胶囊
+    setPendingFiles([]);
 
     // AI 占位消息
     const aiMsgId = createId();
@@ -1485,7 +1557,7 @@ export function ChatPage() {
       // 注意：MCP 工具激活改为对话级持久化（session.mcpEnabledTools），
       // 不再在每次发送后清空，让用户在一次对话内可以连续多次调用工具。
     }
-  }, [input, isLoading, settings, currentSessionId, sessions, persistSessions, updateSessionMessages, thinkingEnabled, thinkingEffort, mcpEnabled, mcpActiveTools, currentModel, pickerSelectedIds, pendingImages, visionSupported]);
+  }, [input, isLoading, settings, currentSessionId, sessions, persistSessions, updateSessionMessages, thinkingEnabled, thinkingEffort, mcpEnabled, mcpActiveTools, currentModel, pickerSelectedIds, pendingImages, pendingFiles, visionSupported]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     // 手机端/桌面端统一：裸 Enter 换行（不拦截），仅 Ctrl/Cmd+Enter 发送；
@@ -1805,6 +1877,9 @@ export function ChatPage() {
           onTakePhoto={handleTakePhoto}
           onRemovePendingImage={handleRemovePendingImage}
           onPasteImages={handlePasteImages}
+          pendingFiles={pendingFiles}
+          onPickFiles={handlePickFiles}
+          onRemovePendingFile={handleRemovePendingFile}
         />
       </main>
 

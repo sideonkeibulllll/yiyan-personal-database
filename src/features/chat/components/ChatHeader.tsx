@@ -61,7 +61,12 @@ export const ChatHeader = memo(function ChatHeader({
   onExportSelected,
 }: ChatHeaderProps) {
   // v2.5.1: currentSessionModel 可能是复合值 `provider::model`，直接用 value 精确匹配
-  const currentModelLabel = modelOptions.find(m => m.value === currentSessionModel)?.label || currentModel;
+  // v3.6.3: 勾选收敛后老会话可能钉着一个已取消勾选的模型 —— 单独补一条，别让它凭空消失
+  const missingCurrent = !!currentSessionModel
+    && currentSessionModel !== ''
+    && !modelOptions.some(m => m.value === currentSessionModel);
+  const currentModelLabel = modelOptions.find(m => m.value === currentSessionModel)?.label
+    || (missingCurrent ? currentSessionModel.split('::').pop()! : currentModel);
 
   return (
     <header className="chat-header">
@@ -81,6 +86,15 @@ export const ChatHeader = memo(function ChatHeader({
         </button>
         {modelPickerOpen && (
           <div className="model-picker-dropdown">
+            {missingCurrent && (
+              <div>
+                <div className="model-picker-group">当前会话</div>
+                <div className="model-option active" onClick={() => onSelectModel(currentSessionModel)}>
+                  {currentSessionModel.split('::').pop()}
+                  <span className="check">✓</span>
+                </div>
+              </div>
+            )}
             {modelOptions.map((opt, i) => {
               // v2.5.1: provider 分组标题（仅在新分组的第一项前渲染）
               const showGroup = !!opt.group && opt.group !== modelOptions[i - 1]?.group;

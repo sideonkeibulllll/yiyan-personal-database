@@ -29,6 +29,22 @@ export interface PendingChatImage {
   preview: string;
 }
 
+/**
+ * 尚未发送的文本文件（v3.6.3）
+ *
+ * 内容在发送时拼进 user 消息正文（`【文件：name】…【文件结束】`），
+ * 不落盘、不新增字段 —— 历史/备份/导出天然跟着 messages 走。
+ */
+export interface PendingChatFile {
+  id: string;
+  name: string;
+  /** 原始字节数（展示用） */
+  size: number;
+  text: string;
+  /** 读取时是否因超长被截断 */
+  truncated: boolean;
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'tool';

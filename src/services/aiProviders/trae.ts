@@ -26,6 +26,8 @@
 
 // ── 端点与客户端常量 ──
 
+import { Capacitor } from '@capacitor/core'
+
 const TRAE_AGENT_HOST = 'https://trae-api-cn.mchost.guru'
 const TRAE_OAUTH_HOST = 'https://api.trae.com.cn'
 const TRAE_CHAT_PATH = '/api/agent/v3/llm_utils_chat'
@@ -728,13 +730,29 @@ export interface TraeCreditsInfo {
 
 /** 用简化头访问 Ug（签到/积分）端点——实测这三个接口都接受。 */
 function ugHeaders(credential: TraeCredential): Record<string, string> {
-  return {
+  const minimal: Record<string, string> = {
     'Content-Type': 'application/json',
     Accept: 'application/json',
     'User-Agent': TRAE_USER_AGENT,
     Authorization: `Cloud-IDE-JWT ${credential.access_token}`,
     'X-User-Region': 'CN',
     'X-Device-Id': credential.device_id,
+  }
+  // Web / Electron：受 CORS 白名单限制，只能带精简头（多了会 Failed to fetch）。
+  // 原生端走 CapacitorHttp（无预检），补上官方客户端同款头 —— claim 比 status 校验更严
+  // （设备指纹 / machine_id 绑定），缺头正是「积分能查、签到没反应」的常见原因。
+  if (Capacitor.getPlatform() === 'web') return minimal
+  return {
+    ...minimal,
+    'X-Cloudide-Token': credential.access_token,
+    'X-Uid': credential.uid,
+    'X-App-Id': TRAE_APP_ID,
+    'X-Machine-Id': credential.machine_id,
+    'X-Device-Type': 'macos',
+    'X-Os-Version': TRAE_OS_VERSION,
+    'X-Ide-Version': TRAE_IDE_VERSION,
+    'X-Ide-Version-Code': TRAE_IDE_VERSION_CODE,
+    'X-Request-Id': `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
   }
 }
 
@@ -770,6 +788,52 @@ async function ugPost(
   }
 }
 
+/** 上游响应里的业务码（缺省视为 0＝成功）。 */
+function readCode(body: Record<string, unknown>): number {
+  const raw = body.code ?? body.err_code ?? body.errno
+  const code = typeof raw === 'number' ? raw : Number(raw)
+  return Number.isFinite(code) ? code : 0
+}
+
+/** 上游响应里的提示语（不同接口字段名不一致）。 */
+function readMessage(body: Record<string, unknown>): string {
+  for (const key of ['message', 'msg', 'err_msg', 'error']) {
+    const raw = body[key]
+    if (typeof raw === 'string' && raw.trim().length > 0) return raw.trim()
+  }
+  return ''
+}
+
+/** 已知业务码的人话解释（9074 是早高峰限流，实测有效）。 */
+const TRAE_CODE_HINTS: Record<number, string> = {
+  9074: '当前参与用户太多，请晚点再试',
+}
+
+/** 拼一条可读的错误文案：上游 message + 已知解释 + code。 */
+function describeCode(code: number, message: string): string {
+  const hint = TRAE_CODE_HINTS[code] ?? ''
+  const parts = [message, hint].filter(text => text.length > 0)
+  return parts.length > 0 ? `${parts.join('；')}（code ${code}）` : `code ${code}`
+}
+
+/**
+ * 从响应里抠数值：顶层与 `data` 各找一遍，字段名按优先级尝试。
+ * 签到接口的「本次获得」字段在不同版本叫 credits_gained / gained_credits /
+ * reward / work_credits —— v3.6.2 只读了 credits，所以永远显示 0 积分。
+ */
+function readNumber(body: Record<string, unknown>, keys: string[]): number {
+  const data = (body.data as Record<string, unknown> | undefined) ?? {}
+  for (const source of [body, data]) {
+    for (const key of keys) {
+      const raw = source[key]
+      if (raw === undefined || raw === null) continue
+      const num = typeof raw === 'number' ? raw : Number(raw)
+      if (Number.isFinite(num)) return num
+    }
+  }
+  return 0
+}
+
 /** 读取积分余额与今日签到状态。 */
 export async function fetchCreditsInfo(
   credential: TraeCredential,
@@ -780,9 +844,16 @@ export async function fetchCreditsInfo(
   const totalBalance = typeof totalRaw === 'number' ? totalRaw : Number(totalRaw) || 0
 
   const statusBody = await ugPost(credential, TRAE_CHECKIN_STATUS_PATH, {}, fetchFn)
-  const checkedIn = statusBody.checked_in === true || statusBody.did_checked_in === true
-  const creditsRaw = statusBody.credits ?? 0
-  const dailyCredits = typeof creditsRaw === 'number' ? creditsRaw : Number(creditsRaw) || 0
+  const statusCode = readCode(statusBody)
+  if (statusCode !== 0) {
+    throw new Error(`签到状态查询失败：${describeCode(statusCode, readMessage(statusBody))}`)
+  }
+  const statusData = (statusBody.data as Record<string, unknown> | undefined) ?? {}
+  const checkedIn = statusBody.checked_in === true
+    || statusBody.did_checked_in === true
+    || statusData.checked_in === true
+    || statusData.did_checked_in === true
+  const dailyCredits = readNumber(statusBody, ['credits', 'daily_credits', 'checkin_credits'])
 
   return {
     totalBalance,
@@ -792,16 +863,39 @@ export async function fetchCreditsInfo(
   }
 }
 
-/** 领取今日签到积分，返回本次领取数额（0 表示今日已领过）。 */
+/** 单次签到结果。 */
+export interface TraeClaimResult {
+  /** 上游业务码为 0 才算成功 */
+  ok: boolean
+  code: number
+  /** 本次获得的积分（已签到/失败时为 0） */
+  credits: number
+  /** 成功时的上游提示，失败时的可读原因 */
+  message: string
+}
+
+/** 领取今日签到积分。 */
 export async function claimCheckin(
   credential: TraeCredential,
   fetchFn: typeof fetch = fetch,
-): Promise<{ ok: boolean; credits: number; message: string }> {
+): Promise<TraeClaimResult> {
   const body = await ugPost(credential, TRAE_CHECKIN_CLAIM_PATH, {}, fetchFn)
-  const creditsRaw = body.credits ?? body.extra_credits ?? 0
-  const credits = typeof creditsRaw === 'number' ? creditsRaw : Number(creditsRaw) || 0
-  const message = typeof body.message === 'string' ? body.message : ''
-  return { ok: body.code === 0 || body.code === undefined, credits, message }
+  const code = readCode(body)
+  const credits = readNumber(body, [
+    'credits_gained',
+    'gained_credits',
+    'reward',
+    'work_credits',
+    'credits',
+    'extra_credits',
+  ])
+  const message = readMessage(body)
+  return {
+    ok: code === 0,
+    code,
+    credits: code === 0 ? credits : 0,
+    message: code === 0 ? message : describeCode(code, message),
+  }
 }
 
 /** 单个账号的积分视图（多账号批量查询用）。 */
@@ -854,13 +948,19 @@ export async function fetchAllCredits(
 export interface TraeCheckinResult {
   uid: string
   label: string
+  /** 今日原本就已签到（没发起领取） */
+  skipped: boolean
+  /** 本次领取是否成功（skipped 也算 ok） */
+  ok: boolean
   credits: number
   message: string
 }
 
 /**
  * 一键签到所有账号（顺序执行，避免并发触发风控）。
- * 已签到的账号会返回 credits = 0 与上游的提示语。
+ *
+ * 先查状态再领：已签到的账号直接跳过，省一次 claim（高峰期限流很敏感）。
+ * 每个账号都会带独立的 ok / message —— UI 据此逐条显示，不再把失败说成「今日已签」。
  */
 export async function claimAllCheckin(
   raw: string,
@@ -871,12 +971,26 @@ export async function claimAllCheckin(
   for (const credential of list) {
     const label = accountLabel(credential)
     try {
+      const info = await fetchCreditsInfo(credential, fetchFn)
+      if (info.checkedIn) {
+        out.push({ uid: credential.uid, label, skipped: true, ok: true, credits: 0, message: '今日已签到' })
+        continue
+      }
       const result = await claimCheckin(credential, fetchFn)
-      out.push({ uid: credential.uid, label, credits: result.credits, message: result.message })
+      out.push({
+        uid: credential.uid,
+        label,
+        skipped: false,
+        ok: result.ok,
+        credits: result.credits,
+        message: result.message,
+      })
     } catch (error) {
       out.push({
         uid: credential.uid,
         label,
+        skipped: false,
+        ok: false,
         credits: 0,
         message: error instanceof Error ? error.message : '签到失败',
       })

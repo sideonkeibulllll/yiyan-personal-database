@@ -6,11 +6,18 @@
  * MCP 分组与提示词条目都来自 settings（v3.6.0 起不再硬编码分组）。
  */
 import type { ClipboardEvent, KeyboardEvent, RefObject } from 'react';
-import { IconUpload, IconBrain, IconTool, IconClose, IconBack, IconSendAlt, IconCheck, IconUndo, IconRedo, IconImage, IconCamera, IconClipboard } from '@/components/icons';
+import { IconUpload, IconBrain, IconTool, IconClose, IconBack, IconSendAlt, IconCheck, IconUndo, IconRedo, IconImage, IconCamera, IconClipboard, IconFile } from '@/components/icons';
 import { VISION_UNSUPPORTED_HINT } from '@/utils/modelCapability';
 import { PromptPickerPanel } from './PromptPickerPanel';
 import type { McpGroupConfig } from '@/types';
-import type { PendingChatImage, ThinkingEffort } from '../chatTypes';
+import type { PendingChatImage, PendingChatFile, ThinkingEffort } from '../chatTypes';
+
+/** 字节数转可读文案（文件胶囊用） */
+function formatBytes(size: number): string {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
 
 interface ChatInputAreaProps {
   pickerSelectedCount: number;
@@ -68,6 +75,12 @@ interface ChatInputAreaProps {
   onRemovePendingImage: (id: string) => void;
   /** 粘贴图片（桌面端 Ctrl+V / 手机端剪贴板） */
   onPasteImages: (files: File[]) => void;
+
+  /* === 文本文件输入（v3.6.3） === */
+  /** 尚未发送的文本文件（内容发送时拼进正文） */
+  pendingFiles: PendingChatFile[];
+  onPickFiles: () => void;
+  onRemovePendingFile: (id: string) => void;
 }
 
 export function ChatInputArea({
@@ -113,6 +126,9 @@ export function ChatInputArea({
   onTakePhoto,
   onRemovePendingImage,
   onPasteImages,
+  pendingFiles,
+  onPickFiles,
+  onRemovePendingFile,
 }: ChatInputAreaProps) {
   // 切换某一组工具：选中则全部启用，取消则全部移除（保留其它组）
   const toggleGroup = (tools: string[], enable: boolean) => {
@@ -138,7 +154,7 @@ export function ChatInputArea({
     }
   };
 
-  const canSend = input.trim().length > 0 || pendingImages.length > 0 || attachedPrompts.length > 0;
+  const canSend = input.trim().length > 0 || pendingImages.length > 0 || pendingFiles.length > 0 || attachedPrompts.length > 0;
 
   return (
     <footer className="chat-input-area glass">
@@ -184,6 +200,16 @@ export function ChatInputArea({
             <span>拍照</span>
           </button>
         )}
+
+        {/* 文件：图片自动走图片管线，文本类读成正文（v3.6.3） */}
+        <button
+          className={`toolbar-btn ${pendingFiles.length > 0 ? 'active file' : ''}`}
+          onClick={onPickFiles}
+          title="选择文件（txt / md / csv / json / 代码；图片会自动当作图片发送）"
+        >
+          <IconFile />
+          <span>文件{pendingFiles.length > 0 ? ` (${pendingFiles.length})` : ''}</span>
+        </button>
 
         {/* 深度思考 */}
         <button
@@ -315,6 +341,30 @@ export function ChatInputArea({
           </div>
         )}
 
+        {/* 待发送文件胶囊（内容在发送时才拼进正文；flex-basis:100% 独占一行） */}
+        {pendingFiles.length > 0 && (
+          <div className="chat-pending-files">
+            {pendingFiles.map(f => (
+              <span className="chat-pending-file" key={f.id}>
+                <IconFile size={12} />
+                <span className="pending-file-name">{f.name}</span>
+                <span className="pending-file-meta">
+                  {formatBytes(f.size)}{f.truncated ? ' · 已截断' : ''}
+                </span>
+                <button
+                  type="button"
+                  className="pending-file-remove"
+                  onClick={() => onRemovePendingFile(f.id)}
+                  aria-label={`移除 ${f.name}`}
+                  title="移除"
+                >
+                  <IconClose size={9} />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+
         {/* 搜索回看按钮 */}
         {mcpEnabled && mcpSearchCount > 0 && (
           <button
@@ -325,6 +375,29 @@ export function ChatInputArea({
             <IconBack />
             <span>{mcpSearchCount}</span>
           </button>
+        )}
+
+        {/* 待发送图片预览条（同样挂在工具栏内独占一行，见 .chat-pending-images 注释） */}
+        {pendingImages.length > 0 && (
+          <div className="chat-pending-images">
+            {pendingImages.map(img => (
+              <div className="chat-pending-image" key={img.id}>
+                <img src={img.preview} alt="待发送图片" />
+                <button
+                  type="button"
+                  className="pending-image-remove"
+                  onClick={() => onRemovePendingImage(img.id)}
+                  aria-label="移除这张图片"
+                  title="移除"
+                >
+                  <IconClose size={9} />
+                </button>
+              </div>
+            ))}
+            <span className="pending-images-hint">
+              {pendingImages.length} 张将随消息发送
+            </span>
+          </div>
         )}
 
         {/* 撤销 / 重做（模拟 Ctrl+Z / Ctrl+Y，固定在工具栏最右侧，方便手机端点按） */}
@@ -353,29 +426,6 @@ export function ChatInputArea({
           </button>
         </div>
       </div>
-
-      {/* 待发送图片预览条 */}
-      {pendingImages.length > 0 && (
-        <div className="chat-pending-images">
-          {pendingImages.map(img => (
-            <div className="chat-pending-image" key={img.id}>
-              <img src={img.preview} alt="待发送图片" />
-              <button
-                type="button"
-                className="pending-image-remove"
-                onClick={() => onRemovePendingImage(img.id)}
-                aria-label="移除这张图片"
-                title="移除"
-              >
-                <IconClose size={9} />
-              </button>
-            </div>
-          ))}
-          <span className="pending-images-hint">
-            {pendingImages.length} 张将随消息发送
-          </span>
-        </div>
-      )}
 
       <div className="input-row">
         <textarea
