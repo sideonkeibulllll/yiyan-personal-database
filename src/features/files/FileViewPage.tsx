@@ -16,6 +16,7 @@ import {
   writeLibraryFile,
 } from '@/services/fileLibrary';
 import { IconBack, IconCopy, IconCheck, IconEdit, IconTrash, IconRename } from '@/components/icons';
+import { goBack } from '@/utils/navBack';
 import './Files.css';
 
 type Mode = 'preview' | 'source';
@@ -109,7 +110,7 @@ export function FileViewPage() {
   return (
     <div className="file-view-page">
       <header className="files-head">
-        <button type="button" className="files-back" onClick={() => navigate('/files')} title="返回文件库">
+        <button type="button" className="files-back" onClick={() => goBack(navigate, '/files')} title="返回上一页">
           <IconBack />
         </button>
         <div className="files-title">

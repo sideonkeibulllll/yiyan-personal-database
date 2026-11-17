@@ -13,6 +13,7 @@ import { loadChatSessions } from '@/services/chatSessionService';
 import { splitChatFileBlocks, formatCharCount } from './chatUtils';
 import type { ChatMessage } from './chatTypes';
 import { IconBack, IconCopy, IconCheck } from '@/components/icons';
+import { goBack } from '@/utils/navBack';
 import './ChatFilePage.css';
 
 export function ChatFilePage() {
@@ -64,7 +65,7 @@ export function ChatFilePage() {
   return (
     <div className="chat-file-page">
       <header className="chat-file-page-head">
-        <button type="button" className="chat-file-back" onClick={() => navigate('/chat')} title="返回对话">
+        <button type="button" className="chat-file-back" onClick={() => goBack(navigate, '/chat')} title="返回对话">
           <IconBack />
         </button>
         <div className="chat-file-title">
@@ -83,7 +84,7 @@ export function ChatFilePage() {
       {state === 'missing' && (
         <div className="chat-file-hint">
           这段文件内容已经不在了（消息被删除或会话被清理）。
-          <button type="button" className="chat-file-link" onClick={() => navigate('/chat')}>返回对话</button>
+          <button type="button" className="chat-file-link" onClick={() => goBack(navigate, '/chat')}>返回对话</button>
         </div>
       )}
       {state === 'ok' && (

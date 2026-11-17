@@ -70,6 +70,9 @@ import type { ApiMessage, ApiContentPart } from './chatUtils';
 import type { ChatMessage, ChatSession, ChatImage, PendingChatImage, PendingChatFile, SearchSelectedResult, ThinkingEffort } from './chatTypes';
 import { streamChatCompletion } from './chatStream';
 import { getActiveChatStream, setActiveChatStream, subscribeChatStream } from './chatRuntime';
+
+/** 上次打开的会话 id（v3.6.9：从文件页/全文页返回时用来恢复对话） */
+const LAST_CHAT_SESSION_KEY = 'yiyan_chat_last_session_v1';
 import { ChatSidebar } from './components/ChatSidebar';
 import { ChatHeader } from './components/ChatHeader';
 import { ChatMessageList } from './components/ChatMessageList';
@@ -509,11 +512,24 @@ export function ChatPage() {
         setSessions(base);
       }
       consumePendingDraft(base);
+      // v3.6.9：ChatPage 不读路由里的会话 id，从文件页/全文页「返回上一页」回来时
+      // 若没有指定会话，接上上次打开的那个，别把用户丢回空白新对话。
+      const savedSessionId = localStorage.getItem(LAST_CHAT_SESSION_KEY);
+      if (savedSessionId && base.some(item => item.id === savedSessionId)) {
+        setCurrentSessionId(prev => prev ?? savedSessionId);
+      }
     }).catch(() => {
       if (mounted) consumePendingDraft(sessionsRef.current);
     });
     return () => { mounted = false; };
   }, []);
+
+  // 记住当前会话（刷新/返回时恢复）
+  useEffect(() => {
+    if (currentSessionId) {
+      try { localStorage.setItem(LAST_CHAT_SESSION_KEY, currentSessionId); } catch { /* 隐私模式忽略 */ }
+    }
+  }, [currentSessionId]);
 
   // 监听窗口大小
   useEffect(() => {

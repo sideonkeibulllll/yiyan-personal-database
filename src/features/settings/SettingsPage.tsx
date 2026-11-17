@@ -121,6 +121,8 @@ interface NavGroup {
   label: string;
   desc: string;
   items: NavLeaf[];
+  /** 只有一个面板的分组：点分组直接进面板，不再多一层子页（v3.6.9） */
+  directTo?: SettingsTab;
 }
 
 const NAV_GROUPS: NavGroup[] = [
@@ -151,8 +153,9 @@ const NAV_GROUPS: NavGroup[] = [
     key: 'filesGroup',
     label: '文件与作品',
     desc: 'HTML 作品池 · 全屏预览 · 重命名与复制',
+    directTo: 'files',
     items: [
-      { key: 'files', label: '文件管理器', alias: 'html 作品 文件 预览 重命名' },
+      { key: 'files', label: '文件与作品', alias: 'html 作品 文件 预览 重命名' },
     ],
   },
   {
@@ -267,6 +270,13 @@ export function SettingsPage() {
   /** 移动端：从面板退回（有分组就回组内页，否则回首页） */
   const closePanel = () => {
     const g = TAB_GROUP[activeTab];
+    const group = NAV_GROUPS.find(item => item.key === g);
+    // 单面板分组没有子页可回，直接回分组首页
+    if (group?.directTo) {
+      setOpenGroupKey(null);
+      setMobileView('index');
+      return;
+    }
     setOpenGroupKey(g ?? null);
     setMobileView(g ? 'group' : 'index');
   };
@@ -1037,7 +1047,12 @@ export function SettingsPage() {
                       <button
                         key={g.key}
                         className="settings-nav-group"
-                        onClick={() => { setOpenGroupKey(g.key); setMobileView('group'); }}
+                        onClick={() => {
+                          // 单面板分组（文件与作品）：一步直达，不再多点一次
+                          if (g.directTo) { openPanel(g.directTo); return; }
+                          setOpenGroupKey(g.key);
+                          setMobileView('group');
+                        }}
                       >
                         <span className="settings-nav-group-main">
                           <span className="settings-nav-group-label">{g.label}</span>

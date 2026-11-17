@@ -27,6 +27,7 @@ import {
   type LibraryFile,
 } from '@/services/fileLibrary';
 import { IconBack, IconFile, IconPlus, IconTrash, IconCopy, IconEdit, IconCheck } from '@/components/icons';
+import { goBack } from '@/utils/navBack';
 import './Files.css';
 
 type Filter = 'all' | 'html' | 'text' | 'other';
@@ -173,7 +174,7 @@ export function FileManagerPage({ embedded = false }: FileManagerPageProps) {
     <div className={`files-page ${embedded ? 'embedded' : ''}`}>
       <header className="files-head">
         {!embedded && (
-          <button type="button" className="files-back" onClick={() => navigate('/')} title="返回">
+          <button type="button" className="files-back" onClick={() => goBack(navigate, '/')} title="返回上一页">
             <IconBack />
           </button>
         )}
