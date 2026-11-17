@@ -150,3 +150,46 @@ export function formatFileSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
+
+/** 重命名（Filesystem 没有 rename：读→写新名→删旧） */
+export async function renameLibraryFile(rawOld: string, rawNew: string): Promise<string> {
+  const from = sanitizeFileName(rawOld);
+  const to = sanitizeFileName(rawNew);
+  if (from === to) return to;
+  const file = await readLibraryFile(from);
+  if (!file) throw new Error('文件不存在');
+  await writeLibraryFile(to, file.text);
+  await deleteLibraryFile(from);
+  return to;
+}
+
+/** 复制一份：`demo.html` → `demo-副本.html`（重名自动加序号） */
+export async function duplicateLibraryFile(rawName: string): Promise<string> {
+  const name = sanitizeFileName(rawName);
+  const file = await readLibraryFile(name);
+  if (!file) throw new Error('文件不存在');
+  const dot = name.lastIndexOf('.');
+  const base = dot > 0 ? name.slice(0, dot) : name;
+  const ext = dot > 0 ? name.slice(dot) : '';
+  const existing = new Set((await listLibraryFiles()).map(item => item.name));
+  let candidate = `${base}-副本${ext}`;
+  let i = 2;
+  while (existing.has(candidate)) {
+    candidate = `${base}-副本${i}${ext}`;
+    i += 1;
+  }
+  await writeLibraryFile(candidate, file.text);
+  return candidate;
+}
+
+/** 相对时间：刚刚 / N 分钟前 / N 小时前 / 昨天 / 月-日 */
+export function formatRelativeTime(ms: number): string {
+  if (!ms) return '';
+  const diff = Date.now() - ms;
+  if (diff < 60_000) return '刚刚';
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`;
+  if (diff < 172_800_000) return '昨天';
+  const date = new Date(ms);
+  return `${date.getMonth() + 1}-${date.getDate()}`;
+}

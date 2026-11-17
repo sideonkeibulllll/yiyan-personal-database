@@ -198,3 +198,8 @@ export const IconCamera = createIcon('IconCamera', 16, 1.5, (
 export const IconFile = createIcon('IconFile', 16, 1.5, (
   <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="8" y1="13" x2="16" y2="13" /><line x1="8" y1="17" x2="13" y2="17" /></>
 ));
+
+/** 重命名（v3.6.7：文件管理器） */
+export const IconRename = createIcon('IconRename', 16, 1.5, (
+  <><path d="M4 7V5h16v2" /><path d="M9 5v14" /><path d="M15 5v14" /><line x1="3" y1="19" x2="21" y2="19" /></>
+));

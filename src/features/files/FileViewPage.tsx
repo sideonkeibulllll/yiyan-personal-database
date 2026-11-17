@@ -8,12 +8,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   deleteLibraryFile,
+  duplicateLibraryFile,
   formatFileSize,
   isHtmlFile,
   readLibraryFile,
+  renameLibraryFile,
   writeLibraryFile,
 } from '@/services/fileLibrary';
-import { IconBack, IconCopy, IconCheck, IconEdit, IconTrash } from '@/components/icons';
+import { IconBack, IconCopy, IconCheck, IconEdit, IconTrash, IconRename } from '@/components/icons';
 import './Files.css';
 
 type Mode = 'preview' | 'source';
@@ -31,6 +33,8 @@ export function FileViewPage() {
   const [draft, setDraft] = useState('');
   const [copied, setCopied] = useState(false);
   const [dirtyHint, setDirtyHint] = useState('');
+  const [renaming, setRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
 
   const load = useCallback(async () => {
     const file = await readLibraryFile(name);
@@ -66,6 +70,27 @@ export function FileViewPage() {
       window.setTimeout(() => setCopied(false), 1500);
     } catch {
       /* ignore */
+    }
+  };
+
+  const handleRename = async () => {
+    const next = renameValue.trim();
+    if (!next || next === name) { setRenaming(false); return; }
+    try {
+      const saved = await renameLibraryFile(name, next);
+      setRenaming(false);
+      navigate(`/files/${encodeURIComponent(saved)}`, { replace: true });
+    } catch {
+      window.alert('改名失败，请重试');
+    }
+  };
+
+  const handleDuplicate = async () => {
+    try {
+      const copy = await duplicateLibraryFile(name);
+      navigate(`/files/${encodeURIComponent(copy)}`);
+    } catch {
+      window.alert('复制失败，请重试');
     }
   };
 
@@ -107,6 +132,21 @@ export function FileViewPage() {
               {copied ? <IconCheck size={14} /> : <IconCopy size={14} />}
             </button>
           )}
+          {!editing && (
+            <button
+              type="button"
+              className="files-icon-btn"
+              onClick={() => { setRenameValue(name); setRenaming(true); }}
+              title="重命名"
+            >
+              <IconRename size={14} />
+            </button>
+          )}
+          {!editing && (
+            <button type="button" className="files-icon-btn" onClick={handleDuplicate} title="复制一份">
+              <IconCopy size={14} />
+            </button>
+          )}
           {editing ? (
             <>
               <button type="button" className="files-icon-btn" onClick={() => { setDraft(text); setEditing(false); }}>取消</button>
@@ -128,6 +168,25 @@ export function FileViewPage() {
         <div className="files-empty">
           <p>这个文件不存在（可能已被删除）。</p>
           <button type="button" className="files-create-btn" onClick={() => navigate('/files')}>回文件库</button>
+        </div>
+      )}
+
+      {renaming && (
+        <div className="files-modal-mask" onClick={() => setRenaming(false)}>
+          <div className="files-modal" onClick={e => e.stopPropagation()}>
+            <h3>重命名</h3>
+            <input
+              className="files-create-input"
+              value={renameValue}
+              onChange={e => setRenameValue(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') void handleRename(); }}
+              autoFocus
+            />
+            <div className="files-modal-actions">
+              <button type="button" className="files-create-btn ghost" onClick={() => setRenaming(false)}>取消</button>
+              <button type="button" className="files-create-btn" onClick={handleRename}>保存</button>
+            </div>
+          </div>
         </div>
       )}
 
