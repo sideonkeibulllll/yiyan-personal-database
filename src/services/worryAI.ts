@@ -24,9 +24,17 @@
  * - soulUpdate 升级为结构化变更组（add / update / retire）
  */
 import type { AIConfig, AIProviderId, SoulChanges, WorryFlipPoint } from '@/types';
-import { AI_PROVIDER_ORDER, GLM_FREE_MODEL_POOL, PROVIDER_PRESETS } from '@/types';
+import { AI_PROVIDER_ORDER, PROVIDER_PRESETS, getEnabledModels } from '@/types';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { parseSoulChanges, renderSoulPortrait } from './soulFacts';
+import {
+  resolveLiteEndpoint, liteRequestText, extractJson,
+  type LiteEndpoint, type LiteRequestOpts,
+} from './liteAiCall';
+
+// v3.7.2：请求传输层已抽到 liteAiCall（TRAE / OpenAI 分流 + 凭据轮换）。
+// 这里 re-export 保持对 soulDistill 的既有引用不破。
+export { resolveLiteEndpoint as resolveEndpointForModelValue, extractJson } from './liteAiCall';
 
 /** 非思考模式超时 */
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -85,7 +93,8 @@ export function buildWorryModelOptions(ai: AIConfig): WorryModelOption[] {
   for (const pid of AI_PROVIDER_ORDER) {
     const entry = ai.providers?.[pid];
     const preset = PROVIDER_PRESETS[pid];
-    const models = entry?.models?.length ? entry.models : preset.models;
+    // v3.7.2：与 chat 页一致，尊重设置页「启用模型」勾选，不再全量列出
+    const models = entry ? getEnabledModels(entry) : preset.models;
     for (const m of models) {
       options.push({
         value: `${pid}${MODEL_SEP}${m}`,
@@ -97,16 +106,6 @@ export function buildWorryModelOptions(ai: AIConfig): WorryModelOption[] {
 
   options.push({ value: '__glm_smart__', label: '智能 GLM（免费池）' });
   return options;
-}
-
-/** 解析复合值：`providerId::model` / `__glm_smart__` / 裸值 */
-function parseModelValue(value: string): { providerId: AIProviderId | null; model: string } {
-  if (!value || value === '__glm_smart__') return { providerId: null, model: value };
-  const idx = value.indexOf(MODEL_SEP);
-  if (idx === -1) return { providerId: null, model: value };
-  const pid = value.slice(0, idx) as AIProviderId;
-  const model = value.slice(idx + MODEL_SEP.length);
-  return { providerId: pid, model };
 }
 
 // ============ 深度思考配置（v3.3.0，与 Chat 页同款语义）============
@@ -184,75 +183,10 @@ function buildSoulSection(soul: string): string {
   return `\n\n【关于用户（来自 ta 自己维护的人格档案）】\n${soul}\n（以上背景帮助你写出更贴合 ta 真实生活的结局，不要生硬复述档案内容，也不要在回复里提及档案本身。）`;
 }
 
-/** GLM 免费池轮询游标（进程内，跨调用递增） */
-let glmPoolCursor = 0;
-
-interface ResolvedEndpoint {
-  model: string;
-  baseURL: string;
-  apiKey: string;
-}
-
-/**
- * 解析当前模型选择 → 实际请求终点。
- * 规则与 Chat 页一致；默认（''）走设置页激活提供商，**不做 GLM 优先**。
- */
-function resolveEndpoint(): ResolvedEndpoint {
-  return resolveEndpointForModelValue(getWorryModelValue());
-}
-
-/**
- * 按指定模型值解析请求终点（v3.4.0 抽出，供 Soul 蒸馏等复用）。
- * 规则与 Chat 页一致；默认（''）走设置页激活提供商，**不做 GLM 优先**。
- */
-export function resolveEndpointForModelValue(value: string): ResolvedEndpoint {
-  const aiCfg = useSettingsStore.getState().settings.ai;
-
-  // 智能 GLM（免费池）：轮询池中模型
-  if (value === '__glm_smart__') {
-    const glm = aiCfg.glm;
-    if (!glm?.enabled || !glm.apiKey) {
-      throw new Error('智谱 GLM 未配置：请切换其他模型，或在设置页启用并填写智谱 Key');
-    }
-    const pool = GLM_FREE_MODEL_POOL;
-    const model = pool[glmPoolCursor % pool.length];
-    glmPoolCursor = (glmPoolCursor + 1) % pool.length;
-    return {
-      model,
-      baseURL: glm.baseURL || 'https://open.bigmodel.cn/api/paas/v4',
-      apiKey: glm.apiKey,
-    };
-  }
-
-  const parsed = parseModelValue(value);
-
-  // 指定了提供商：用该提供商的配置
-  if (parsed.providerId) {
-    const entry = aiCfg.providers?.[parsed.providerId];
-    const apiKey = entry?.apiKey || '';
-    if (!apiKey) {
-      const label = PROVIDER_PRESETS[parsed.providerId]?.label || parsed.providerId;
-      throw new Error(`${label} 未配置 API Key：请切换其他模型，或在设置页补充配置`);
-    }
-    return {
-      model: parsed.model || entry?.model || 'deepseek-v4-flash',
-      baseURL: entry?.baseURL || 'https://api.deepseek.com',
-      apiKey,
-    };
-  }
-
-  // 全局默认：设置页当前激活的提供商（兼容旧扁平字段）
-  const activeProviderId: AIProviderId = aiCfg.provider || (aiCfg.isDeepSeek ? 'deepseek' : 'deepseek');
-  const active = aiCfg.providers?.[activeProviderId];
-  const apiKey = active?.apiKey || aiCfg.apiKey || '';
-  if (!apiKey) {
-    throw new Error('AI 未配置：请在设置页配置模型，或在顶部切换可用模型');
-  }
-  return {
-    model: active?.model || aiCfg.model || 'deepseek-v4-flash',
-    baseURL: active?.baseURL || aiCfg.baseURL || 'https://api.deepseek.com',
-    apiKey,
-  };
+// v3.7.2：模型解析下沉到 liteAiCall（见顶部 re-export 的 resolveEndpointForModelValue）
+/** 解析当前模型选择 → 请求终点（TRAE 走专属协议） */
+function resolveEndpoint(): LiteEndpoint {
+  return resolveLiteEndpoint(getWorryModelValue());
 }
 
 // ============ 请求与 JSON 解析 ============
@@ -261,19 +195,6 @@ export interface GeneratedOutcomes {
   worst: string;
   normal: string;
   best: string;
-}
-
-/** 从模型输出中提取 JSON 对象（剥 ``` 围栏 + 截取首尾大括号容错）；v3.4.0 导出供 Soul 蒸馏复用 */
-export function extractJson(text: string): any {
-  let s = String(text || '').trim();
-  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  if (fence && fence[1]) s = fence[1].trim();
-  const start = s.indexOf('{');
-  const end = s.lastIndexOf('}');
-  if (start < 0 || end <= start) {
-    throw new Error('AI 返回内容格式不正确');
-  }
-  return JSON.parse(s.slice(start, end + 1));
 }
 
 function clipText(value: unknown, maxLen: number): string {
@@ -288,155 +209,28 @@ interface RequestOpts {
 }
 
 /**
- * 构造请求体（流式 / 非流式共用）。
- * 深度思考语义对齐 Chat 页（chatStream.ts）：
- * - 开：thinking.enabled + reasoning_effort，且**不传** temperature / max_tokens；
- * - 关：显式 thinking.disabled（对默认思考的模型才是"真关"），保留 temperature / max_tokens。
- */
-function buildBody(model: string, opts: RequestOpts, stream: boolean): string {
-  const thinking = getWorryThinking();
-  return JSON.stringify({
-    model,
-    messages: [
-      { role: 'system', content: opts.systemPrompt },
-      { role: 'user', content: opts.userMessage },
-    ],
-    ...(thinking.enabled
-      ? { thinking: { type: 'enabled' }, reasoning_effort: thinking.effort }
-      : {
-          thinking: { type: 'disabled' },
-          temperature: opts.temperature ?? 0.7,
-          max_tokens: opts.maxTokens ?? 900,
-        }),
-    ...(stream ? { stream: true } : {}),
-  });
-}
-
-/** 非流式请求：一次性返回完整文本（兜底路径） */
-async function requestTextPlain(opts: RequestOpts): Promise<string> {
-  const endpoint = resolveEndpoint();
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), currentTimeoutMs());
-  try {
-    const response = await fetch(`${endpoint.baseURL}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${endpoint.apiKey}`,
-      },
-      body: buildBody(endpoint.model, opts, false),
-      signal: controller.signal,
-    });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({} as any));
-      throw new Error(error?.error?.message || `AI 请求失败: ${response.status}`);
-    }
-
-    const data = await response.json();
-    return data.choices?.[0]?.message?.content || '';
-  } catch (err) {
-    if (err instanceof Error && err.name === 'AbortError') {
-      throw new Error('AI 请求超时，请重试');
-    }
-    throw err;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-/**
- * 流式请求（SSE）：逐增量回调「已生成字符数」（含思维链字数，思考期计数也会增长），
- * 返回完整正文文本。
- *
- * ⚠️ Android/Capacitor 上原生 HTTP（被 CapacitorHttp patch 的 fetch）不支持流式读取，
- * 必须使用原始 WebView fetch（`CapacitorWebFetch`，与 chatStream.ts 同款处理）。
- */
-async function requestTextStream(
-  opts: RequestOpts,
-  onProgress?: (chars: number) => void,
-): Promise<string> {
-  const endpoint = resolveEndpoint();
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), currentTimeoutMs());
-  const fetchFn = (window as any).CapacitorWebFetch || fetch;
-  try {
-    const response = await fetchFn(`${endpoint.baseURL}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${endpoint.apiKey}`,
-      },
-      body: buildBody(endpoint.model, opts, true),
-      signal: controller.signal,
-    });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({} as any));
-      throw new Error(error?.error?.message || `AI 请求失败: ${response.status}`);
-    }
-
-    const reader = response.body?.getReader();
-    if (!reader) throw new Error('无法读取响应流');
-
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let full = '';
-    let reasoningLen = 0;
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed || !trimmed.startsWith('data: ')) continue;
-        const data = trimmed.slice(6);
-        if (data === '[DONE]') continue;
-        try {
-          const json = JSON.parse(data);
-          const delta = json.choices?.[0]?.delta;
-          // 思维链增量：只计数（不进入正文累积，正文才是被解析的 JSON）
-          if (delta?.reasoning_content) {
-            reasoningLen += String(delta.reasoning_content).length;
-            onProgress?.(full.length + reasoningLen);
-          }
-          if (delta?.content) {
-            full += delta.content;
-            onProgress?.(full.length + reasoningLen);
-          }
-        } catch {
-          // 忽略单帧解析错误
-        }
-      }
-    }
-    return full;
-  } catch (err) {
-    if (err instanceof Error && err.name === 'AbortError') {
-      throw new Error('AI 请求超时，请重试');
-    }
-    throw err;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-/**
- * 请求并解析 JSON：
+ * 请求并解析 JSON（v3.7.2：委托 liteAiCall 公共传输层）。
  * ① 流式优先（带「已生成字数」进度回调）
  * ② 流式失败自动降级为非流式重试（覆盖流式不可用/中断的环境）
+ * TRAE 时 liteAiCall 内部自动走 SOLO 协议，不再把整包凭据 JSON 拼进 Bearer header。
  * 配置缺失类错误直接抛出，不做无谓重试。
  */
 async function requestJson(opts: RequestOpts, onProgress?: (chars: number) => void): Promise<any> {
+  const thinking = getWorryThinking();
+  const makeOpts = (stream: boolean): LiteRequestOpts => ({
+    ...opts,
+    thinking: { enabled: thinking.enabled, effort: thinking.effort },
+    timeoutMs: currentTimeoutMs(),
+    stream,
+  });
   try {
-    const text = await requestTextStream(opts, onProgress);
+    const text = await liteRequestText(resolveEndpoint(), makeOpts(true));
     return extractJson(text);
   } catch (firstErr) {
     const msg = firstErr instanceof Error ? firstErr.message : '';
-    if (msg.includes('未配置')) throw firstErr;
+    if (msg.includes('未配置') || msg.includes('凭据格式不正确')) throw firstErr;
     // 兜底：非流式重试一次（GLM 池轮询天然换模型）
-    const text = await requestTextPlain(opts);
+    const text = await liteRequestText(resolveEndpoint(), makeOpts(false));
     return extractJson(text);
   }
 }

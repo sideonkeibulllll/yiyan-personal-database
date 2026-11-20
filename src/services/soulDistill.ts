@@ -9,6 +9,7 @@
  * 失败直接抛错，由 UI 提供重试。模型选择为独立复合值（与「怕了么」同款格式）。
  */
 import { resolveEndpointForModelValue, extractJson } from './worryAI';
+import { liteRequestText, type LiteRequestOpts } from './liteAiCall';
 import { isSoulFactCategory, listSoulFacts, parseSoulChanges } from './soulFacts';
 import { listMemories } from './aiMemory';
 import { SOUL_CATEGORY_LABELS } from '@/types';
@@ -42,45 +43,28 @@ const INBOX_ITEM_CLIP = 200;
 /** 拆解旧档案的最大条目数 */
 const MAX_MIGRATE_ITEMS = 20;
 
-/** 非流式请求 + JSON 解析（安卓端普通 fetch 走 CapacitorHttp 原生补丁，无 CORS 问题） */
+/**
+ * 非流式请求 + JSON 解析（v3.7.2：委托 liteAiCall 公共传输层）。
+ * TRAE 时内部走 SOLO 协议，不再把整包凭据 JSON 拼进 Bearer header。
+ */
 async function requestJson(systemPrompt: string, userMessage: string): Promise<any> {
   const endpoint = resolveEndpointForModelValue(getSoulDistillModelValue());
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const opts: LiteRequestOpts = {
+    systemPrompt,
+    userMessage,
+    temperature: 0.2,
+    maxTokens: 2400,
+    timeoutMs: REQUEST_TIMEOUT_MS,
+    stream: false,
+  };
   try {
-    const response = await fetch(`${endpoint.baseURL.replace(/\/+$/, '')}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${endpoint.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: endpoint.model,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userMessage },
-        ],
-        temperature: 0.2,
-        max_tokens: 2400,
-        stream: false,
-      }),
-      signal: controller.signal,
-    });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({} as any));
-      throw new Error(error?.error?.message || `AI 请求失败: ${response.status}`);
-    }
-    const data = await response.json();
-    const content = data?.choices?.[0]?.message?.content ?? '';
-    return extractJson(content);
+    const text = await liteRequestText(endpoint, opts);
+    return extractJson(text);
   } catch (err) {
-    if ((err as Error)?.name === 'AbortError') {
+    if ((err as Error)?.name === 'AbortError' || /超时/.test(String((err as Error)?.message))) {
       throw new Error('AI 请求超时（60s），请重试或换一个模型');
     }
     throw err;
-  } finally {
-    clearTimeout(timer);
   }
 }
 
