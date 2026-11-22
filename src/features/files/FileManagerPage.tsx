@@ -200,7 +200,11 @@ export function FileManagerPage({ embedded = false }: FileManagerPageProps) {
 
   const totalSize = useMemo(() => works.reduce((sum, w) => sum + (w.size || 0), 0), [works]);
 
-  const openWork = (name: string) => navigate(`/files/${encodeURIComponent(name)}`);
+  // v3.8.1：从设置页内嵌的管理器进作品详情时，记下来源 —— 详情页返回要回到
+  // 「文件与作品」面板（?tab=files），而不是 -1 退到设置首页（多退一页且丢面板状态）。
+  const openWork = (name: string) => navigate(`/files/${encodeURIComponent(name)}`, {
+    state: embedded ? { yiyanBackTo: '/settings?tab=files' } : undefined,
+  });
 
   // ===== 长按 / 右键菜单 =====
   const startPress = (work: WorkInfo) => {

@@ -30,6 +30,33 @@ interface ChatMessageListProps {
   onToggleSelect: (msgId: string) => void;
   /** 危险操作确认：confirmId + 是否批准 */
   onConfirmAction?: (confirmId: string, approved: boolean) => void;
+  /** v3.8.1：删除本轮对话（该 AI 消息 + 它对应的用户消息） */
+  onDeleteTurn?: (msgId: string) => void;
+}
+
+/** v3.8.1：思考提示旁的「删除 → 确认删除？」两段式按钮（点一下待确认，再点一下真删） */
+function TurnDeleteButton({ onDelete }: { onDelete: () => void }) {
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    if (!armed) return;
+    const t = window.setTimeout(() => setArmed(false), 3000);
+    return () => window.clearTimeout(t);
+  }, [armed]);
+  return (
+    <button
+      type="button"
+      className={`turn-delete-btn ${armed ? 'armed' : ''}`}
+      title="删除这一轮对话（我的和 AI 的这次发送）"
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (armed) onDelete();
+        else setArmed(true);
+      }}
+    >
+      {armed ? '确认删除？' : '删除'}
+    </button>
+  );
 }
 
 /* === 消息内的图片网格（v3.5.3）=== */
@@ -115,6 +142,7 @@ interface ChatMessageItemProps {
   streamingActive: boolean;
   onToggleSelect: (msgId: string) => void;
   onConfirmAction?: (confirmId: string, approved: boolean) => void;
+  onDeleteTurn?: (msgId: string) => void;
 }
 
 const ChatMessageItem = memo(function ChatMessageItem({
@@ -125,6 +153,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
   streamingActive,
   onToggleSelect,
   onConfirmAction,
+  onDeleteTurn,
 }: ChatMessageItemProps) {
   const confirm = msg.confirmRequest;
   const isSelectable = selectMode && msg.role !== 'tool' && !confirm;
@@ -188,6 +217,9 @@ const ChatMessageItem = memo(function ChatMessageItem({
               <IconBrain />
               <span>思考过程</span>
               {msg.thinkingEffort && <span className="reasoning-effort">{msg.thinkingEffort}</span>}
+              {msg.role === 'assistant' && !streamingActive && onDeleteTurn && (
+                <TurnDeleteButton onDelete={() => onDeleteTurn(msg.id)} />
+              )}
             </summary>
             <div className="reasoning-content">{msg.reasoningContent}</div>
           </details>
@@ -286,7 +318,12 @@ const ChatMessageItem = memo(function ChatMessageItem({
         )}
 
         {msg.isThinking && !msg.reasoningContent && (
-          <span className="message-tag">深度思考 · {msg.thinkingEffort}</span>
+          <span className="message-tag">
+            深度思考 · {msg.thinkingEffort}
+            {msg.role === 'assistant' && !streamingActive && onDeleteTurn && (
+              <TurnDeleteButton onDelete={() => onDeleteTurn(msg.id)} />
+            )}
+          </span>
         )}
 
         {msg.toolCallResults && msg.toolCallResults.length > 0 && (
@@ -319,6 +356,7 @@ export function ChatMessageList({
   endRef,
   onToggleSelect,
   onConfirmAction,
+  onDeleteTurn,
 }: ChatMessageListProps) {
   return (
     <div className="chat-messages" ref={containerRef}>
@@ -341,6 +379,7 @@ export function ChatMessageList({
             streamingActive={isLoading && idx === messages.length - 1}
             onToggleSelect={onToggleSelect}
             onConfirmAction={onConfirmAction}
+            onDeleteTurn={onDeleteTurn}
           />
         ))
       )}

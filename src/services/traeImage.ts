@@ -19,7 +19,7 @@
  * - 失败不自动重试（504 也扣分），冷却交给调用方提示用户。
  * - refresh_token 轮换必须按 uid 回写（notifyTraeCredentialRotated）。
  */
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import { useSettingsStore } from '@/stores/settingsStore';
 import {
   isCredentialExpiring,
@@ -102,7 +102,44 @@ function cacheSet(prompt: string, size: string, uri: string): void {
 
 // ===== 请求工具 =====
 
+/** 生图较慢，原生 HTTP 给足超时（CapacitorHttp 底层默认无超时会干等） */
+const DRAW_HTTP_TIMEOUT = 120_000;
+
+/**
+ * 原生端把 CapacitorHttp 包成 fetch 形状。
+ *
+ * ⚠️ 为什么不用 CapacitorWebFetch（v3.8.1 修复）：
+ * CapacitorWebFetch 是原生桥保存的「原始 WebView fetch」，仍受 WebView CORS 约束。
+ * TRAE 画图端点（tool_text_to_image / get_resource_url）的 OPTIONS 预检返回 403、
+ * 且没有 Access-Control-Allow-Origin —— WebView 直接抛 TypeError: Failed to fetch。
+ * 这就是「电脑上能画、手机上 Failed to fetch」的根因（本机实测：POST 直连返回
+ * 1001 认证码说明接口通，唯独带 Origin 的预检 403）。
+ * CapacitorHttp 走原生层、不受 CORS 限制（签到、R2 下载同款路子）。
+ */
+function capFetchShim(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+  const method = (init?.method ?? 'GET').toUpperCase();
+  const headers = (init?.headers ?? undefined) as Record<string, string> | undefined;
+  const rawBody = init?.body;
+  const data = rawBody === undefined || rawBody === null
+    ? undefined
+    : typeof rawBody === 'string' ? rawBody : String(rawBody);
+  return CapacitorHttp.request({
+    url,
+    method,
+    headers,
+    data,
+    responseType: 'text',
+    connectTimeout: DRAW_HTTP_TIMEOUT,
+    readTimeout: DRAW_HTTP_TIMEOUT,
+  }).then(res => new Response(
+    typeof res.data === 'string' ? res.data : JSON.stringify(res.data ?? ''),
+    { status: res.status, headers: { 'Content-Type': 'application/json' } },
+  ));
+}
+
 function rawFetch(): typeof fetch {
+  if (Capacitor.isNativePlatform()) return capFetchShim as typeof fetch;
   return ((window as unknown as { CapacitorWebFetch?: typeof fetch }).CapacitorWebFetch ?? fetch).bind(window);
 }
 
@@ -236,6 +273,21 @@ async function resolveSignedUrl(credential: TraeCredential, uri: string): Promis
 }
 
 async function downloadSigned(url: string): Promise<Uint8Array> {
+  // 原生端：签名 URL 多是第三方对象存储，WebView fetch 同样会被 CORS 拦，
+  // 走 CapacitorHttp（返回 base64，见 r2Client 同款处理）。
+  if (Capacitor.isNativePlatform()) {
+    const res = await CapacitorHttp.get({
+      url,
+      connectTimeout: DRAW_HTTP_TIMEOUT,
+      readTimeout: DRAW_HTTP_TIMEOUT,
+    });
+    if (res.status < 200 || res.status >= 300) throw new Error(`下载图片失败：${res.status}`);
+    const b64 = typeof res.data === 'string' ? res.data : (res.data?.data ?? '');
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+  }
   const fetchFn = rawFetch();
   let res: Response;
   try {

@@ -12,7 +12,7 @@
  * 图由 AI 的 draw_image 画好放作品里。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   deleteWork,
   deleteWorkFile,
@@ -60,7 +60,16 @@ const REASON_LABEL: Record<FileVersion['reason'], string> = {
 export function FileViewPage() {
   const { name: rawName } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const work = useMemo(() => decodeURIComponent(rawName ?? ''), [rawName]);
+
+  // v3.8.1：从设置页「文件与作品」内嵌管理器进来的，返回时直接落到该面板
+  // （replace 掉详情页，避免多退一页退到设置首页）。
+  const backTo = (location.state as { yiyanBackTo?: string } | null)?.yiyanBackTo;
+  const handleBack = useCallback(() => {
+    if (backTo) navigate(backTo, { replace: true });
+    else goBack(navigate, '/files');
+  }, [backTo, navigate]);
 
   const [files, setFiles] = useState<WorkFile[]>([]);
   const [entry, setEntry] = useState<string | null>(null);
@@ -194,7 +203,7 @@ export function FileViewPage() {
     try {
       const saved = await renameWork(work, next);
       setRenaming(false);
-      navigate(`/files/${encodeURIComponent(saved)}`, { replace: true });
+      navigate(`/files/${encodeURIComponent(saved)}`, { replace: true, state: backTo ? { yiyanBackTo: backTo } : undefined });
     } catch {
       window.alert('改名失败，请重试');
     }
@@ -326,7 +335,7 @@ export function FileViewPage() {
   return (
     <div className="file-view-page">
       <header className="files-head">
-        <button type="button" className="files-back" onClick={() => goBack(navigate, '/files')} title="返回上一页">
+        <button type="button" className="files-back" onClick={handleBack} title="返回上一页">
           <IconBack />
         </button>
         <div className="files-title">

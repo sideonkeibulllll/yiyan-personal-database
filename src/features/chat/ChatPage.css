@@ -859,6 +859,36 @@
   letter-spacing: 0.05em;
 }
 
+/* v3.8.1：思考提示旁的「删除 → 确认删除？」两段式按钮 */
+.turn-delete-btn {
+  margin-left: auto;
+  padding: 1px 6px;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--color-text-tertiary);
+  font-size: 10px;
+  line-height: 1.4;
+  cursor: pointer;
+  user-select: none;
+  transition: color var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out);
+}
+.reasoning-effort + .turn-delete-btn {
+  margin-left: 0;
+}
+.turn-delete-btn:hover {
+  color: var(--color-error, #ef4444);
+  border-color: var(--color-error, #ef4444);
+}
+.turn-delete-btn.armed {
+  color: #fff;
+  background: var(--color-error, #ef4444);
+  border-color: var(--color-error, #ef4444);
+}
+.message-tag .turn-delete-btn {
+  margin-left: var(--space-2);
+}
+
 .reasoning-content {
   padding: var(--space-2) var(--space-3);
   font-size: var(--text-xs);

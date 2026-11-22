@@ -228,6 +228,8 @@ export function ChatPage() {
   const consumedPreparedRef = useRef(false);
   /** isLoading 镜像：供滚动 effect 在不额外触发重跑的前提下读取最新值 */
   const isLoadingRef = useRef(false);
+  /** 用户是否停留在消息底部（v3.8.1：只有本就在底部时才吸附，翻上去看历史不被拽回） */
+  const stickToBottomRef = useRef(true);
   /** sessions 最新镜像：流式回调需要在 React state 之外读取/更新最新值 */
   const sessionsRef = useRef<ChatSession[]>(sessions);
 
@@ -605,10 +607,41 @@ export function ChatPage() {
   // isLoading 镜像同步（供滚动 effect 读取，不进入其依赖数组）
   useEffect(() => { isLoadingRef.current = isLoading; }, [isLoading]);
 
-  // 自动滚动：流式期间用 'auto'（smooth 动画会与高频 chunk 更新排队打架、追不上），
-  // 非流式（发消息、加载历史、切换会话）仍用 smooth
+  /* === v3.8.1 滚动策略：只在「用户本就在底部」时才吸附 ===
+   * 旧实现每次 messages 变化都强制 scrollIntoView —— 流式期间用户翻上去看前文，
+   * 会被源源不断的 chunk 一次次拽回底部，根本没法读。现在：
+   * - 监听容器 scroll，实时维护 stickToBottomRef（距底 <= 80px 视为在底部）；
+   * - 切会话/首次加载先强制归底（见下方 effect）；
+   * - 发送消息时主动归底（handleSend 里置 stickToBottomRef = true）；
+   * - 流式 chunk 到达时，仅当在底部才滚动，且用 'auto' 追帧。
+   */
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: isLoadingRef.current ? 'auto' : 'smooth' });
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+      stickToBottomRef.current = distance <= 80;
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+  }, []);
+
+  // 切换会话先归底：新会话从最新一条看起（不等 scroll 事件）
+  useEffect(() => {
+    stickToBottomRef.current = true;
+  }, [currentSessionId]);
+
+  const scrollMessagesToBottom = useCallback((smooth: boolean) => {
+    const el = messagesContainerRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+    else messagesEndRef.current?.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto' });
+    stickToBottomRef.current = true;
+  }, []);
+
+  // 消息变化：仅当用户本就在底部才吸附。流式用 'auto'（smooth 会与高频 chunk 排队打架）
+  useEffect(() => {
+    if (!stickToBottomRef.current) return;
+    scrollMessagesToBottom(!isLoadingRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages]);
 
@@ -680,6 +713,21 @@ export function ChatPage() {
       saveSessionDb(updated).catch(() => {});
     }
   }, [scheduleSessionWrite]);
+
+  /**
+   * v3.8.1：删除「这一轮」对话 —— 从点中的 AI 消息往前找到本轮的用户提问，
+   * 连同中间的 tool 结果一起删掉，方便回退重发。
+   */
+  const handleDeleteTurn = useCallback((msgId: string) => {
+    if (isLoadingRef.current || !currentSessionId) return;
+    const idx = messages.findIndex(m => m.id === msgId);
+    if (idx < 0) return;
+    let start = idx;
+    while (start > 0 && messages[start].role !== 'user') start -= 1;
+    if (messages[start]?.role !== 'user') start = idx; // 异常数据：只删这一条
+    const next = messages.filter((_, i) => i < start || i > idx);
+    updateSessionMessages(currentSessionId, next);
+  }, [messages, currentSessionId, updateSessionMessages]);
 
   /* === MCP 工具激活：对话级持久化 ===
    * 把当前启用的工具列表同时写到 state（即时 UI 反馈）与 session.mcpEnabledTools（持久化）。
@@ -1097,6 +1145,8 @@ export function ChatPage() {
 
     let currentMsgs = [...updatedMessages, aiPlaceholder];
     updateSessionMessages(sessionId, currentMsgs);
+    // v3.8.1：自己发消息时主动归底（哪怕之前翻上去看历史）
+    stickToBottomRef.current = true;
 
     /* === 流式状态（提升到 try 外：异常处理需要读取最新值）=== */
     let loopDisplayMsgs = [...currentMsgs];   // UI 显示的消息序列（含初始 AI 占位）
@@ -1900,6 +1950,7 @@ export function ChatPage() {
           endRef={messagesEndRef}
           onToggleSelect={handleToggleSelectMsg}
           onConfirmAction={resolveConfirm}
+          onDeleteTurn={handleDeleteTurn}
         />
 
         {/* === MCP 搜索面板（半页，支持数据/待办切换）=== */}
