@@ -513,3 +513,249 @@
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.4);
   pointer-events: none;
 }
+
+/* ===== v3.8.0 图标网格 / 双区域 / 菜单 ===== */
+.files-head-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.files-new.ghost {
+  background: transparent;
+  border: 1px solid var(--color-border-primary);
+  color: var(--color-text-secondary);
+}
+
+.files-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 14px;
+}
+
+.files-zone {
+  margin-bottom: 22px;
+}
+
+.files-zone-title {
+  margin: 0 0 10px;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  letter-spacing: 0.5px;
+}
+
+.files-cover-card {
+  min-width: 0;
+}
+
+.files-cover-main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  padding: 0;
+  background: none;
+  border: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+
+.files-cover-thumb {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-primary);
+}
+
+.files-cover-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.files-cover-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  font-size: 18px;
+  font-weight: 500;
+  letter-spacing: 1px;
+  color: var(--color-text-tertiary);
+  background: var(--color-bg-secondary);
+}
+
+.files-cover-fallback.html {
+  color: var(--color-accent-primary);
+}
+
+.files-mark {
+  position: absolute;
+  left: 6px;
+  top: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: var(--text-xs);
+  background: rgba(20, 21, 26, 0.82);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border-primary);
+}
+
+.files-mark.daily {
+  left: auto;
+  right: 6px;
+  color: var(--color-accent-primary);
+}
+
+.files-cover-name {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+  line-height: 1.35;
+  word-break: break-all;
+}
+
+.files-cover-meta {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+}
+
+.files-menu-title {
+  margin: 0 0 10px;
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  word-break: break-all;
+}
+
+.files-menu-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.files-menu-item {
+  padding: 11px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-primary);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.files-menu-item.danger {
+  color: var(--color-error);
+}
+
+.files-modal.wide {
+  width: min(560px, 92vw);
+}
+
+/* 查看页工具行 */
+.file-view-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--color-border-primary);
+}
+
+.files-chip {
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border-primary);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.files-chip.active {
+  border-color: var(--color-accent-primary);
+  color: var(--color-accent-primary);
+}
+
+.files-chip.ghost {
+  background: transparent;
+  color: var(--color-text-secondary);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.files-chip.danger {
+  color: var(--color-error);
+}
+
+.file-view-image {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-primary);
+}
+
+.file-view-tools-note {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  margin-left: auto;
+}
+
+/* 历史版本列表 */
+.version-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 50vh;
+  overflow-y: auto;
+  margin-bottom: 12px;
+}
+
+.version-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+}
+
+.version-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.version-time {
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+}
+
+.version-meta {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+}
+
+.version-acts {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}

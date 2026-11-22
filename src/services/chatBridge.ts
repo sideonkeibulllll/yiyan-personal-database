@@ -28,7 +28,11 @@
  * 解决了「AI 看不到结果」「一次只能调一个」「无 agent loop」等弊端。
  */
 
-import { listLibraryFiles, readLibraryFile, writeLibraryFile, deleteLibraryFile, libraryFileExists } from './fileLibrary';
+import {
+  listWorks, listWorkFiles, readWorkText, writeWorkText, writeWorkBinary,
+  deleteWorkFile, createWork, renameWork, deleteWork, workExists, entryNameFor,
+} from './workLibrary';
+import { bytesToBase64, drawTraeImage } from './traeImage';
 import { fetchPageText, searchWeb } from './webSearch';
 import { getDatabase } from '@/services/database';
 import { getTodoDatabase } from '@/services/todoDatabase';
@@ -640,44 +644,117 @@ export const BRIDGE_TOOLS: BridgeTool[] = [
       required: ['title', 'content'],
     },
   },
-  /* === v3.6.4: 文件库（AI 可直接写 html，写完在「文件」页全屏看） === */
+  /* === v3.8.0: 文件与作品（一个作品 = 一个文件夹，入口 index.html / index.md / …） === */
   {
-    name: 'list_files',
-    description: '列出「文件库」里的文件（名称、字节数、修改时间）。文件库是用户的本地文件柜，主要放 html / md 作品。想找文件、确认某个名字是否存在时先调它。',
+    name: 'list_works',
+    description: '列出「文件与作品」里的全部作品（每个作品是一个文件夹：入口文件 + 可选的 css/js/图片等）。想知道有哪些作品、某作品存不存在时先调它。',
     parameters: { type: 'object', properties: {}, required: [] },
   },
   {
-    name: 'read_file',
-    description: '读取文件库里某个文件的全文（按文件名精确匹配，支持 .html/.md/.txt 等文本文件）。超过 20 万字符会截断并在结果里标注。',
+    name: 'create_work',
+    description: '新建一个作品（自动建文件夹与入口文件）。html 作品入口固定 index.html，md 笔记入口 index.md。也可以直接 write_file 写 index.html——作品不存在时会自动创建。',
     parameters: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: '文件名（含扩展名，如 demo.html）' },
+        name: { type: 'string', description: '作品名（沿用文件名风格，如 记账本.html 或 note.md）' },
+        entry_content: { type: 'string', description: '入口文件初始内容（可选，默认空）' },
       },
       required: ['name'],
+    },
+  },
+  {
+    name: 'rename_work',
+    description: '重命名一个作品（连同它的全部文件一起改）。',
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: '原作品名' },
+        new_name: { type: 'string', description: '新作品名' },
+      },
+      required: ['name', 'new_name'],
+    },
+  },
+  {
+    name: 'delete_work',
+    description: '删除整个作品（含它的全部文件、版本快照与应用数据）。破坏性操作：系统会先弹确认卡片，用户确认后才真正删除。',
+    parameters: {
+      type: 'object',
+      properties: { name: { type: 'string', description: '作品名' } },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'list_files',
+    description: '列出某个作品内的全部文件（相对路径、字节数、修改时间）。',
+    parameters: {
+      type: 'object',
+      properties: { work: { type: 'string', description: '作品名' } },
+      required: ['work'],
+    },
+  },
+  {
+    name: 'read_file',
+    description: '读取作品内某个文本文件的全文（超过 20 万字符会截断并在结果里标注）。图片不要用它读。',
+    parameters: {
+      type: 'object',
+      properties: {
+        work: { type: 'string', description: '作品名' },
+        path: { type: 'string', description: '相对路径，如 index.html 或 app.css' },
+      },
+      required: ['work', 'path'],
     },
   },
   {
     name: 'write_file',
-    description: '在文件库里新建或覆盖一个文本文件（同名即覆盖，常用于迭代同一个 html）。**不需要用户确认**，所以只在用户明确要求写文件、或明显是在做作品时使用；不要拿它当草稿纸。写 html 时请输出完整可运行的单文件（内联样式/脚本）。',
+    description: '在作品里新建或覆盖一个文本文件（同路径即覆盖，迭代作品的常态）。**不需要用户确认**，只在用户明确要求写文件/做作品时使用。多文件作品可把样式/脚本拆到 app.css / app.js 再引用。\n【封面约定】我们会提取 html 里的封面做封面：需要封面时用 draw_image 画一张图存进作品（如 cover.jpg），再在 index.html 的 <head> 里写 <meta name="cover" content="cover.jpg">，作品列表就会显示它。',
     parameters: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: '文件名（含扩展名；不接受路径分隔符）' },
+        work: { type: 'string', description: '作品名（不存在会自动创建）' },
+        path: { type: 'string', description: '相对路径，如 index.html、app.css' },
         content: { type: 'string', description: '完整文件内容（原样写入，不做转义）' },
       },
-      required: ['name', 'content'],
+      required: ['work', 'path', 'content'],
+    },
+  },
+  {
+    name: 'write_image',
+    description: '把一张 base64 图片写进作品文件夹（已有图片数据时用）。文生图请用 draw_image。',
+    parameters: {
+      type: 'object',
+      properties: {
+        work: { type: 'string', description: '作品名' },
+        path: { type: 'string', description: '相对路径，如 cover.jpg 或 assets/a.png' },
+        base64: { type: 'string', description: '图片字节的 base64（不要 data: 前缀）' },
+      },
+      required: ['work', 'path', 'base64'],
     },
   },
   {
     name: 'delete_file',
-    description: '删除文件库里的一个文件。这是破坏性操作：系统会先弹确认卡片，用户确认后才真正删除。',
+    description: '删除作品内的一个文件。破坏性操作：系统会先弹确认卡片，用户确认后才真正删除。',
     parameters: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: '要删除的文件名（含扩展名）' },
+        work: { type: 'string', description: '作品名' },
+        path: { type: 'string', description: '相对路径' },
       },
-      required: ['name'],
+      required: ['work', 'path'],
+    },
+  },
+  /* === v3.8.0: 画图（TRAE 文生图，约 8.8 积分/张，自动走积分最多的账号） === */
+  {
+    name: 'draw_image',
+    description: '文生图并直接存进作品文件夹（TRAE seedream，1920x1920 约 8.8 积分/张，走账号倾向里积分最多的号）。画完返回保存路径。典型用法：给作品画封面——存成 cover.jpg 并按封面约定在 index.html 加 <meta name="cover" content="cover.jpg">。同一 prompt 有缓存不会重复扣费。纯几何/图标请直接写 SVG/CSS，别浪费积分。',
+    parameters: {
+      type: 'object',
+      properties: {
+        prompt: { type: 'string', description: '画面描述（英文更稳：主体、风格、光线、构图、白底等）' },
+        work: { type: 'string', description: '保存到哪个作品' },
+        path: { type: 'string', description: '保存的相对路径，默认 assets/gen-<时间>.jpg；画封面建议 cover.jpg' },
+        image_size: { type: 'string', description: '尺寸，默认 1920x1920（像素下限）；也可用 2k/3k/4k' },
+      },
+      required: ['prompt', 'work'],
     },
   },
   /* === v3.6.7: 联网搜索（引擎由设置决定：秘塔 / DeepSeek 官方 Search） === */
@@ -741,12 +818,21 @@ export const PROMPT_TOOLS = [
   'get_prompt',
   'save_prompt',
 ];
-/** 文件库工具（v3.6.4）：列表 / 读 / 写（免确认） / 删除（需确认） */
+/** 文件与作品工具（v3.8.0）：作品管理 + 作品内文件读写；删除类需确认 */
 export const FILE_TOOLS = [
+  'list_works',
+  'create_work',
+  'rename_work',
+  'delete_work',
   'list_files',
   'read_file',
   'write_file',
+  'write_image',
   'delete_file',
+];
+/** 画图工具（v3.8.0）：TRAE 文生图落盘（花积分，走账号倾向） */
+export const IMAGE_TOOLS = [
+  'draw_image',
 ];
 /** 联网工具（v3.6.7）：搜索 / 抓网页正文；引擎在设置里选，不做自动降级 */
 export const WEB_TOOLS = [
@@ -760,7 +846,7 @@ export const WEB_TOOLS = [
  * update_soul：展示理由 + 逐项变更 + 更新后画像预览（见 describeToolPreview）；
  * save_prompt：展示名称/场景/字数与「新建还是覆盖哪一条」。
  */
-export const DANGEROUS_TOOLS = new Set(['delete_card', 'delete_todo', 'delete_memo', 'delete_todo_tag', 'delete_ai_memory', 'update_soul', 'save_prompt', 'delete_file']);
+export const DANGEROUS_TOOLS = new Set(['delete_card', 'delete_todo', 'delete_memo', 'delete_todo_tag', 'delete_ai_memory', 'update_soul', 'save_prompt', 'delete_file', 'delete_work']);
 
 /** 工具名 → 中文显示名（用于确认弹窗） */
 export const TOOL_DISPLAY_NAMES: Record<string, string> = {
@@ -777,7 +863,9 @@ export const TOOL_DISPLAY_NAMES: Record<string, string> = {
   update_ai_memory: '修改长期记忆', delete_ai_memory: '删除长期记忆',
   update_soul: '更新人格档案',
   list_prompts: '查看提示词库', get_prompt: '读取提示词', save_prompt: '保存提示词',
-  list_files: '查看文件库', read_file: '读取文件', write_file: '写入文件', delete_file: '删除文件',
+  list_works: '查看作品列表', create_work: '新建作品', rename_work: '重命名作品', delete_work: '删除作品',
+  list_files: '列出作品文件', read_file: '读取文件', write_file: '写入文件', write_image: '写入图片',
+  delete_file: '删除文件', draw_image: '绘制图片',
   web_search: '联网搜索', web_fetch: '读取网页',
 };
 
@@ -799,7 +887,8 @@ export function describeToolAction(toolName: string, args: Record<string, unknow
     case 'delete_todo': return `删除 ${count(args.todoIds)} 条待办`;
     case 'delete_memo': return `删除 ${count(args.memoIds)} 篇备忘录`;
     case 'delete_ai_memory': return `删除 ${count(args.memoryIds ?? args.memoryId)} 条长期记忆`;
-    case 'delete_file': return `删除文件「${String(args.name || '未命名')}」`;
+    case 'delete_file': return `删除「${String(args.work || '未命名')}」里的文件「${String(args.path || '')}」`;
+    case 'delete_work': return `删除整个作品「${String(args.name || '未命名')}」（含全部文件与数据）`;
     case 'save_prompt': {
       const title = String(args.title || '').trim() || '未命名提示词';
       const chars = String(args.content || '').length;
@@ -2299,26 +2388,66 @@ export async function executeToolCall(
         };
       }
 
-      case 'list_files': {
-        const files = await listLibraryFiles();
+      case 'list_works': {
+        const works = await listWorks();
         return {
           success: true,
           data: {
+            total: works.length,
+            works: works.map(w => ({ name: w.name, entry: w.entry ?? undefined, files: w.fileCount, bytes: w.size })),
+            hint: works.length === 0 ? '还没有作品；可以 create_work 新建，或 write_file 直接写 index.html' : undefined,
+          },
+        };
+      }
+      case 'create_work': {
+        const name = typeof args.name === 'string' ? args.name.trim() : '';
+        if (!name) return { success: false, error: 'name 必填' };
+        const content = typeof args.entry_content === 'string' ? args.entry_content : '';
+        const entry = entryNameFor(name);
+        const saved = await createWork(name, entry, content);
+        return {
+          success: true,
+          data: { name: saved, entry, message: `已创建作品「${saved}」（入口 ${entry}）` },
+        };
+      }
+      case 'rename_work': {
+        const name = typeof args.name === 'string' ? args.name.trim() : '';
+        const newName = typeof args.new_name === 'string' ? args.new_name.trim() : '';
+        if (!name || !newName) return { success: false, error: 'name / new_name 必填' };
+        const saved = await renameWork(name, newName);
+        return { success: true, data: { name: saved, message: `已改名为「${saved}」` } };
+      }
+      case 'delete_work': {
+        const name = typeof args.name === 'string' ? args.name.trim() : '';
+        if (!name) return { success: false, error: 'name 必填' };
+        await deleteWork(name);
+        return { success: true, data: { name, message: `已删除作品「${name}」` } };
+      }
+      case 'list_files': {
+        const work = typeof args.work === 'string' ? args.work.trim() : '';
+        if (!work) return { success: false, error: 'work 必填' };
+        const files = await listWorkFiles(work);
+        return {
+          success: true,
+          data: {
+            work,
             total: files.length,
-            files: files.map(file => ({ name: file.name, bytes: file.size, mtime: file.mtime || undefined })),
-            hint: files.length === 0 ? '文件库是空的；可以先用 write_file 写一个 demo.html' : undefined,
+            files: files.map(f => ({ path: f.path, bytes: f.size, mtime: f.mtime || undefined })),
+            hint: files.length === 0 ? '这个作品还没有文件；用 write_file 写 index.html 吧' : undefined,
           },
         };
       }
       case 'read_file': {
-        const name = typeof args.name === 'string' ? args.name.trim() : '';
-        if (!name) return { success: false, error: 'name 必填' };
-        const file = await readLibraryFile(name);
-        if (!file) return { success: false, error: `文件不存在：${name}` };
+        const work = typeof args.work === 'string' ? args.work.trim() : '';
+        const path = typeof args.path === 'string' ? args.path.trim() : '';
+        if (!work || !path) return { success: false, error: 'work / path 必填' };
+        const file = await readWorkText(work, path);
+        if (!file) return { success: false, error: `文件不存在：${work}/${path}` };
         return {
           success: true,
           data: {
-            name: file.name,
+            name: work,
+            path: file.path,
             chars: file.text.length,
             truncated: file.truncated,
             content: file.text,
@@ -2326,27 +2455,63 @@ export async function executeToolCall(
         };
       }
       case 'write_file': {
-        const name = typeof args.name === 'string' ? args.name.trim() : '';
+        const work = typeof args.work === 'string' ? args.work.trim() : '';
+        const path = typeof args.path === 'string' ? args.path.trim() : '';
         const content = typeof args.content === 'string' ? args.content : '';
-        if (!name) return { success: false, error: 'name 必填' };
+        if (!work || !path) return { success: false, error: 'work / path 必填' };
         if (!content.trim()) return { success: false, error: 'content 不能为空' };
-        const existed = await libraryFileExists(name);
-        const saved = await writeLibraryFile(name, content);
+        const existed = (await listWorkFiles(work)).some(f => f.path === path.replace(/\\/g, '/').replace(/^\/+/, ''));
+        const saved = await writeWorkText(work, path, content, { reason: 'ai' });
         return {
           success: true,
           data: {
-            name: saved,
+            name: work,
+            path: saved,
             chars: content.length,
             mode: existed ? 'overwritten' : 'created',
             message: `${existed ? '已覆盖' : '已创建'}「${saved}」（${content.length} 字）`,
           },
         };
       }
+      case 'write_image': {
+        const work = typeof args.work === 'string' ? args.work.trim() : '';
+        const path = typeof args.path === 'string' ? args.path.trim() : '';
+        let base64 = typeof args.base64 === 'string' ? args.base64.trim() : '';
+        if (!work || !path) return { success: false, error: 'work / path 必填' };
+        if (!base64) return { success: false, error: 'base64 必填' };
+        base64 = base64.replace(/^data:[^,]*,/, '');
+        const saved = await writeWorkBinary(work, path, base64);
+        return { success: true, data: { name: work, path: saved, message: `图片已写入「${saved}」` } };
+      }
       case 'delete_file': {
-        const name = typeof args.name === 'string' ? args.name.trim() : '';
-        if (!name) return { success: false, error: 'name 必填' };
-        await deleteLibraryFile(name);
-        return { success: true, data: { name, message: `已删除「${name}」` } };
+        const work = typeof args.work === 'string' ? args.work.trim() : '';
+        const path = typeof args.path === 'string' ? args.path.trim() : '';
+        if (!work || !path) return { success: false, error: 'work / path 必填' };
+        await deleteWorkFile(work, path);
+        return { success: true, data: { name: work, path, message: `已删除「${work}/${path}」` } };
+      }
+      case 'draw_image': {
+        const prompt = typeof args.prompt === 'string' ? args.prompt.trim() : '';
+        const work = typeof args.work === 'string' ? args.work.trim() : '';
+        const size = typeof args.image_size === 'string' && args.image_size.trim() ? args.image_size.trim() : '1920x1920';
+        if (!prompt || !work) return { success: false, error: 'prompt / work 必填' };
+        const path = typeof args.path === 'string' && args.path.trim()
+          ? args.path.trim()
+          : `assets/gen-${Date.now()}.jpg`;
+        const result = await drawTraeImage({ prompt, imageSize: size });
+        const saved = await writeWorkBinary(work, path, bytesToBase64(result.bytes));
+        return {
+          success: true,
+          data: {
+            name: work,
+            path: saved,
+            cached: result.cached,
+            uid: result.uid,
+            bytes: result.bytes.length,
+            message: `${result.cached ? '命中缓存（未扣积分）' : '已生成'}「${saved}」`
+              + `，账号 ${result.uid.slice(-6)}。记得在 index.html 加 <meta name="cover" content="${path}"> 作为封面`,
+          },
+        };
       }
 
       /* === v3.6.7: 联网搜索 === */

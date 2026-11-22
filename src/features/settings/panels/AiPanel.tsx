@@ -19,6 +19,7 @@ import {
   type TraeAccountCredits,
   type TraeCheckinResult,
 } from '@/services/aiProviders/trae';
+import { updateTraeDrawPreference } from '@/services/traeImage';
 
 interface AiPanelProps {
   markDirty: (field: string) => void;
@@ -155,7 +156,10 @@ export function AiPanel({ markDirty }: AiPanelProps) {
     setCreditsBusy(true);
     setCreditsMsg('');
     try {
-      setCredits(await fetchAllCredits(entry.apiKey));
+      const list = await fetchAllCredits(entry.apiKey);
+      setCredits(list);
+      // 画图账号倾向：余额最多的号记下来（画图时直接用，不再实时查积分防风控）
+      updateTraeDrawPreference(list);
     } catch (error) {
       setCreditsMsg(error instanceof Error ? error.message : '读取积分失败');
     } finally {
@@ -189,7 +193,10 @@ export function AiPanel({ markDirty }: AiPanelProps) {
       } else {
         setCreditsMsg(`${skipped.length} 个账号今日均已签到`);
       }
-      setCredits(await fetchAllCredits(entry.apiKey));
+      setCredits(await fetchAllCredits(entry.apiKey).then(list => {
+        updateTraeDrawPreference(list);
+        return list;
+      }));
     } catch (error) {
       setCreditsMsg(error instanceof Error ? error.message : '签到失败');
     } finally {

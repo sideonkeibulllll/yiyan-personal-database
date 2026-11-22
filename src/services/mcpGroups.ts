@@ -13,7 +13,7 @@
  * - 配置存在 settings.ai.mcpGroups；undefined 表示「从未配置过」→ 用本文件的内置定义。
  */
 import type { McpGroupConfig } from '@/types';
-import { ENTRY_TOOLS, FILE_TOOLS, MEMO_TOOLS, PROMPT_TOOLS, SOUL_TOOLS, TODO_TOOLS, WEB_TOOLS } from './chatBridge';
+import { ENTRY_TOOLS, FILE_TOOLS, IMAGE_TOOLS, MEMO_TOOLS, PROMPT_TOOLS, SOUL_TOOLS, TODO_TOOLS, WEB_TOOLS } from './chatBridge';
 
 /** 出厂分组：与 v3.5.x 硬编码在 ChatInputArea 的 4 组保持一致，另加提示词组。
  *
@@ -67,10 +67,19 @@ export const DEFAULT_MCP_GROUPS: McpGroupConfig[] = [
   },
   {
     id: 'files',
-    label: '文件库',
+    label: '文件与作品',
     icon: '📁',
-    desc: '列表 / 读取 / 写入（免确认） / 删除（需你确认）',
+    desc: '作品/文件两级读写（写入免确认） / 删除（需你确认）',
     tools: [...FILE_TOOLS],
+    builtin: true,
+    visible: true,
+  },
+  {
+    id: 'image',
+    label: '画图',
+    icon: '🎨',
+    desc: '文生图存进作品（TRAE，约 8.8 积分/张，走积分最多的账号）',
+    tools: [...IMAGE_TOOLS],
     builtin: true,
     visible: true,
   },
@@ -105,48 +114,49 @@ function sanitizeTools(tools: unknown): string[] {
 /**
  * 把 settings 里存的配置解析成完整分组列表。
  *
- * 合并规则：
- * - 内置组永远按 DEFAULT 的顺序出现在前面（用户改过的字段覆盖默认值，id 不丢）；
- * - 用户自己加的组按存储顺序跟在后面；
- * - 存的是空数组/非法值 → 视为「从未配置」，直接返回出厂定义。
+ * 合并规则（出厂组不再插队）：
+ * - **顺序完全以 settings.ai.mcpGroups 保存的数组为准**（设置页的上移/下移直接写回这个数组）；
+ * - 老配置里缺失的出厂组按出厂顺序补到末尾，不插到别人前面；
+ * - 存的是空数组/非法值 → 视为「从未配置」，直接返回出厂定义；
+ * - 重复 id 只留第一次出现的，避免同一组显示两次。
  */
 export function resolveMcpGroups(raw?: McpGroupConfig[] | null): McpGroupConfig[] {
   if (!Array.isArray(raw) || raw.length === 0) return DEFAULT_MCP_GROUPS.map(cloneGroup);
 
-  const byId = new Map<string, McpGroupConfig>();
-  for (const g of raw) {
-    if (g && typeof g.id === 'string') byId.set(g.id, g);
-  }
-
+  const seen = new Set<string>();
   const merged: McpGroupConfig[] = [];
-  for (const def of DEFAULT_MCP_GROUPS) {
-    const saved = byId.get(def.id);
-    if (!saved) {
-      merged.push(cloneGroup(def));
-      continue;
+
+  for (const g of raw) {
+    if (!g || typeof g.id !== 'string' || seen.has(g.id)) continue;
+    seen.add(g.id);
+
+    const def = DEFAULT_MCP_GROUPS.find(d => d.id === g.id);
+    if (def) {
+      merged.push({
+        id: def.id,
+        label: (g.label || def.label).trim(),
+        icon: g.icon || def.icon,
+        desc: g.desc ?? def.desc,
+        tools: sanitizeTools(g.tools),
+        builtin: true,
+        visible: g.visible !== false,
+      });
+    } else {
+      merged.push({
+        id: g.id,
+        label: (g.label || '自定义组').trim(),
+        icon: g.icon || '🧩',
+        desc: g.desc,
+        tools: sanitizeTools(g.tools),
+        builtin: false,
+        visible: g.visible !== false,
+      });
     }
-    byId.delete(def.id);
-    merged.push({
-      id: def.id,
-      label: (saved.label || def.label).trim(),
-      icon: saved.icon || def.icon,
-      desc: saved.desc ?? def.desc,
-      tools: sanitizeTools(saved.tools),
-      builtin: true,
-      visible: saved.visible !== false,
-    });
   }
 
-  for (const saved of byId.values()) {
-    merged.push({
-      id: saved.id,
-      label: (saved.label || '自定义组').trim(),
-      icon: saved.icon || '🧩',
-      desc: saved.desc,
-      tools: sanitizeTools(saved.tools),
-      builtin: false,
-      visible: saved.visible !== false,
-    });
+  // 旧配置没有的出厂组补到末尾，仍然不破坏保存顺序
+  for (const def of DEFAULT_MCP_GROUPS) {
+    if (!seen.has(def.id)) merged.push(cloneGroup(def));
   }
 
   return merged;

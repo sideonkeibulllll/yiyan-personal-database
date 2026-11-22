@@ -4,9 +4,10 @@
  * 解决的问题：Chat 的 MCP 面板把 4 个组硬编码在组件里，工具涨到 30+ 之后
  * 既不能按自己的用法组合，也没法把用不上的组收起来。
  *
- * 这里配置两件事（都只影响「选择层」，不改运行时）：
+ * 这里配置三件事（都只影响「选择层」，不改运行时）：
  * - 显示：该组是否出现在 Chat 的 MCP 面板
  * - 默认：新建对话时是否自动勾选该组的工具
+ * - 顺序：分组在 Chat 的 MCP 面板里的排列（每组右侧的上移 / 下移）
  *
  * 数据存 settings.ai.mcpGroups（undefined = 用 services/mcpGroups 的出厂定义）。
  */
@@ -53,6 +54,15 @@ export function McpGroupPanel() {
     write(groups.map(g => (g.id === id ? { ...g, ...patch } : g)));
   }, [groups, write]);
 
+  /** 上移/下移：交换相邻两项并写回完整数组，顺序即 Chat MCP 面板的排列 */
+  const moveGroup = useCallback((index: number, delta: number) => {
+    const target = index + delta;
+    if (target < 0 || target >= groups.length) return;
+    const next = [...groups];
+    [next[index], next[target]] = [next[target], next[index]];
+    write(next, '顺序已更新，Chat 面板同步生效');
+  }, [groups, write]);
+
   const toggleTool = useCallback((group: McpGroupConfig, tool: string) => {
     const has = group.tools.includes(tool);
     const tools = has ? group.tools.filter(t => t !== tool) : [...group.tools, tool];
@@ -92,6 +102,7 @@ export function McpGroupPanel() {
       <h2 className="panel-title">MCP 分组</h2>
       <p className="form-hint" style={{ marginTop: 0 }}>
         「启用」= 这个组出现在 Chat 的 MCP 面板里；关掉就整组下线（里面的工具也勾不到）。
+        用每组右侧的 ↑ / ↓ 调整顺序，这个顺序就是 Chat 的 MCP 面板里的排列顺序。
         分组只是选择视图，不改运行时行为；<strong>新对话永远从零工具开始</strong>，
         要用哪组就在面板里点一下 —— 免得自动挂上 30 多个工具把每轮 token 顶上去。
       </p>
@@ -99,7 +110,7 @@ export function McpGroupPanel() {
       {flash && <div className="promptlib-flash">{flash}</div>}
 
       <div className="mcpg-list">
-        {groups.map(g => {
+        {groups.map((g, index) => {
           const open = expanded === g.id;
           return (
             <div key={g.id} className={`mcpg-item ${open ? 'open' : ''} ${g.visible ? '' : 'hidden-group'}`}>
@@ -116,6 +127,20 @@ export function McpGroupPanel() {
                   <span className="mcpg-chev">{open ? '▴' : '▾'}</span>
                 </button>
                 <div className="mcpg-flags">
+                  <button
+                    className="mcpg-move-btn"
+                    onClick={() => moveGroup(index, -1)}
+                    disabled={index === 0}
+                    title="上移一位（Chat 面板里的顺序）"
+                    type="button"
+                  >↑</button>
+                  <button
+                    className="mcpg-move-btn"
+                    onClick={() => moveGroup(index, 1)}
+                    disabled={index === groups.length - 1}
+                    title="下移一位（Chat 面板里的顺序）"
+                    type="button"
+                  >↓</button>
                   <label className="form-checkbox" title="启用后该组出现在 Chat 的 MCP 面板；关掉整组下线">
                     <input
                       type="checkbox"

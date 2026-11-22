@@ -1,31 +1,47 @@
 /**
- * 文件管理器（v3.6.7）
+ * 文件与作品管理器（v3.8.0：作品文件夹 / 图标网格 / 双区域 / 导入）
  *
- * 使用场景想清楚了再画的：
- * 1. AI 写完 html → 人只想「点开看看」→ 主区域整块可点，直接全屏预览；
- * 2. 迭代同一件作品 → 「复制一份」而不是覆盖，留个后悔的余地；
- * 3. 名字乱（pet-pixel-final-v2）→ 「重命名」不用去别处；
- * 4. 文件多了 → 搜索 + 类型筛选 + 最近修改排前面；
- * 5. 手机上按钮要够大 → 每个卡片下方一整行操作，不搞 hover 才出现的小图标。
+ * 这是「小型应用平台」的启动器喵：
+ * - 一个作品 = 一个文件夹（入口 index.<ext> + css/js/图片），卡片展示封面；
+ * - 图标网格（仿资源管理器大图标），旧列表视图已砍；
+ * - 双区域：
+ *   1) 固定区 = 置顶作品 + 1 个随机展示位（按天换，偏向最久没打开的，防遗忘）；
+ *   2) 默认区 = 其余作品按最近使用时间倒序；
+ * - 封面：只认入口 html 里的 `<meta name="cover" content="...">`（AI 用 draw_image 画好放作品里）；
+ * - 导入：从系统文件管理器选 html/文本/图片进来，每个文件自动变一个作品；
+ * - 长按卡片（桌面右键）出操作菜单：置顶/排序/重命名/复制/删除。
  *
  * 两种形态：
  * - 独立页 `#/files`（带返回）
  * - 嵌入设置页（embedded，无返回、高度自适应、背景透明）
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  deleteLibraryFile,
-  duplicateLibraryFile,
+  createWork,
+  deleteWork,
+  duplicateWork,
+  entryNameFor,
   formatFileSize,
   formatRelativeTime,
-  isHtmlFile,
-  isMarkdownFile,
-  listLibraryFiles,
-  renameLibraryFile,
-  writeLibraryFile,
-  type LibraryFile,
-} from '@/services/fileLibrary';
+  isHtmlPath,
+  isImagePath,
+  listWorks,
+  migrateLegacyFlatFiles,
+  renameWork,
+  uniqueWorkName,
+  writeWorkBinary,
+  writeWorkText,
+  type WorkInfo,
+} from '@/services/workLibrary';
+import {
+  getMetaMap,
+  updateFileMeta,
+  type FileMeta,
+} from '@/services/fileAssets';
+import { extractWorkCover } from '@/utils/workCover';
+import { bytesToBase64 } from '@/services/traeImage';
+import { localDateKey } from '@/utils/localDate';
 import { IconBack, IconFile, IconPlus, IconTrash, IconCopy, IconEdit, IconCheck } from '@/components/icons';
 import { goBack } from '@/utils/navBack';
 import './Files.css';
@@ -38,6 +54,8 @@ const FILTERS: Array<{ key: Filter; label: string }> = [
   { key: 'text', label: '文本' },
   { key: 'other', label: '其他' },
 ];
+
+const IMPORT_ACCEPT = '.html,.htm,.txt,.md,.markdown,.css,.js,.json,.csv,.svg,.xml,.yml,.yaml,.png,.jpg,.jpeg,.gif,.webp';
 
 const TEMPLATES: Array<{ key: string; label: string; name: string; content: string }> = [
   { key: 'blank', label: '空白', name: 'untitled.txt', content: '' },
@@ -57,16 +75,32 @@ const TEMPLATES: Array<{ key: string; label: string; name: string; content: stri
 
 /** 按扩展名给个小标识（没有图标库依赖，纯文本标签） */
 function fileBadge(name: string): string {
-  if (isHtmlFile(name)) return 'HTML';
-  if (isMarkdownFile(name)) return 'MD';
+  if (isHtmlPath(name)) return 'HTML';
+  if (/\.md$/i.test(name)) return 'MD';
   const ext = name.includes('.') ? name.split('.').pop()!.toUpperCase() : 'TXT';
   return ext.slice(0, 4);
 }
 
 function kindOf(name: string): Filter {
-  if (isHtmlFile(name)) return 'html';
-  if (isMarkdownFile(name) || /\.(txt|json|csv|ts|js|css|xml|yml|yaml)$/i.test(name)) return 'text';
+  if (isHtmlPath(name)) return 'html';
+  if (/\.(md|txt|json|csv|ts|js|css|xml|yml|yaml)$/i.test(name)) return 'text';
   return 'other';
+}
+
+/** FNV-1a：给「每日一亮」做确定性随机种子 */
+function hashStr(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+interface CardItem {
+  work: WorkInfo;
+  meta?: FileMeta;
+  cover?: string;
 }
 
 interface FileManagerPageProps {
@@ -76,16 +110,21 @@ interface FileManagerPageProps {
 
 export function FileManagerPage({ embedded = false }: FileManagerPageProps) {
   const navigate = useNavigate();
-  const [files, setFiles] = useState<LibraryFile[]>([]);
+  const [works, setWorks] = useState<WorkInfo[]>([]);
+  const [metaMap, setMetaMap] = useState<Record<string, FileMeta>>({});
+  const [coverMap, setCoverMap] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [keyword, setKeyword] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('demo.html');
   const [template, setTemplate] = useState('html');
-  const [renaming, setRenaming] = useState<LibraryFile | null>(null);
+  const [renaming, setRenaming] = useState<WorkInfo | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  const [menuFor, setMenuFor] = useState<WorkInfo | null>(null);
   const [toast, setToast] = useState('');
+  const importInputRef = useRef<HTMLInputElement | null>(null);
+  const pressTimerRef = useRef<number | null>(null);
 
   const flash = useCallback((text: string) => {
     setToast(text);
@@ -95,7 +134,16 @@ export function FileManagerPage({ embedded = false }: FileManagerPageProps) {
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      setFiles(await listLibraryFiles());
+      await migrateLegacyFlatFiles();
+      const [list, meta] = await Promise.all([listWorks(), getMetaMap()]);
+      const covers: Record<string, string> = {};
+      await Promise.all(list.map(async item => {
+        const cover = await extractWorkCover(item.name, item.entry);
+        if (cover) covers[item.name] = cover;
+      }));
+      setWorks(list);
+      setMetaMap(meta);
+      setCoverMap(covers);
     } finally {
       setLoading(false);
     }
@@ -104,28 +152,78 @@ export function FileManagerPage({ embedded = false }: FileManagerPageProps) {
   useEffect(() => { void refresh(); }, [refresh]);
 
   const counts = useMemo(() => {
-    const base: Record<Filter, number> = { all: files.length, html: 0, text: 0, other: 0 };
-    for (const file of files) base[kindOf(file.name)] += 1;
+    const base: Record<Filter, number> = { all: works.length, html: 0, text: 0, other: 0 };
+    for (const work of works) base[kindOf(work.name)] += 1;
     return base;
-  }, [files]);
+  }, [works]);
 
-  const visible = useMemo(() => {
+  const searching = keyword.trim().length > 0 || filter !== 'all';
+
+  const items = useMemo<CardItem[]>(() => {
     const key = keyword.trim().toLowerCase();
-    return files.filter(file => {
-      if (filter !== 'all' && kindOf(file.name) !== filter) return false;
-      if (key && !file.name.toLowerCase().includes(key)) return false;
-      return true;
+    return works
+      .filter(work => {
+        if (filter !== 'all' && kindOf(work.name) !== filter) return false;
+        if (key && !work.name.toLowerCase().includes(key)) return false;
+        return true;
+      })
+      .map(work => ({ work, meta: metaMap[work.name], cover: coverMap[work.name] }));
+  }, [works, filter, keyword, metaMap, coverMap]);
+
+  const pinnedItems = useMemo(
+    () => items.filter(i => i.meta?.pinned).sort((a, b) => (a.meta?.pinOrder ?? 0) - (b.meta?.pinOrder ?? 0)),
+    [items],
+  );
+
+  const unpinnedItems = useMemo(() => items.filter(i => !i.meta?.pinned), [items]);
+
+  /** 每日一亮：最久没打开的前 1/3 里按日期种子抽一张（同一天稳定） */
+  const dailyPick = useMemo<CardItem | null>(() => {
+    if (searching || unpinnedItems.length === 0) return null;
+    const stalest = [...unpinnedItems].sort(
+      (a, b) => (a.meta?.lastOpenedAt ?? 0) - (b.meta?.lastOpenedAt ?? 0),
+    );
+    const pool = stalest.slice(0, Math.max(1, Math.ceil(stalest.length / 3)));
+    return pool[hashStr(localDateKey()) % pool.length];
+  }, [unpinnedItems, searching]);
+
+  /** 默认区：最近使用倒序（没记录过的用 mtime 兜底） */
+  const recentItems = useMemo(() => {
+    const arr = [...unpinnedItems];
+    arr.sort((a, b) => {
+      const ta = a.meta?.lastOpenedAt || a.work.mtime || 0;
+      const tb = b.meta?.lastOpenedAt || b.work.mtime || 0;
+      return tb - ta || a.work.name.localeCompare(b.work.name);
     });
-  }, [files, filter, keyword]);
+    return arr;
+  }, [unpinnedItems]);
 
-  const totalSize = useMemo(() => files.reduce((sum, file) => sum + (file.size || 0), 0), [files]);
+  const totalSize = useMemo(() => works.reduce((sum, w) => sum + (w.size || 0), 0), [works]);
 
+  const openWork = (name: string) => navigate(`/files/${encodeURIComponent(name)}`);
+
+  // ===== 长按 / 右键菜单 =====
+  const startPress = (work: WorkInfo) => {
+    cancelPress();
+    pressTimerRef.current = window.setTimeout(() => {
+      pressTimerRef.current = null;
+      setMenuFor(work);
+    }, 500);
+  };
+  const cancelPress = () => {
+    if (pressTimerRef.current) {
+      window.clearTimeout(pressTimerRef.current);
+      pressTimerRef.current = null;
+    }
+  };
+
+  // ===== 作品操作 =====
   const handleCreate = async () => {
     const name = newName.trim();
     if (!name) return;
     const tpl = TEMPLATES.find(item => item.key === template) ?? TEMPLATES[0];
     try {
-      await writeLibraryFile(name, tpl.content);
+      await createWork(name, entryNameFor(name), tpl.content);
       setCreating(false);
       setNewName('demo.html');
       await refresh();
@@ -135,12 +233,35 @@ export function FileManagerPage({ embedded = false }: FileManagerPageProps) {
     }
   };
 
+  const handleImport = async (list: FileList | null) => {
+    if (!list || list.length === 0) return;
+    let ok = 0;
+    for (const file of Array.from(list)) {
+      try {
+        const name = await uniqueWorkName(file.name);
+        const entry = entryNameFor(file.name);
+        if (isImagePath(file.name)) {
+          const buf = new Uint8Array(await file.arrayBuffer());
+          await writeWorkBinary(name, entry, bytesToBase64(buf));
+        } else {
+          const text = await file.text();
+          await writeWorkText(name, entry, text, { reason: 'system' });
+        }
+        ok += 1;
+      } catch {
+        /* 单个失败不拦整体 */
+      }
+    }
+    await refresh();
+    flash(ok > 0 ? `已导入 ${ok} 个作品` : '没有导入任何文件');
+  };
+
   const handleRename = async () => {
     if (!renaming) return;
     const next = renameValue.trim();
     if (!next || next === renaming.name) { setRenaming(null); return; }
     try {
-      const saved = await renameLibraryFile(renaming.name, next);
+      const saved = await renameWork(renaming.name, next);
       setRenaming(null);
       await refresh();
       flash(`已改名为 ${saved}`);
@@ -151,7 +272,7 @@ export function FileManagerPage({ embedded = false }: FileManagerPageProps) {
 
   const handleDuplicate = async (name: string) => {
     try {
-      const copy = await duplicateLibraryFile(name);
+      const copy = await duplicateWork(name);
       await refresh();
       flash(`已复制为 ${copy}`);
     } catch {
@@ -160,14 +281,76 @@ export function FileManagerPage({ embedded = false }: FileManagerPageProps) {
   };
 
   const handleDelete = async (name: string) => {
-    if (!window.confirm(`确定删除「${name}」吗？删除后不可恢复。`)) return;
+    if (!window.confirm(`确定删除作品「${name}」吗？全部文件、快照与应用数据都会没。`)) return;
     try {
-      await deleteLibraryFile(name);
+      await deleteWork(name);
       await refresh();
       flash(`已删除 ${name}`);
     } catch {
       window.alert('删除失败，请重试');
     }
+  };
+
+  const handleTogglePin = async (name: string) => {
+    const meta = metaMap[name];
+    if (meta?.pinned) {
+      await updateFileMeta(name, { pinned: false });
+      flash('已取消置顶');
+    } else {
+      await updateFileMeta(name, { pinned: true, pinOrder: Date.now() });
+      flash('已置顶');
+    }
+    setMenuFor(null);
+    await refresh();
+  };
+
+  const handleMovePin = async (name: string, dir: -1 | 1) => {
+    const list = pinnedItems;
+    const idx = list.findIndex(i => i.work.name === name);
+    const swapWith = list[idx + dir];
+    if (idx < 0 || !swapWith) return;
+    const a = list[idx].meta?.pinOrder ?? 0;
+    const b = swapWith.meta?.pinOrder ?? 0;
+    await updateFileMeta(name, { pinOrder: b });
+    await updateFileMeta(swapWith.work.name, { pinOrder: a });
+    setMenuFor(null);
+    await refresh();
+  };
+
+  // ===== 渲染 =====
+  const renderCard = (item: CardItem, marks?: { pin?: boolean; daily?: boolean }) => {
+    const { work, meta, cover } = item;
+    const usedAt = meta?.lastOpenedAt || work.mtime || 0;
+    return (
+      <div key={work.name} className="files-cover-card">
+        <button
+          type="button"
+          className="files-cover-main"
+          onClick={() => openWork(work.name)}
+          onPointerDown={() => startPress(work)}
+          onPointerUp={cancelPress}
+          onPointerMove={cancelPress}
+          onPointerCancel={cancelPress}
+          onContextMenu={e => { e.preventDefault(); setMenuFor(work); }}
+          title={`打开 ${work.name}`}
+        >
+          <span className="files-cover-thumb">
+            {cover ? (
+              <img src={cover} alt="" loading="lazy" />
+            ) : (
+              <span className={`files-cover-fallback ${isHtmlPath(work.name) ? 'html' : ''}`}>{fileBadge(work.name)}</span>
+            )}
+            {marks?.pin && <span className="files-mark pin">置顶</span>}
+            {marks?.daily && <span className="files-mark daily">今日一亮</span>}
+          </span>
+          <span className="files-cover-name">{work.name}</span>
+          <span className="files-cover-meta">
+            {work.fileCount > 1 ? `${work.fileCount} 文件 · ` : ''}{formatFileSize(work.size)}
+            {usedAt ? ` · ${formatRelativeTime(usedAt)}` : ''}
+          </span>
+        </button>
+      </div>
+    );
   };
 
   return (
@@ -179,23 +362,40 @@ export function FileManagerPage({ embedded = false }: FileManagerPageProps) {
           </button>
         )}
         <div className="files-title">
-          <h1>文件管理器</h1>
+          <h1>文件与作品</h1>
           <span className="files-sub">
-            {files.length} 个文件 · {formatFileSize(totalSize)}{counts.html > 0 ? ` · ${counts.html} 个作品` : ''}
+            {works.length} 个作品 · {formatFileSize(totalSize)}{counts.html > 0 ? ` · ${counts.html} 个网页作品` : ''}
           </span>
         </div>
-        <button type="button" className="files-new" onClick={() => setCreating(true)}>
-          <IconPlus size={16} />
-          <span>新建</span>
-        </button>
+        <div className="files-head-actions">
+          <button type="button" className="files-new ghost" onClick={() => importInputRef.current?.click()}>
+            导入
+          </button>
+          <button type="button" className="files-new" onClick={() => setCreating(true)}>
+            <IconPlus size={16} />
+            <span>新建</span>
+          </button>
+        </div>
       </header>
+
+      <input
+        ref={importInputRef}
+        type="file"
+        accept={IMPORT_ACCEPT}
+        multiple
+        style={{ display: 'none' }}
+        onChange={e => {
+          void handleImport(e.target.files);
+          e.target.value = '';
+        }}
+      />
 
       <div className="files-tools">
         <input
           className="files-search"
           value={keyword}
           onChange={e => setKeyword(e.target.value)}
-          placeholder="搜索文件名…"
+          placeholder="搜索作品名…"
         />
         <div className="files-filters">
           {FILTERS.map(item => (
@@ -215,66 +415,96 @@ export function FileManagerPage({ embedded = false }: FileManagerPageProps) {
       <div className="files-body">
         {loading && <div className="files-empty">读取中…</div>}
 
-        {!loading && files.length === 0 && (
+        {!loading && works.length === 0 && (
           <div className="files-empty">
             <IconFile size={30} />
             <p>还没有作品喵。</p>
             <p className="files-empty-hint">
-              点右上角「新建」，或者去 Chat 让 AI 直接写一个 —— 记得在输入区的 MCP 面板勾上「文件库」，
-              写完会自动出现在这里，点一下就全屏看。
+              从文件管理器「导入」一个 html，或者去 Chat 让 AI 直接写 ——
+              记得在 MCP 面板勾上「文件与作品」，写完点开就能玩。
             </p>
             <div className="files-empty-actions">
-              <button type="button" className="files-create-btn" onClick={() => setCreating(true)}>新建空白文件</button>
+              <button type="button" className="files-create-btn" onClick={() => importInputRef.current?.click()}>导入文件</button>
+              <button type="button" className="files-create-btn ghost" onClick={() => setCreating(true)}>新建空白作品</button>
               <button type="button" className="files-create-btn ghost" onClick={() => navigate('/chat')}>去 Chat 让 AI 写</button>
             </div>
           </div>
         )}
 
-        {!loading && files.length > 0 && visible.length === 0 && (
+        {!loading && works.length > 0 && items.length === 0 && (
           <div className="files-empty">
-            <p>没有匹配「{keyword || FILTERS.find(f => f.key === filter)?.label}」的文件喵</p>
+            <p>没有匹配「{keyword || FILTERS.find(f => f.key === filter)?.label}」的作品喵</p>
           </div>
         )}
 
-        {visible.map(file => (
-          <div key={file.name} className="files-card">
-            <button
-              type="button"
-              className="files-card-main"
-              onClick={() => navigate(`/files/${encodeURIComponent(file.name)}`)}
-              title={`打开 ${file.name}`}
-            >
-              <span className={`files-badge ${isHtmlFile(file.name) ? 'html' : ''}`}>{fileBadge(file.name)}</span>
-              <span className="files-row-text">
-                <span className="files-row-name">{file.name}</span>
-                <span className="files-row-meta">
-                  {formatFileSize(file.size)}
-                  {file.mtime ? ` · ${formatRelativeTime(file.mtime)}` : ''}
-                </span>
-              </span>
-              {isHtmlFile(file.name) && <span className="files-preview-hint">点击预览</span>}
-            </button>
+        {/* 搜索/筛选：扁平网格 */}
+        {!loading && searching && items.length > 0 && (
+          <div className="files-grid">{items.map(item => renderCard(item))}</div>
+        )}
 
-            <div className="files-card-actions">
-              <button type="button" className="files-act" onClick={() => { setRenaming(file); setRenameValue(file.name); }}>
-                <IconEdit size={13} /><span>重命名</span>
+        {/* 双区域 */}
+        {!loading && !searching && items.length > 0 && (
+          <>
+            {(pinnedItems.length > 0 || dailyPick) && (
+              <section className="files-zone">
+                <h2 className="files-zone-title">置顶与推荐</h2>
+                <div className="files-grid">
+                  {pinnedItems.map(item => renderCard(item, { pin: true }))}
+                  {dailyPick && renderCard(dailyPick, { daily: true })}
+                </div>
+              </section>
+            )}
+            {recentItems.length > 0 && (
+              <section className="files-zone">
+                <h2 className="files-zone-title">最近使用</h2>
+                <div className="files-grid">{recentItems.map(item => renderCard(item))}</div>
+              </section>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* 长按 / 右键操作菜单 */}
+      {menuFor && (
+        <div className="files-modal-mask" onClick={() => setMenuFor(null)}>
+          <div className="files-modal" onClick={e => e.stopPropagation()}>
+            <h3 className="files-menu-title">{menuFor.name}</h3>
+            <div className="files-menu-list">
+              <button type="button" className="files-menu-item" onClick={() => void handleTogglePin(menuFor.name)}>
+                {metaMap[menuFor.name]?.pinned ? '取消置顶' : '置顶'}
               </button>
-              <button type="button" className="files-act" onClick={() => void handleDuplicate(file.name)}>
-                <IconCopy size={13} /><span>复制一份</span>
+              {metaMap[menuFor.name]?.pinned && (
+                <>
+                  <button type="button" className="files-menu-item" onClick={() => void handleMovePin(menuFor.name, -1)}>上移</button>
+                  <button type="button" className="files-menu-item" onClick={() => void handleMovePin(menuFor.name, 1)}>下移</button>
+                </>
+              )}
+              <button
+                type="button"
+                className="files-menu-item"
+                onClick={() => { setRenaming(menuFor); setRenameValue(menuFor.name); setMenuFor(null); }}
+              >
+                重命名
               </button>
-              <button type="button" className="files-act danger" onClick={() => void handleDelete(file.name)}>
-                <IconTrash size={13} /><span>删除</span>
+              <button type="button" className="files-menu-item" onClick={() => { void handleDuplicate(menuFor.name); setMenuFor(null); }}>
+                复制一份
+              </button>
+              <button type="button" className="files-menu-item danger" onClick={() => { void handleDelete(menuFor.name); setMenuFor(null); }}>
+                删除
               </button>
             </div>
+            <div className="files-modal-actions">
+              <button type="button" className="files-create-btn ghost" onClick={() => setMenuFor(null)}>取消</button>
+            </div>
           </div>
-        ))}
-      </div>
+        </div>
+      )}
 
       {/* 新建弹层 */}
       {creating && (
         <div className="files-modal-mask" onClick={() => setCreating(false)}>
           <div className="files-modal" onClick={e => e.stopPropagation()}>
-            <h3>新建文件</h3>
+            <h3>新建作品</h3>
             <div className="files-templates">
               {TEMPLATES.map(item => (
                 <button
@@ -292,7 +522,7 @@ export function FileManagerPage({ embedded = false }: FileManagerPageProps) {
               value={newName}
               onChange={e => setNewName(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') void handleCreate(); }}
-              placeholder="文件名，如 demo.html"
+              placeholder="作品名，如 demo.html"
               autoFocus
             />
             <div className="files-modal-actions">
@@ -307,7 +537,7 @@ export function FileManagerPage({ embedded = false }: FileManagerPageProps) {
       {renaming && (
         <div className="files-modal-mask" onClick={() => setRenaming(null)}>
           <div className="files-modal" onClick={e => e.stopPropagation()}>
-            <h3>重命名</h3>
+            <h3>重命名作品</h3>
             <input
               className="files-create-input"
               value={renameValue}
