@@ -276,8 +276,14 @@ async function downloadSigned(url: string): Promise<Uint8Array> {
   // 原生端：签名 URL 多是第三方对象存储，WebView fetch 同样会被 CORS 拦，
   // 走 CapacitorHttp（返回 base64，见 r2Client 同款处理）。
   if (Capacitor.isNativePlatform()) {
+    // ⚠️ responseType 必须是 'arraybuffer'（v3.8.2 修复）：
+    // Capacitor Android 的 readData 对非 JSON 响应按 responseType 分支——
+    // ARRAY_BUFFER/BLOB → readStreamAsBase64（纯 base64）；默认 TEXT → 按 UTF-8
+    // 解码图片二进制，得到的字符串含 U+0080+ 字符，atob 抛
+    // "characters outside of the Latin1 range"（手机端 Failed to fetch 修好后的第二个坑）。
     const res = await CapacitorHttp.get({
       url,
+      responseType: 'arraybuffer',
       connectTimeout: DRAW_HTTP_TIMEOUT,
       readTimeout: DRAW_HTTP_TIMEOUT,
     });
