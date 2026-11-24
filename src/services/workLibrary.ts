@@ -14,6 +14,8 @@
  */
 import { Filesystem, Directory } from './filesystemAdapter';
 import { migrateVersionKeys, purgeFileAssets, migrateFileAssets, snapshotVersion } from './fileAssets';
+import { forgetWorkIdByWork } from './workIds';
+import { forgetWorkRecent } from './workRecent';
 
 const WORKS_DIR = 'works';
 const LEGACY_DIR = 'files';
@@ -242,6 +244,9 @@ export async function listWorks(): Promise<WorkInfo[]> {
     const base = entry.name.includes('/') ? entry.name.split('/').pop()! : entry.name;
     if (entry.type === 'directory') {
       const files = await listWorkFiles(base);
+      // 空目录不算作品：删除时目录可能没删干净（Android 上 deleteFile 删不掉目录），
+      // 残留的空壳会显示成 0 B 卡片，还会占住名字把同名作品挤成 -2。
+      if (files.length === 0) continue;
       const paths = files.map(f => f.path);
       const manifest = await readWorkManifest(base);
       out.push({
@@ -395,15 +400,35 @@ export async function deleteWork(rawName: string): Promise<void> {
   for (const file of files) {
     await deleteWorkFile(name, file.path);
   }
+  // 目录本身也要删：Capacitor 6 有 rmdir（recursive），Electron 适配层没有就退化成 deleteFile。
+  // 删不掉时 listWorks 会跳过空目录，不至于再显示成 0 B 卡片。
   try {
-    await Filesystem.deleteFile({ path: workPath(name), directory: Directory.Data });
+    const fsAny = Filesystem as unknown as {
+      rmdir?: (opts: { path: string; directory: Directory; recursive?: boolean }) => Promise<void>;
+    };
+    if (typeof fsAny.rmdir === 'function') {
+      await fsAny.rmdir({ path: workPath(name), directory: Directory.Data, recursive: true });
+    } else {
+      await Filesystem.deleteFile({ path: workPath(name), directory: Directory.Data });
+    }
   } catch {
-    /* 目录删除能力不是所有端都有，文件删完即可 */
+    /* 删不掉就让空目录留着，列表会跳过 */
   }
   try {
     await purgeFileAssets(name);
   } catch {
     /* 资产清理失败不拦删除 */
+  }
+  // 映射和浏览记录必须一起清，否则重新导入同名包会认错升级目标、被挤成 -2
+  try {
+    forgetWorkIdByWork(name);
+  } catch {
+    /* ignore */
+  }
+  try {
+    forgetWorkRecent(name);
+  } catch {
+    /* ignore */
   }
 }
 

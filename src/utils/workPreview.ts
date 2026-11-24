@@ -18,6 +18,7 @@
 import { readWorkBinary, readWorkText } from '@/services/workLibrary';
 import type { RecentPage } from '@/services/workRecent';
 import { buildStorageShimScript, injectScripts } from '@/utils/htmlStorageShim';
+import { buildWorkAiBridgeScript, type WorkAiBridgeConfig } from '@/utils/workAiBridge';
 
 const MIME: Record<string, string> = {
   png: 'image/png',
@@ -262,7 +263,7 @@ export async function buildWorkPreview(
   work: string,
   pagePath: string,
   appData: Record<string, string>,
-  options: { recent?: RecentPage[] } = {},
+  options: { recent?: RecentPage[]; ai?: WorkAiBridgeConfig } = {},
 ): Promise<PreviewReport | null> {
   const file = await readWorkText(work, pagePath);
   if (!file) return null;
@@ -396,6 +397,8 @@ export async function buildWorkPreview(
     html = await injectResumeBlock(html, work, pagePath, options.recent);
   }
 
-  report.html = injectScripts(html, [buildStorageShimScript(appData), buildNavGuardScript()]);
+  const scripts = [buildStorageShimScript(appData), buildNavGuardScript()];
+  if (options.ai) scripts.push(buildWorkAiBridgeScript(options.ai));
+  report.html = injectScripts(html, scripts);
   return report;
 }

@@ -34,6 +34,7 @@ import {
 } from './workLibrary';
 import { bytesToBase64, drawTraeImage } from './traeImage';
 import { buildWorkCatalog } from './workCatalog';
+import { WORK_AI_GUIDE } from '@/utils/workAiBridge';
 import { fetchPageText, searchWeb } from './webSearch';
 import { getDatabase } from '@/services/database';
 import { getTodoDatabase } from '@/services/todoDatabase';
@@ -2511,6 +2512,7 @@ export async function executeToolCall(
             chars: content.length,
             mode: existed ? 'overwritten' : 'created',
             message: `${existed ? '已覆盖' : '已创建'}「${saved}」（${content.length} 字）`,
+            aiGuide: /\.html?$/i.test(saved) ? WORK_AI_GUIDE : undefined,
           },
         };
       }
@@ -2574,6 +2576,7 @@ export async function executeToolCall(
             failed: failed.length > 0 ? failed : undefined,
             message: `已写入 ${written.length} 个文件（${totalChars} 字）${failed.length ? `，${failed.length} 个失败` : ''}`,
             hint: '多个页面写完后可以调 build_catalog 生成目录页',
+            aiGuide: written.some((f) => /\.html?$/i.test(f.path)) ? WORK_AI_GUIDE : undefined,
           },
           ...(written.length === 0 ? { error: '一个文件都没写成功' } : {}),
         };

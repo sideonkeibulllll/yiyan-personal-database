@@ -19,7 +19,7 @@ import {
   writeWorkText,
   type WorkFile,
 } from '@/services/workLibrary';
-import { getBundleIdMap } from '@/services/workBundle';
+import { findWorkId } from '@/services/workIds';
 import {
   looksLikeCatalog,
   renderCatalogHtml,
@@ -124,8 +124,7 @@ export async function buildWorkCatalog(
     ? opts.featured
     : pickFeatured(pages);
 
-  const idMap = getBundleIdMap();
-  const mappedId = Object.entries(idMap).find(([, value]) => value?.work === work)?.[0];
+  const mappedId = findWorkId(work);
   const manifestId = manifest?.id && /^[a-z0-9][a-z0-9-]{1,63}$/.test(manifest.id) ? manifest.id : '';
   const id = manifestId || mappedId || slugifyWorkName(work);
 

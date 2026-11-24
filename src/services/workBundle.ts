@@ -22,6 +22,7 @@ import {
   uniqueWorkName,
   writeWorkBinary,
 } from './workLibrary';
+import { getWorkIdMap, setWorkId } from './workIds';
 
 type ZipEntry = JSZip.JSZipObject;
 
@@ -29,7 +30,6 @@ export const BUNDLE_SPEC = 1;
 export const BUNDLE_MAX_FILES = 2000;
 export const BUNDLE_MAX_FILE_BYTES = 20 * 1024 * 1024;
 export const BUNDLE_MAX_TOTAL_BYTES = 200 * 1024 * 1024;
-const ID_MAP_KEY = 'yiyan_mod_ids_v1';
 const MAX_DEPTH = 8;
 
 /** 平台不收的可执行类型，包里带了也跳过 */
@@ -88,40 +88,6 @@ export interface BundleImportResult extends BundleReport {
   workName?: string;
   upgraded?: boolean;
   writtenCount?: number;
-}
-
-interface IdMapEntry {
-  work: string;
-  version: string;
-  at: number;
-}
-
-type IdMap = Record<string, IdMapEntry>;
-
-// ===== id → 作品名 映射（判断升级用） =====
-
-function loadIdMap(): IdMap {
-  try {
-    const raw = localStorage.getItem(ID_MAP_KEY);
-    if (!raw) return {};
-    const parsed: unknown = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') return {};
-    return parsed as IdMap;
-  } catch {
-    return {};
-  }
-}
-
-function saveIdMap(map: IdMap): void {
-  try {
-    localStorage.setItem(ID_MAP_KEY, JSON.stringify(map));
-  } catch {
-    /* 存不进去也不影响本次导入 */
-  }
-}
-
-export function getBundleIdMap(): IdMap {
-  return loadIdMap();
 }
 
 // ===== 包内路径清洗 =====
@@ -306,7 +272,7 @@ async function analyzeZip(zip: JSZip, warnings: string[]): Promise<BundleReport>
   if (skipped > 0) warnings.push(`跳过 ${skipped} 个文件（可执行类型或路径不合法）`);
 
   // 同 id 已装过 → 走升级
-  const prev = loadIdMap()[manifest.id];
+  const prev = getWorkIdMap()[manifest.id];
   let upgradeOf: string | undefined;
   if (prev?.work) {
     const existing = await listWorkFiles(prev.work);
@@ -399,9 +365,7 @@ export async function importBundle(
     };
   }
 
-  const map = loadIdMap();
-  map[manifest.id] = { work: workName, version: manifest.version, at: Date.now() };
-  saveIdMap(map);
+  setWorkId(manifest.id, workName, manifest.version);
 
   if (upgraded && written !== report.files.length) {
     warnings.push(`有 ${report.files.length - written} 个文件没写成功`);

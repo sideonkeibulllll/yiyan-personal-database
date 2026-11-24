@@ -36,6 +36,17 @@ import {
 import { listRecentPages, rememberPage } from '@/services/workRecent';
 import { buildWorkCatalog } from '@/services/workCatalog';
 import {
+  clampLimit,
+  DEFAULT_DAILY_LIMIT,
+  MAX_DAILY_LIMIT,
+  readWorkAiGrant,
+  resetWorkAiUsage,
+  runWorkAi,
+  updateWorkAiGrant,
+  type WorkAiGrant,
+} from '@/services/workAi';
+import type { WorkAiBridgeConfig } from '@/utils/workAiBridge';
+import {
   appDataStats,
   clearAppData,
   deleteVersion,
@@ -53,7 +64,12 @@ import { goBack } from '@/utils/navBack';
 import './Files.css';
 
 type Mode = 'preview' | 'source';
-type Panel = null | 'pages' | 'actions' | 'versions' | 'appdata' | 'newfile';
+type Panel = null | 'pages' | 'actions' | 'ai' | 'versions' | 'appdata' | 'newfile';
+
+interface PendingAiAsk {
+  id: string;
+  req: { kind: string; prompt: string; system?: string; thinking?: boolean; search?: boolean };
+}
 
 const ISLAND_POS_KEY = 'yiyan_island_pos_v1';
 
@@ -102,6 +118,19 @@ export function FileViewPage() {
   const location = useLocation();
   const work = useMemo(() => decodeURIComponent(rawName ?? ''), [rawName]);
 
+  // v4.1.0：chat 里的「已写入」卡片会带 ?page=相对路径，点开直接落在那页
+  const requestedPage = useMemo(() => {
+    const search = location.search || '';
+    const match = /[?&]page=([^&]*)/.exec(search);
+    if (!match) return '';
+    try {
+      return decodeURIComponent(match[1]);
+    } catch {
+      return '';
+    }
+  }, [location.search]);
+  /** 同一次导航只消费一次 ?page，之后手动切页不会再被拽回去 */
+  const consumedNavRef = useRef('');
   // v3.8.1：从设置页「文件与作品」内嵌管理器进来的，返回时直接落到该面板
   // （replace 掉详情页，避免多退一页退到设置首页）。
   const backTo = (location.state as { yiyanBackTo?: string } | null)?.yiyanBackTo;
@@ -134,10 +163,17 @@ export function FileViewPage() {
   const [previewToken, setPreviewToken] = useState(0);
   const [showAllFiles, setShowAllFiles] = useState(false);
   const [panel, setPanel] = useState<Panel>(null);
+  const [aiGrant, setAiGrant] = useState<WorkAiGrant>(() => readWorkAiGrant(work));
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiPendingAsk, setAiPendingAsk] = useState<PendingAiAsk | null>(null);
   const [versions, setVersions] = useState<FileVersion[]>([]);
   const [appStat, setAppStat] = useState<{ keys: number; bytes: number }>({ keys: 0, bytes: 0 });
 
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  // 桥注入时的初始配置：只跟「日额度/联网开关」有关，不跟已用次数走。
+  // 否则每调一次 AI 就重建一次 iframe，作品里的状态全丢。
+  const aiCfgRef = useRef<WorkAiBridgeConfig>({ remaining: DEFAULT_DAILY_LIMIT, allowSearch: false });
+  aiCfgRef.current = { remaining: aiGrant.dailyLimit, allowSearch: aiGrant.allowSearch };
   const appDataRef = useRef<Record<string, string>>({});
   const saveTimerRef = useRef<number | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
@@ -219,7 +255,15 @@ export function FileViewPage() {
     setFiles(list);
     setEntry(entryPath);
     setManifest(manifestDoc);
-    const path = entryPath ?? list[0].path;
+    // chat 卡片带了具体页面就落过去；同一次导航只认一次，手动切页不会被拽回
+    const navKey = `${location.key}|${requestedPage}`;
+    const jumpTo = requestedPage
+      && consumedNavRef.current !== navKey
+      && list.some(item => item.path === requestedPage)
+      ? requestedPage
+      : '';
+    if (jumpTo) consumedNavRef.current = navKey;
+    const path = jumpTo || entryPath || list[0].path;
     setCurrentPath(path);
     await loadFile(path);
     const data = await getAppData(work);
@@ -228,7 +272,7 @@ export function FileViewPage() {
     setMissing(false);
     setLoaded(true);
     void touchFileOpened(work);
-  }, [work, loadFile]);
+  }, [work, loadFile, requestedPage, location.key]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -248,6 +292,7 @@ export function FileViewPage() {
     void (async () => {
       const report = await buildWorkPreview(work, currentPath, previewData, {
         recent: isCatalogPage ? listRecentPages(work) : [],
+        ai: aiCfgRef.current,
       });
       if (cancelled) return;
       setPreviewDoc({ path: currentPath, html: report?.html ?? '' });
@@ -304,11 +349,85 @@ export function FileViewPage() {
     return () => window.removeEventListener('message', onMessage);
   }, [currentPath, files, loadFile, flash, entry, work]);
 
+  // ===== 作品内 AI：请求 → 宿主调用 → 原路回传 =====
+  const executeAi = useCallback(async (id: string, req: PendingAiAsk['req']) => {
+    const reply = (payload: Record<string, unknown>) => {
+      iframeRef.current?.contentWindow?.postMessage({ __yiyanAIResult: { id, ...payload } }, '*');
+    };
+    setAiBusy(true);
+    try {
+      const result = await runWorkAi({
+        work,
+        prompt: req.prompt,
+        system: req.system,
+        thinking: req.thinking,
+        search: req.search,
+        json: req.kind === 'json',
+      });
+      // 成功或失败都刷新一下额度显示
+      setAiGrant(readWorkAiGrant(work));
+      reply({
+        ok: result.ok,
+        text: result.text,
+        data: result.data,
+        error: result.error,
+        code: result.code,
+        remaining: result.remaining,
+      });
+    } catch (err) {
+      reply({ ok: false, code: 'failed', error: err instanceof Error ? err.message : String(err), remaining: 0 });
+    } finally {
+      setAiBusy(false);
+    }
+  }, [work]);
+
+  useEffect(() => {
+    const onMessage = (ev: MessageEvent) => {
+      const win = iframeRef.current?.contentWindow;
+      if (!win || ev.source !== win) return;
+      const data = ev.data as { __yiyanAI?: PendingAiAsk['req'] & { id: string } } | null;
+      const req = data?.__yiyanAI;
+      if (!req || typeof req.id !== 'string') return;
+      // 没授权就先弹确认卡，用户点了允许才真正调用
+      if (!readWorkAiGrant(work).enabled) {
+        setAiPendingAsk({ id: req.id, req });
+        return;
+      }
+      void executeAi(req.id, req);
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [work, executeAi]);
+
+  const handleAllowAi = async () => {
+    const pending = aiPendingAsk;
+    setAiPendingAsk(null);
+    setAiGrant(updateWorkAiGrant(work, { enabled: true }));
+    if (pending) await executeAi(pending.id, pending.req);
+  };
+
+  const handleDenyAi = () => {
+    const pending = aiPendingAsk;
+    setAiPendingAsk(null);
+    if (!pending) return;
+    iframeRef.current?.contentWindow?.postMessage({
+      __yiyanAIResult: {
+        id: pending.id,
+        ok: false,
+        code: 'unauthorized',
+        error: '用户没有授权这个作品使用 AI',
+        remaining: 0,
+      },
+    }, '*');
+  };
+
   const save = async () => {
     try {
       await writeWorkText(work, currentPath, draft, { reason: 'save' });
       setText(draft);
       setEditing(false);
+      // 预览文档不依赖 text，保存后必须显式重建，否则看到的还是旧内容
+      setPreviewToken(token => token + 1);
       flash('已保存（旧版本已存快照）');
     } catch {
       window.alert('保存失败，请重试');
@@ -421,6 +540,25 @@ export function FileViewPage() {
     } catch {
       window.alert('生成目录页失败，请重试');
     }
+  };
+
+  const handleToggleAi = (enabled: boolean) => {
+    setAiGrant(updateWorkAiGrant(work, { enabled }));
+  };
+
+  const handleAiLimitChange = (value: string) => {
+    const num = Number(value);
+    if (!Number.isFinite(num) || num <= 0) return;
+    setAiGrant(updateWorkAiGrant(work, { dailyLimit: clampLimit(num) }));
+  };
+
+  const handleToggleAiSearch = (allowSearch: boolean) => {
+    setAiGrant(updateWorkAiGrant(work, { allowSearch }));
+  };
+
+  const handleResetAiUsage = () => {
+    setAiGrant(resetWorkAiUsage(work));
+    flash('今日 AI 用量已清零');
   };
 
   const openAppData = async () => {
@@ -614,6 +752,13 @@ export function FileViewPage() {
         </div>
       )}
 
+      {aiBusy && (
+        <div className="work-ai-busy">
+          <span className="work-ai-spinner" />
+          <span>AI 正在思考…</span>
+        </div>
+      )}
+
       {dirtyHint && <div className="files-toast">{dirtyHint}</div>}
 
       <input
@@ -731,6 +876,14 @@ export function FileViewPage() {
                 <span className="sheet-action-icon">☰</span>
                 <span>生成目录页</span>
               </button>
+              <button
+                type="button"
+                className={`sheet-action ${aiGrant.enabled ? 'ai-on' : ''}`}
+                onClick={() => setPanel('ai')}
+              >
+                <span className="sheet-action-icon">✦</span>
+                <span>AI 权限</span>
+              </button>
               <button type="button" className="sheet-action" onClick={() => importInputRef.current?.click()}>
                 <span className="sheet-action-icon">↧</span>
                 <span>导入文件</span>
@@ -772,6 +925,64 @@ export function FileViewPage() {
         </div>
       )}
 
+      {/* AI 权限面板：开关 / 每日次数 / 联网授权 / 今日用量 */}
+      {panel === 'ai' && (
+        <div className="files-sheet-mask" onClick={() => setPanel(null)}>
+          <div className="files-sheet" onClick={e => e.stopPropagation()}>
+            <div className="sheet-grabber" />
+            <div className="sheet-head">
+              <h3>AI 权限</h3>
+              <span className="sheet-sub">{work}</span>
+            </div>
+            <div className="ai-panel">
+              <label className="ai-row">
+                <span className="ai-row-label">允许这个作品使用 AI</span>
+                <input
+                  type="checkbox"
+                  className="ai-switch"
+                  checked={aiGrant.enabled}
+                  onChange={e => handleToggleAi(e.target.checked)}
+                />
+              </label>
+              <label className="ai-row">
+                <span className="ai-row-label">
+                  每天次数
+                  <em className="ai-row-hint">默认 {DEFAULT_DAILY_LIMIT} 次，最多 {MAX_DAILY_LIMIT}</em>
+                </span>
+                <input
+                  type="number"
+                  className="ai-number"
+                  min={1}
+                  max={MAX_DAILY_LIMIT}
+                  value={aiGrant.dailyLimit}
+                  onChange={e => handleAiLimitChange(e.target.value)}
+                />
+              </label>
+              <label className="ai-row">
+                <span className="ai-row-label">
+                  允许联网搜索
+                  <em className="ai-row-hint">关着时作品就算请求 search 也会跳过</em>
+                </span>
+                <input
+                  type="checkbox"
+                  className="ai-switch"
+                  checked={aiGrant.allowSearch}
+                  onChange={e => handleToggleAiSearch(e.target.checked)}
+                />
+              </label>
+              <p className="ai-usage">
+                今日已用 {Math.min(aiGrant.used, aiGrant.dailyLimit)} / {aiGrant.dailyLimit} 次
+                · 相同问题 5 分钟内复用结果
+              </p>
+              <div className="files-modal-actions">
+                <button type="button" className="files-create-btn ghost" onClick={handleResetAiUsage}>清空今日用量</button>
+                <button type="button" className="files-create-btn" onClick={() => setPanel(null)}>关闭</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {!loaded && <div className="files-empty">加载中…</div>}
       {loaded && missing && (
         <div className="files-empty">
@@ -794,6 +1005,23 @@ export function FileViewPage() {
             <div className="files-modal-actions">
               <button type="button" className="files-create-btn ghost" onClick={() => setRenaming(false)}>取消</button>
               <button type="button" className="files-create-btn" onClick={handleRenameWork}>保存</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* AI 授权确认：作品第一次请求时弹一次 */}
+      {aiPendingAsk && (
+        <div className="files-modal-mask" onClick={handleDenyAi}>
+          <div className="files-modal" onClick={e => e.stopPropagation()}>
+            <h3>「{work}」想使用 AI</h3>
+            <p className="files-empty-hint">
+              每天最多 {aiGrant.dailyLimit} 次，相同问题 5 分钟内复用结果。
+              请求内容会发送给你在设置里配置的模型服务商。
+            </p>
+            <div className="files-modal-actions">
+              <button type="button" className="files-create-btn ghost" onClick={handleDenyAi}>先不用</button>
+              <button type="button" className="files-create-btn" onClick={() => void handleAllowAi()}>允许</button>
             </div>
           </div>
         </div>

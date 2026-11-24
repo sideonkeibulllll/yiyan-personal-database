@@ -167,22 +167,50 @@ const ChatMessageItem = memo(function ChatMessageItem({
   const hasFileBlocks = segments.some(seg => seg.type === 'file');
 
   // v3.6.5：文件类工具结果 → 可点卡片，点一下直接全屏打开（不用绕文件管理器）
-  const toolFiles = useMemo(() => {
-    if (msg.role !== 'tool') return [] as string[];
+  // v4.1.0：带上「写的是哪一页」，点开直接落在那一页，而不是永远回到目录页
+  const toolFiles = useMemo<Array<{ work: string; page?: string; hint?: string }>>(() => {
+    if (msg.role !== 'tool') return [];
     const name = msg.toolName ?? '';
-    if (!['write_file', 'read_file', 'list_files'].includes(name)) return [];
+    if (!['write_file', 'write_files', 'read_file', 'list_files'].includes(name)) return [];
     try {
       const parsed = JSON.parse(msg.content) as { success?: boolean; data?: Record<string, unknown> };
       if (parsed?.success !== true) return [];
       const data = parsed.data ?? {};
-      const names: string[] = [];
-      if (typeof data.name === 'string' && data.name.trim()) names.push(data.name.trim());
-      if (Array.isArray(data.files)) {
-        for (const item of data.files as Array<{ name?: unknown }>) {
-          if (typeof item?.name === 'string' && item.name.trim()) names.push(item.name.trim());
+      const out: Array<{ work: string; page?: string; hint?: string }> = [];
+
+      const work = typeof data.name === 'string' ? data.name.trim() : '';
+      const page = typeof data.path === 'string' ? data.path.trim() : '';
+      if (work) {
+        out.push({
+          work,
+          page: page || undefined,
+          hint: name === 'write_file' ? '已写入 · 点击打开' : '点击打开',
+        });
+      }
+
+      // write_files：一次写一批，卡片指向其中第一个页面（没有页面就指第一个文件）
+      if (name === 'write_files' && work && Array.isArray(data.files)) {
+        const paths = (data.files as Array<{ path?: unknown }>)
+          .map((item) => (typeof item?.path === 'string' ? item.path.trim() : ''))
+          .filter(Boolean);
+        if (paths.length > 0) {
+          const firstPage = paths.find((item) => /\.html?$/i.test(item)) ?? paths[0];
+          out[0] = { work, page: firstPage, hint: `已写入 ${paths.length} 个文件 · 点击打开` };
         }
       }
-      return Array.from(new Set(names)).slice(0, 12);
+
+      // list_files：只有作品名，打开入口页
+      if (name === 'list_files' && typeof data.work === 'string' && data.work.trim()) {
+        out.push({ work: data.work.trim(), hint: '点击打开' });
+      }
+
+      const seen = new Set<string>();
+      return out.filter((item) => {
+        const key = `${item.work}|${item.page ?? ''}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      }).slice(0, 12);
     } catch {
       return [];
     }
@@ -263,19 +291,20 @@ const ChatMessageItem = memo(function ChatMessageItem({
           <>
             {toolFiles.length > 0 && (
               <div className="tool-file-list">
-                {toolFiles.map(fileName => (
+                {toolFiles.map(target => (
                   <button
-                    key={fileName}
+                    key={`${target.work}|${target.page ?? ''}`}
                     type="button"
                     className="chat-file-card"
-                    onClick={() => navigate(`/files/${encodeURIComponent(fileName)}`)}
+                    onClick={() => {
+                      const query = target.page ? `?page=${encodeURIComponent(target.page)}` : '';
+                      navigate(`/files/${encodeURIComponent(target.work)}${query}`);
+                    }}
                   >
                     <span className="chat-file-card-icon"><IconFile size={16} /></span>
                     <span className="chat-file-card-main">
-                      <span className="chat-file-card-name">{fileName}</span>
-                      <span className="chat-file-card-meta">
-                        {msg.toolName === 'write_file' ? '已写入 · 点击打开' : '点击打开'}
-                      </span>
+                      <span className="chat-file-card-name">{target.work}</span>
+                      <span className="chat-file-card-meta">{target.page ?? target.hint ?? '点击打开'}</span>
                     </span>
                     <IconChevronRight size={14} />
                   </button>
