@@ -171,6 +171,8 @@ export function FileViewPage() {
   // （iframe 先挂载再改 srcDoc，部分内核不会重新加载文档，会白屏）
   const [previewDoc, setPreviewDoc] = useState<{ path: string; html: string } | null>(null);
   const [previewToken, setPreviewToken] = useState(0);
+  /** iframe 首帧是否已画出（v4.2.4：暗色主题下避免白闪，见 Files.css .file-view-frame） */
+  const [frameReady, setFrameReady] = useState(false);
   const [showAllFiles, setShowAllFiles] = useState(false);
   const [panel, setPanel] = useState<Panel>(null);
 
@@ -367,6 +369,15 @@ export function FileViewPage() {
 
   /** 只有当前页的文档已经就绪，才允许渲染 iframe */
   const previewReady = previewDoc !== null && previewDoc.path === currentPath && previewDoc.html !== '';
+
+  /* v4.2.4：每次换页/重建 iframe 都从透明开始，等首帧画完再淡入。
+   * 兜底：万一 onLoad 没触发（超大文档/内核怪癖），700ms 后强制显示，别把人锁在黑屏外面。 */
+  useEffect(() => { setFrameReady(false); }, [currentPath, previewToken]);
+  useEffect(() => {
+    if (!previewReady || frameReady) return;
+    const timer = window.setTimeout(() => setFrameReady(true), 700);
+    return () => window.clearTimeout(timer);
+  }, [previewReady, frameReady, currentPath, previewToken]);
 
   // iframe 消息桥：应用数据回写
   useEffect(() => {
@@ -1291,11 +1302,13 @@ export function FileViewPage() {
         <iframe
           key={`${currentPath}-${previewToken}`}
           ref={iframeRef}
-          className="file-view-frame"
+          className={`file-view-frame ${frameReady ? 'ready' : ''}`}
           title={work}
           sandbox="allow-scripts allow-forms allow-popups allow-modals"
           srcDoc={previewDoc?.html ?? ''}
           onLoad={() => {
+            // 等首帧真的画出来再淡入（直接 set 会在白底那一帧就显示）
+            requestAnimationFrame(() => setFrameReady(true));
             const hash = pendingScrollRef.current;
             if (!hash) return;
             pendingScrollRef.current = '';

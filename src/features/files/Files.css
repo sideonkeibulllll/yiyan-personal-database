@@ -260,7 +260,15 @@
   flex: 1;
   width: 100%;
   border: none;
-  background: #fff;
+  /* v4.2.4：不要白底！srcdoc 首帧画出来之前是白板，暗色主题下会闪一下。
+     设透明后透出 .file-view-page 的深色背景，再配合 opacity 淡入（见 .ready）。 */
+  background: transparent;
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+
+.file-view-frame.ready {
+  opacity: 1;
 }
 
 .file-view-editor {
@@ -781,7 +789,8 @@
 }
 
 .file-view-page .file-view-frame {
-  background: #fff;
+  /* v4.2.4：这个选择器优先级更高，必须一起改成透明，否则 259 行那条白改 */
+  background: transparent;
   border: none;
 }
 
