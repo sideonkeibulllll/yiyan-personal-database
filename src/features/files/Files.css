@@ -829,7 +829,15 @@
   user-select: none;
   -webkit-user-select: none;
   cursor: grab;
-  transition: opacity 0.4s ease;
+  transition: opacity 0.4s ease, transform 0.2s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.file-island.expanded.expand-left {
+  transform: translateX(calc(-100% + 40px));
+}
+
+.file-island.expanded.expand-right {
+  transform: none;
 }
 
 .file-island:active {

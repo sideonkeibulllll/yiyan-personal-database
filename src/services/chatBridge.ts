@@ -33,6 +33,7 @@ import {
   deleteWorkFile, createWork, renameWork, deleteWork, workExists, entryNameFor,
 } from './workLibrary';
 import { bytesToBase64, drawTraeImage } from './traeImage';
+import { buildWorkCatalog } from './workCatalog';
 import { fetchPageText, searchWeb } from './webSearch';
 import { getDatabase } from '@/services/database';
 import { getTodoDatabase } from '@/services/todoDatabase';
@@ -742,6 +743,43 @@ export const BRIDGE_TOOLS: BridgeTool[] = [
       required: ['work', 'path'],
     },
   },
+  /* === v4.0.0: 批量写文件 + 生成目录页（让 AI 也能铺开多文件作品） === */
+  {
+    name: 'write_files',
+    description: '一次写入多个文本文件（write_file 的批量版）。**做多文件作品就用它**：index.html + app.css + app.js + 子目录页面一次交齐。路径支持子目录（如 pages/a.html），目录会自动创建。\n批量上限 12 个文件 / 整批约 30 万字符，更大的作品分几批写。写完建议调 build_catalog 生成目录页。',
+    parameters: {
+      type: 'object',
+      properties: {
+        work: { type: 'string', description: '作品名（不存在会自动创建）' },
+        files: {
+          type: 'array',
+          description: '要写入的文件数组，按顺序写',
+          items: {
+            type: 'object',
+            properties: {
+              path: { type: 'string', description: '相对路径，如 index.html 或 pages/a.html' },
+              content: { type: 'string', description: '完整文件内容（原样写入，不做转义）' },
+            },
+            required: ['path', 'content'],
+          },
+        },
+      },
+      required: ['work', 'files'],
+    },
+  },
+  {
+    name: 'build_catalog',
+    description: '给作品生成 / 更新目录页（入口页）。扫描作品内全部 html，按目录分组列成「卡片 + 搜索框」的页面，写成 index.html（这个名字被占用时退到 _index.html），同时写入 mod.json。\n写完多个页面后调它一次，散页面就变成结构完整的作品包；重复调用会原地更新同一张目录页，不会越堆越多。页面少于 2 个时不需要调。',
+    parameters: {
+      type: 'object',
+      properties: {
+        work: { type: 'string', description: '作品名' },
+        featured: { type: 'string', description: '可选：把哪个页面置顶高亮（相对路径）。不传则自动判断' },
+        description: { type: 'string', description: '可选：目录页顶部的一句话说明' },
+      },
+      required: ['work'],
+    },
+  },
   /* === v3.8.0: 画图（TRAE 文生图，约 8.8 积分/张，自动走积分最多的账号） === */
   {
     name: 'draw_image',
@@ -827,6 +865,8 @@ export const FILE_TOOLS = [
   'list_files',
   'read_file',
   'write_file',
+  'write_files',
+  'build_catalog',
   'write_image',
   'delete_file',
 ];
@@ -864,7 +904,8 @@ export const TOOL_DISPLAY_NAMES: Record<string, string> = {
   update_soul: '更新人格档案',
   list_prompts: '查看提示词库', get_prompt: '读取提示词', save_prompt: '保存提示词',
   list_works: '查看作品列表', create_work: '新建作品', rename_work: '重命名作品', delete_work: '删除作品',
-  list_files: '列出作品文件', read_file: '读取文件', write_file: '写入文件', write_image: '写入图片',
+  list_files: '列出作品文件', read_file: '读取文件', write_file: '写入文件', write_files: '批量写入文件',
+  build_catalog: '生成目录页', write_image: '写入图片',
   delete_file: '删除文件', draw_image: '绘制图片',
   web_search: '联网搜索', web_fetch: '读取网页',
 };
@@ -2489,6 +2530,72 @@ export async function executeToolCall(
         if (!work || !path) return { success: false, error: 'work / path 必填' };
         await deleteWorkFile(work, path);
         return { success: true, data: { name: work, path, message: `已删除「${work}/${path}」` } };
+      }
+      case 'write_files': {
+        const work = typeof args.work === 'string' ? args.work.trim() : '';
+        if (!work) return { success: false, error: 'work 必填' };
+        const rawList = Array.isArray(args.files) ? (args.files as Array<Record<string, unknown>>) : [];
+        if (rawList.length === 0) return { success: false, error: 'files 不能为空' };
+        if (rawList.length > 12) {
+          return { success: false, error: `一次最多 12 个文件，当前 ${rawList.length} 个，请分批发` };
+        }
+        const existing = new Set((await listWorkFiles(work)).map(f => f.path));
+        const written: Array<{ path: string; chars: number; mode: string }> = [];
+        const failed: Array<{ path: string; error: string }> = [];
+        let totalChars = 0;
+        for (const item of rawList) {
+          const path = typeof item.path === 'string' ? item.path.trim() : '';
+          const content = typeof item.content === 'string' ? item.content : '';
+          if (!path) { failed.push({ path: '(空)', error: 'path 为空' }); continue; }
+          if (!content.trim()) { failed.push({ path, error: 'content 为空' }); continue; }
+          if (totalChars + content.length > 300_000) {
+            failed.push({ path, error: '整批内容超过 30 万字符，请分批发' });
+            break;
+          }
+          try {
+            await writeWorkText(work, path, content, { reason: 'ai' });
+            totalChars += content.length;
+            written.push({
+              path: path.replace(/\\/g, '/').replace(/^\/+/, ''),
+              chars: content.length,
+              mode: existing.has(path) ? 'overwritten' : 'created',
+            });
+          } catch (err) {
+            failed.push({ path, error: err instanceof Error ? err.message : String(err) });
+          }
+        }
+        return {
+          success: written.length > 0,
+          data: {
+            name: work,
+            written: written.length,
+            totalChars,
+            files: written,
+            failed: failed.length > 0 ? failed : undefined,
+            message: `已写入 ${written.length} 个文件（${totalChars} 字）${failed.length ? `，${failed.length} 个失败` : ''}`,
+            hint: '多个页面写完后可以调 build_catalog 生成目录页',
+          },
+          ...(written.length === 0 ? { error: '一个文件都没写成功' } : {}),
+        };
+      }
+      case 'build_catalog': {
+        const work = typeof args.work === 'string' ? args.work.trim() : '';
+        if (!work) return { success: false, error: 'work 必填' };
+        const featured = typeof args.featured === 'string' && args.featured.trim() ? args.featured.trim() : undefined;
+        const description = typeof args.description === 'string' && args.description.trim() ? args.description.trim() : undefined;
+        const result = await buildWorkCatalog(work, { featured, description });
+        if (!result.ok) return { success: false, error: result.message };
+        return {
+          success: true,
+          data: {
+            name: work,
+            entry: result.entry,
+            pages: result.pages,
+            files: result.files,
+            overwritten: result.overwritten,
+            message: result.message,
+          },
+        };
       }
       case 'draw_image': {
         const prompt = typeof args.prompt === 'string' ? args.prompt.trim() : '';

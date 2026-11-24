@@ -16,6 +16,7 @@
  * 那是虚拟文件系统才能解决的事，不在当前范围内。
  */
 import { readWorkBinary, readWorkText } from '@/services/workLibrary';
+import type { RecentPage } from '@/services/workRecent';
 import { buildStorageShimScript, injectScripts } from '@/utils/htmlStorageShim';
 
 const MIME: Record<string, string> = {
@@ -185,6 +186,74 @@ export function parseNavTarget(baseDir: string, raw: string): { path: string; ha
   return { path, hash };
 }
 
+function escapeHtmlText(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/** 包内路径 → href（逐段编码，保留 `/`） */
+function encodePathForHref(path: string): string {
+  return path.split('/').map(seg => encodeURIComponent(seg)).join('/');
+}
+
+/**
+ * 往生成的目录页里插一条「继续上次」。
+ *
+ * 目录页自己不知道用户看过什么，所以由宿主传进来最近访问的页面，
+ * 这里读出目标页的 <title> 当按钮文字，插在搜索框那行**上面**——一进来就看得见。
+ */
+async function injectResumeBlock(
+  html: string,
+  work: string,
+  pagePath: string,
+  recent: RecentPage[],
+): Promise<string> {
+  const picked: Array<{ path: string; title: string }> = [];
+  for (const item of recent) {
+    if (picked.length >= 2) break;
+    if (item.path === pagePath) continue;
+    if (!/\.html?$/i.test(item.path)) continue;
+    const file = await readWorkText(work, item.path);
+    if (!file) continue;
+    const match = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(file.text);
+    const rawTitle = match ? match[1].replace(/\s+/g, ' ').trim() : '';
+    const base = item.path.split('/').pop() ?? item.path;
+    picked.push({ path: item.path, title: rawTitle || base.replace(/\.html?$/i, '') });
+  }
+  if (picked.length === 0) return html;
+
+  const links = picked
+    .map(item => `<a class="yiyan-resume-a" href="${encodePathForHref(item.path)}">${escapeHtmlText(item.title)}</a>`)
+    .join('');
+
+  const block = [
+    '<style>',
+    '.yiyan-resume{display:flex;align-items:center;gap:8px;margin:0 0 14px}',
+    '.yiyan-resume-t{flex:none;font-size:12px;color:var(--dim,#9494a4);letter-spacing:.02em}',
+    '.yiyan-resume-a{flex:1 1 0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:6px 11px;border-radius:999px;font-size:12.5px;text-decoration:none;color:var(--fg,#f1f1f6);background:var(--card,#23242d);border:1px solid var(--line,#33343f);transition:border-color .15s,color .15s}',
+    '.yiyan-resume-a:hover,.yiyan-resume-a:active{border-color:var(--accent,#7d9bff);color:var(--accent,#7d9bff)}',
+    '</style>',
+    `<div class="yiyan-resume"><span class="yiyan-resume-t">继续上次</span>${links}</div>`,
+  ].join('');
+
+  // 目录页声明的插槽优先（v4.0.0 起的包都有）；老包退化成插在搜索框那行前面
+  const slotPattern = /<div\s+id=["']yiyan-slot-resume["'][^>]*>\s*<\/div>/i;
+  if (slotPattern.test(html)) {
+    return html.replace(slotPattern, () => block);
+  }
+  if (/<div\s+class=["']bar["']/i.test(html)) {
+    return html.replace(/<div\s+class=["']bar["'][^>]*>/i, m => `${block}\n${m}`);
+  }
+  if (/<main\b[^>]*>/i.test(html)) {
+    return html.replace(/<main\b[^>]*>/i, m => `${m}\n${block}`);
+  }
+  return html;
+}
+
 /**
  * 构造一页可预览的 html。
  * 失败（文件不存在）返回 null，交给调用方提示。
@@ -193,6 +262,7 @@ export async function buildWorkPreview(
   work: string,
   pagePath: string,
   appData: Record<string, string>,
+  options: { recent?: RecentPage[] } = {},
 ): Promise<PreviewReport | null> {
   const file = await readWorkText(work, pagePath);
   if (!file) return null;
@@ -321,6 +391,10 @@ export async function buildWorkPreview(
       return `${pre}${out.join(', ')}${post}`;
     },
   );
+
+  if (options.recent && options.recent.length > 0) {
+    html = await injectResumeBlock(html, work, pagePath, options.recent);
+  }
 
   report.html = injectScripts(html, [buildStorageShimScript(appData), buildNavGuardScript()]);
   return report;

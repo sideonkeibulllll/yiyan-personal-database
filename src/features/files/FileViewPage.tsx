@@ -31,7 +31,10 @@ import {
   writeWorkBinary,
   writeWorkText,
   type WorkFile,
+  type WorkManifest,
 } from '@/services/workLibrary';
+import { listRecentPages, rememberPage } from '@/services/workRecent';
+import { buildWorkCatalog } from '@/services/workCatalog';
 import {
   appDataStats,
   clearAppData,
@@ -59,16 +62,21 @@ interface IslandPos {
   top: number;
 }
 
-/** 读上次拖到的位置；按视口比例回溯，换机型也不会跑到屏幕外 */
+/**
+ * 读上次拖到的位置（相对作品页左上角的 CSS 像素）。
+ * ⚠️ 这里绝对不能用 window.innerWidth/innerHeight 换算：
+ * 部分 Android WebView 的 innerHeight 和 getBoundingClientRect / clientY
+ * 不在同一坐标系（实测差近一倍），会导致球只能在中线以下活动、跟手只有半速。
+ * 统一用页面容器的矩形做参照，两者同源就一定对得上。
+ */
 function loadIslandPos(): IslandPos | null {
   try {
     const raw = localStorage.getItem(ISLAND_POS_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as { rx?: number; ry?: number };
-    if (typeof parsed.rx !== 'number' || typeof parsed.ry !== 'number') return null;
-    const left = Math.min(Math.max(parsed.rx * window.innerWidth, 8), window.innerWidth - 120);
-    const top = Math.min(Math.max(parsed.ry * window.innerHeight, 8), window.innerHeight - 64);
-    return { left, top };
+    const parsed = JSON.parse(raw) as { left?: number; top?: number };
+    if (typeof parsed.left !== 'number' || typeof parsed.top !== 'number') return null;
+    if (!Number.isFinite(parsed.left) || !Number.isFinite(parsed.top)) return null;
+    return { left: parsed.left, top: parsed.top };
   } catch {
     return null;
   }
@@ -76,10 +84,7 @@ function loadIslandPos(): IslandPos | null {
 
 function saveIslandPos(pos: IslandPos): void {
   try {
-    localStorage.setItem(
-      ISLAND_POS_KEY,
-      JSON.stringify({ rx: pos.left / window.innerWidth, ry: pos.top / window.innerHeight }),
-    );
+    localStorage.setItem(ISLAND_POS_KEY, JSON.stringify(pos));
   } catch {
     /* 存不了无所谓 */
   }
@@ -107,6 +112,7 @@ export function FileViewPage() {
 
   const [files, setFiles] = useState<WorkFile[]>([]);
   const [entry, setEntry] = useState<string | null>(null);
+  const [manifest, setManifest] = useState<WorkManifest | null>(null);
   const [currentPath, setCurrentPath] = useState<string>('');
   const [text, setText] = useState('');
   const [imageData, setImageData] = useState<string | null>(null);
@@ -140,12 +146,42 @@ export function FileViewPage() {
   const [islandPos, setIslandPos] = useState<IslandPos | null>(() => loadIslandPos());
   const [islandDim, setIslandDim] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [hostWidth, setHostWidth] = useState(0);
   const islandRef = useRef<HTMLDivElement | null>(null);
+  const pageRef = useRef<HTMLDivElement | null>(null);
   const suppressClickRef = useRef(false);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setIslandDim(true), 3200);
     return () => window.clearTimeout(timer);
+  }, []);
+
+  // 容器的真实宽度：决定展开方向（球在右半边就向左长，在左半边就向右长）
+  useEffect(() => {
+    const el = pageRef.current;
+    if (!el) return;
+    const measure = () => setHostWidth(el.getBoundingClientRect().width);
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, []);
+
+  // 恢复上次位置后按当前容器尺寸校正一次，换机型/换方向也不会把球留在屏幕外
+  useEffect(() => {
+    if (!islandPos) return;
+    const host = pageRef.current;
+    const el = islandRef.current;
+    if (!host || !el) return;
+    const box = host.getBoundingClientRect();
+    const width = el.offsetWidth || 40;
+    const height = el.offsetHeight || 40;
+    const left = Math.min(Math.max(islandPos.left, 8), Math.max(8, box.width - width - 8));
+    const top = Math.min(Math.max(islandPos.top, 8), Math.max(8, box.height - height - 8));
+    if (Math.abs(left - islandPos.left) > 1 || Math.abs(top - islandPos.top) > 1) {
+      setIslandPos({ left, top });
+    }
+    // 只在挂载时做一次
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const flash = useCallback((msg: string) => {
@@ -178,10 +214,11 @@ export function FileViewPage() {
       return;
     }
     // 作品包导入的作品带 mod.json，入口以清单为准（指向生成的目录页）
-    const manifest = await readWorkManifest(work);
-    const entryPath = pickEntry(list.map(f => f.path), manifest?.entry);
+    const manifestDoc = await readWorkManifest(work);
+    const entryPath = pickEntry(list.map(f => f.path), manifestDoc?.entry);
     setFiles(list);
     setEntry(entryPath);
+    setManifest(manifestDoc);
     const path = entryPath ?? list[0].path;
     setCurrentPath(path);
     await loadFile(path);
@@ -198,6 +235,8 @@ export function FileViewPage() {
   const entryHtml = entry !== null && isHtmlPath(entry);
   // v3.9.0：任意 html 页都能预览 —— 作品包里的页面要能互相点开
   const canPreview = isHtmlPath(currentPath);
+  /** 当前这页是不是打包器生成的目录页 —— 只有它才回显「继续上次」 */
+  const isCatalogPage = manifest?.generatedEntry === true && manifest.entry === currentPath;
 
   // 预览文档：当前页的相对资源懒内联 + 存储垫片 + 包内链接拦截
   useEffect(() => {
@@ -207,12 +246,14 @@ export function FileViewPage() {
       return;
     }
     void (async () => {
-      const report = await buildWorkPreview(work, currentPath, previewData);
+      const report = await buildWorkPreview(work, currentPath, previewData, {
+        recent: isCatalogPage ? listRecentPages(work) : [],
+      });
       if (cancelled) return;
       setPreviewDoc({ path: currentPath, html: report?.html ?? '' });
     })();
     return () => { cancelled = true; };
-  }, [work, currentPath, previewData, previewToken, canPreview, loaded, missing]);
+  }, [work, currentPath, previewData, previewToken, canPreview, loaded, missing, isCatalogPage]);
 
   /** 只有当前页的文档已经就绪，才允许渲染 iframe */
   const previewReady = previewDoc !== null && previewDoc.path === currentPath && previewDoc.html !== '';
@@ -254,13 +295,14 @@ export function FileViewPage() {
         flash(`包里没有「${target.path}」`);
         return;
       }
+      if (target.path !== entry) rememberPage(work, target.path);
       setEditing(false);
       setCurrentPath(target.path);
       void loadFile(target.path);
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [currentPath, files, loadFile, flash]);
+  }, [currentPath, files, loadFile, flash, entry, work]);
 
   const save = async () => {
     try {
@@ -366,6 +408,21 @@ export function FileViewPage() {
     setVersions(await listVersions(`${work}/${currentPath}`));
   };
 
+  /** 扫描作品里所有 html，生成 / 更新目录页 + mod.json */
+  const handleBuildCatalog = async () => {
+    try {
+      const result = await buildWorkCatalog(work);
+      if (!result.ok) {
+        window.alert(result.message);
+        return;
+      }
+      await load();
+      flash(result.message);
+    } catch {
+      window.alert('生成目录页失败，请重试');
+    }
+  };
+
   const openAppData = async () => {
     setPanel('appdata');
     setAppStat(await appDataStats(work));
@@ -413,6 +470,7 @@ export function FileViewPage() {
 
   const switchFile = async (path: string) => {
     if (path === currentPath) return;
+    if (path !== entry) rememberPage(work, path);
     setEditing(false);
     setCurrentPath(path);
     await loadFile(path);
@@ -436,38 +494,47 @@ export function FileViewPage() {
 
   // ===== 悬浮球拖动（拖完记住位置，点按钮不误触） =====
   // 不能在 pointerdown 就 setPointerCapture：捕获后 click 会落到容器上，按钮永远点不动。
-  // 改成 window 级监听，只有真的移动超过 6px 才算拖动。
+  // 也不用「增量累加」算位置：直接按「手指 - 抓取偏移」换算绝对坐标，
+  // 只要 clientX 和容器矩形同坐标系，跟手就是 1:1，不会被缩放放大或缩小。
   const onIslandDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (expanded) return;
     const el = islandRef.current;
-    if (!el) return;
+    const host = pageRef.current;
+    if (!el || !host) return;
     const rect = el.getBoundingClientRect();
-    const drag = { px: e.clientX, py: e.clientY, ox: rect.left, oy: rect.top, moved: false };
+    const grabX = e.clientX - rect.left;
+    const grabY = e.clientY - rect.top;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    let moved = false;
     setIslandDim(false);
 
     const onMove = (ev: PointerEvent) => {
-      const dx = ev.clientX - drag.px;
-      const dy = ev.clientY - drag.py;
-      if (!drag.moved && Math.abs(dx) + Math.abs(dy) < 6) return;
-      drag.moved = true;
-      const maxLeft = Math.max(8, window.innerWidth - el.offsetWidth - 8);
-      const maxTop = Math.max(8, window.innerHeight - el.offsetHeight - 8);
-      setIslandPos({
-        left: Math.min(Math.max(drag.ox + dx, 8), maxLeft),
-        top: Math.min(Math.max(drag.oy + dy, 8), maxTop),
-      });
+      if (!moved && Math.abs(ev.clientX - startX) + Math.abs(ev.clientY - startY) < 6) return;
+      moved = true;
+      const box = host.getBoundingClientRect();
+      const width = el.offsetWidth;
+      const height = el.offsetHeight;
+      const left = Math.min(
+        Math.max(ev.clientX - box.left - grabX, 8),
+        Math.max(8, box.width - width - 8),
+      );
+      const top = Math.min(
+        Math.max(ev.clientY - box.top - grabY, 8),
+        Math.max(8, box.height - height - 8),
+      );
+      setIslandPos({ left, top });
     };
 
     const onUp = () => {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onUp);
-      if (!drag.moved) return;
+      if (!moved) return;
       // 拖动结束浏览器还会补一个 click，先吞掉，免得一拖就跳页
       suppressClickRef.current = true;
       window.setTimeout(() => { suppressClickRef.current = false; }, 120);
-      const finalRect = el.getBoundingClientRect();
-      saveIslandPos({ left: finalRect.left, top: finalRect.top });
+      saveIslandPos({ left: el.offsetLeft, top: el.offsetTop });
     };
 
     window.addEventListener('pointermove', onMove);
@@ -476,16 +543,16 @@ export function FileViewPage() {
   };
 
   return (
-    <div className="file-view-page">
+    <div className="file-view-page" ref={pageRef}>
       {/* 悬浮球：收起是一颗球，点开向左长成 退出 / 操作 / 选页 三个圆钮 */}
       {!editing && (
         <>
           {expanded && <div className="island-scrim" onClick={() => setExpanded(false)} />}
           <div
             ref={islandRef}
-            className={`file-island ${expanded ? 'expanded' : ''} ${islandDim && !expanded ? 'dim' : ''}`}
+            className={`file-island ${expanded ? `expanded ${islandPos && islandPos.left > hostWidth / 2 ? 'expand-left' : 'expand-right'}` : ''} ${islandDim && !expanded ? 'dim' : ''}`}
             style={islandPos
-              ? { right: Math.max(8, window.innerWidth - islandPos.left - 40), top: islandPos.top }
+              ? { left: islandPos.left, top: islandPos.top, right: 'auto', bottom: 'auto' }
               : undefined}
             onPointerDown={onIslandDown}
             onClickCapture={e => {
@@ -655,6 +722,14 @@ export function FileViewPage() {
               >
                 <IconPlus size={17} />
                 <span>新建文件</span>
+              </button>
+              <button
+                type="button"
+                className="sheet-action"
+                onClick={() => { setPanel(null); void handleBuildCatalog(); }}
+              >
+                <span className="sheet-action-icon">☰</span>
+                <span>生成目录页</span>
               </button>
               <button type="button" className="sheet-action" onClick={() => importInputRef.current?.click()}>
                 <span className="sheet-action-icon">↧</span>
