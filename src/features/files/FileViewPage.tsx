@@ -13,6 +13,8 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { Capacitor } from '@capacitor/core';
+import { isElectron } from '@/services/electronAdapter';
 import {
   deleteWork,
   deleteWorkFile,
@@ -135,10 +137,17 @@ export function FileViewPage() {
   // v3.8.1：从设置页「文件与作品」内嵌管理器进来的，返回时直接落到该面板
   // （replace 掉详情页，避免多退一页退到设置首页）。
   const backTo = (location.state as { yiyanBackTo?: string } | null)?.yiyanBackTo;
-  const handleBack = useCallback(() => {
-    if (backTo) navigate(backTo, { replace: true });
-    else goBack(navigate, '/files');
-  }, [backTo, navigate]);
+  /**
+   * 「退出」的真正逻辑每次渲染都刷新到这个 ref 里（要读 currentPath / entry / 页数），
+   * 但 handleBack 本身保持稳定引用 —— 否则 Android 返回键的监听会被反复注册/注销。
+   *
+   * 分层语义（v4.2.2）：
+   * - 多页作品、当前不在入口页 → 先回入口页（目录页），**不离开作品**
+   *   （用户常常只是想翻别的页，不该被丢回管理器重新点一遍）
+   * - 已经在入口页 / 单页作品 / 非 html → 才真正退出到 backTo 或文件管理器
+   */
+  const backImplRef = useRef<() => void>(() => {});
+  const handleBack = useCallback(() => backImplRef.current(), []);
 
   const [files, setFiles] = useState<WorkFile[]>([]);
   const [entry, setEntry] = useState<string | null>(null);
@@ -164,6 +173,38 @@ export function FileViewPage() {
   const [previewToken, setPreviewToken] = useState(0);
   const [showAllFiles, setShowAllFiles] = useState(false);
   const [panel, setPanel] = useState<Panel>(null);
+
+  /* v4.2.2：Android 返回键要读「当前是否在编辑/面板打开」，但不想每次状态变都重注册监听 → ref 镜像 */
+  const editingRef = useRef(editing);
+  editingRef.current = editing;
+  const panelRef = useRef<Panel>(panel);
+  panelRef.current = panel;
+
+  /* v4.2.2：接管 Android 返回键 —— 编辑态先退出编辑、抽屉开着先关抽屉，否则直接退出作品。
+   * 不接管的话 WebView 会走 history.back()，去向就由历史栈决定（「退退退」的来源之一）。 */
+  useEffect(() => {
+    if (isElectron() || Capacitor.getPlatform() !== 'android') return;
+    let remove: (() => Promise<void>) | null = null;
+    let disposed = false;
+    void (async () => {
+      try {
+        const { App } = await import('@capacitor/app');
+        const handle = await App.addListener('backButton', () => {
+          if (editingRef.current) { setEditing(false); return; }
+          if (panelRef.current) { setPanel(null); return; }
+          handleBack();
+        });
+        if (disposed) { void handle.remove(); return; }
+        remove = () => handle.remove();
+      } catch {
+        /* 插件不可用（web）就交给浏览器默认返回 */
+      }
+    })();
+    return () => {
+      disposed = true;
+      void remove?.();
+    };
+  }, [handleBack]);
   const [aiGrant, setAiGrant] = useState<WorkAiGrant>(() => readWorkAiGrant(work));
   const [aiBusy, setAiBusy] = useState(false);
   const [aiPendingAsk, setAiPendingAsk] = useState<PendingAiAsk | null>(null);
@@ -173,6 +214,8 @@ export function FileViewPage() {
   const [coverThumbs, setCoverThumbs] = useState<Record<string, string>>({});
 
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  /** 切页后要滚到的锚点（链接写成 page.html#sec2 时用）；iframe 载入后发一次就清空 */
+  const pendingScrollRef = useRef('');
   // 桥注入时的初始配置：只跟「日额度/联网开关」有关，不跟已用次数走。
   // 否则每调一次 AI 就重建一次 iframe，作品里的状态全丢。
   const aiCfgRef = useRef<WorkAiBridgeConfig>({ remaining: DEFAULT_DAILY_LIMIT, allowSearch: false });
@@ -364,6 +407,8 @@ export function FileViewPage() {
       }
       if (target.path !== entry) rememberPage(work, target.path);
       setEditing(false);
+      // v4.2.2：链接带 #锚点（目录页 → 章节）时，切完页再让新页面自己滚过去
+      pendingScrollRef.current = target.hash || '';
       setCurrentPath(target.path);
       void loadFile(target.path);
     };
@@ -481,7 +526,11 @@ export function FileViewPage() {
   const handleDuplicate = async () => {
     try {
       const copy = await duplicateWork(work);
-      navigate(`/files/${encodeURIComponent(copy)}`);
+      // v4.2.2：replace 掉自己 —— 否则「复制一份 → 退出」要连退两次（作品→作品→列表）
+      navigate(`/files/${encodeURIComponent(copy)}`, {
+        replace: true,
+        state: backTo ? { yiyanBackTo: backTo } : undefined,
+      });
     } catch {
       window.alert('复制失败，请重试');
     }
@@ -491,7 +540,8 @@ export function FileViewPage() {
     if (!window.confirm(`确定删除作品「${work}」吗？全部文件、快照与应用数据都会没。`)) return;
     try {
       await deleteWork(work);
-      navigate('/files');
+      // v4.2.2：删完直接按「退出」的语义走（回列表 / 回 chat），不再额外 push 一条列表
+      handleBack();
     } catch {
       window.alert('删除失败，请重试');
     }
@@ -663,6 +713,19 @@ export function FileViewPage() {
     () => htmlPages.findIndex(item => item.path === currentPath),
     [htmlPages, currentPath],
   );
+
+  /* v4.2.2：每次渲染刷新「退出」的实现 —— 多页作品先回目录页，在目录页再退才离开作品 */
+  backImplRef.current = () => {
+    const multiPage = htmlPages.length > 1;
+    if (multiPage && entry && currentPath !== entry && isHtmlPath(currentPath)) {
+      setEditing(false);
+      setPanel(null);
+      void switchFile(entry);
+      return;
+    }
+    if (backTo) navigate(backTo, { replace: true });
+    else goBack(navigate, '/files');
+  };
 
   // ===== 悬浮球拖动（拖完记住位置，点按钮不误触） =====
   // 不能在 pointerdown 就 setPointerCapture：捕获后 click 会落到容器上，按钮永远点不动。
@@ -1073,7 +1136,7 @@ export function FileViewPage() {
       {loaded && missing && (
         <div className="files-empty">
           <p>这个作品不存在（可能已被删除）。</p>
-          <button type="button" className="files-create-btn" onClick={() => navigate('/files')}>回作品列表</button>
+          <button type="button" className="files-create-btn" onClick={() => navigate('/files', { replace: true })}>回作品列表</button>
         </div>
       )}
 
@@ -1206,6 +1269,12 @@ export function FileViewPage() {
           title={work}
           sandbox="allow-scripts allow-forms allow-popups allow-modals"
           srcDoc={previewDoc?.html ?? ''}
+          onLoad={() => {
+            const hash = pendingScrollRef.current;
+            if (!hash) return;
+            pendingScrollRef.current = '';
+            iframeRef.current?.contentWindow?.postMessage({ __yiyanScrollTo: hash }, '*');
+          }}
         />
       )}
     </div>

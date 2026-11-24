@@ -19,6 +19,7 @@ import { readWorkBinary, readWorkText } from '@/services/workLibrary';
 import type { RecentPage } from '@/services/workRecent';
 import { buildStorageShimScript, injectScripts } from '@/utils/htmlStorageShim';
 import { buildWorkAiBridgeScript, type WorkAiBridgeConfig } from '@/utils/workAiBridge';
+import { buildNavGuardScript } from '@/utils/workNavGuard';
 
 const MIME: Record<string, string> = {
   png: 'image/png',
@@ -154,27 +155,7 @@ async function inlineCssUrls(
   );
 }
 
-/** 注入沙箱内的链接拦截：包内跳转交回宿主，外链不动 */
-function buildNavGuardScript(): string {
-  return `<script>
-(function () {
-  if (window.__yiyanNavGuard) return;
-  window.__yiyanNavGuard = true;
-  document.addEventListener('click', function (e) {
-    var el = e.target;
-    while (el && el !== document && el.nodeName !== 'A') el = el.parentNode;
-    if (!el || el.nodeName !== 'A') return;
-    var raw = el.getAttribute('href');
-    if (!raw) return;
-    if (/^\\s*(#|javascript:|mailto:|tel:|data:|blob:)/i.test(raw)) return;
-    if (raw.slice(0, 2) === '//') return;
-    if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return;
-    e.preventDefault();
-    parent.postMessage({ __yiyanNav: raw }, '*');
-  }, true);
-})();
-</script>`;
-}
+/* 链接守卫搬去 utils/workNavGuard.ts（v4.2.2）：纯字符串、零依赖，方便单测 */
 
 /** 宿主侧解析子页面发来的跳转请求 → 作品内相对路径（带 hash 时一并返回） */
 export function parseNavTarget(baseDir: string, raw: string): { path: string; hash: string } | null {

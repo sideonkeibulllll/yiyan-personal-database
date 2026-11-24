@@ -202,10 +202,12 @@ export function FileManagerPage({ embedded = false }: FileManagerPageProps) {
 
   const totalSize = useMemo(() => works.reduce((sum, w) => sum + (w.size || 0), 0), [works]);
 
-  // v3.8.1：从设置页内嵌的管理器进作品详情时，记下来源 —— 详情页返回要回到
-  // 「文件与作品」面板（?tab=files），而不是 -1 退到设置首页（多退一页且丢面板状态）。
+  // v4.2.2：退出作品统一落到「文件与作品」列表（/files），不再回设置面板。
+  // 原因：设置里的管理器和独立 /files 是同一个列表的两种壳，退出回设置页会让用户
+  // 觉得「我只是关掉一个 html，怎么跑到设置里了」；而 /files 自己有返回键能回设置。
+  // 另：这一条让「退出」有明确目的地，不再依赖 history.back() 猜上一页。
   const openWork = (name: string) => navigate(`/files/${encodeURIComponent(name)}`, {
-    state: embedded ? { yiyanBackTo: '/settings?tab=files' } : undefined,
+    state: { yiyanBackTo: '/files' },
   });
 
   // ===== 长按 / 右键菜单 =====
