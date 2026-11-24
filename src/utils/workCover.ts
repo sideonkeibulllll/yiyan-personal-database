@@ -1,15 +1,16 @@
 /**
- * 作品封面提取（v3.8.0）
+ * 作品封面提取（v4.2.0 起三级优先）
  *
- * 约定（只认 meta 标注，最简单可预测）：
- *   在入口 index.html 的 <head> 里写
- *   `<meta name="cover" content="cover.jpg">`
- *   就用 cover.jpg（作品内相对路径）当封面；没写就没有封面（类型徽标兜底）。
+ * 优先级（越靠前越「显式」）：
+ *   1. `mod.json` 的 `cover` 字段 —— 平台/UI/AI 都能写，**完全不用动 html**
+ *   2. 入口 html `<head>` 里的 `<meta name="cover" content="cover.jpg">`（v3.8.0 老约定）
+ *   3. 约定文件名 `cover.jpg / cover.png / cover.webp`（根目录或 assets/ 下）
  *
- * 不自动截图、不自动生成 —— 封面图由 AI 用 draw_image 画好放进作品，
- * 文件 MCP 的工具描述里会告诉 AI 这个约定。
+ * 为什么加第 1 条：v3.8.0 只有第 2 条，导致「加个封面」= 重写整份 html；
+ * 而且 build_catalog 生成的目录页作品会把 cover 写进 mod.json，列表页却读不到。
+ * 现在 mod.json 是主通道，meta 是兼容通道。
  */
-import { isImagePath, readWorkBinary, readWorkText, sanitizeRelPath } from '@/services/workLibrary';
+import { isImagePath, listWorkFiles, readWorkBinary, readWorkManifest, readWorkText, sanitizeRelPath } from '@/services/workLibrary';
 
 const EXT_MIME: Record<string, string> = {
   png: 'image/png',
@@ -29,20 +30,63 @@ export function parseCoverMeta(html: string): string | null {
   return value ? value.trim() : null;
 }
 
-/**
- * 提取作品封面 → dataURL（无封面/不是 html/图缺失都返回 null）。
- * 读入口 html → 找 meta → 读作品内图片二进制。
- */
-export async function extractWorkCover(workName: string, entryPath: string | null): Promise<string | null> {
-  if (!entryPath || !/\.html?$/i.test(entryPath)) return null;
-  const entry = await readWorkText(workName, entryPath);
-  if (!entry) return null;
-  const rel = parseCoverMeta(entry.text);
-  if (!rel || !isImagePath(rel)) return null;
+/** 约定文件名，按优先级排列 */
+const CONVENTIONAL_COVERS = [
+  'cover.jpg', 'cover.jpeg', 'cover.png', 'cover.webp',
+  'assets/cover.jpg', 'assets/cover.jpeg', 'assets/cover.png', 'assets/cover.webp',
+];
+
+async function toDataUrl(workName: string, rel: string): Promise<string | null> {
+  if (!isImagePath(rel)) return null;
   const path = sanitizeRelPath(rel);
   const base64 = await readWorkBinary(workName, path);
   if (!base64) return null;
   const ext = (path.split('.').pop() || '').toLowerCase();
   const mime = EXT_MIME[ext] ?? 'image/png';
   return `data:${mime};base64,${base64}`;
+}
+
+/**
+ * 提取作品封面 → dataURL（无封面 / 不是 html 作品 / 图缺失都返回 null）。
+ */
+export async function extractWorkCover(workName: string, entryPath: string | null): Promise<string | null> {
+  // 1) 清单声明（AI set_cover / UI「设为封面」写的就是它）
+  try {
+    const manifest = await readWorkManifest(workName);
+    if (manifest?.cover) {
+      const hit = await toDataUrl(workName, manifest.cover);
+      if (hit) return hit;
+    }
+  } catch {
+    /* 清单坏了继续走下一条 */
+  }
+
+  // 2) 入口 html 里的 meta（v3.8.0 兼容通道）
+  if (entryPath && /\.html?$/i.test(entryPath)) {
+    try {
+      const entry = await readWorkText(workName, entryPath);
+      const rel = entry ? parseCoverMeta(entry.text) : null;
+      if (rel) {
+        const hit = await toDataUrl(workName, rel);
+        if (hit) return hit;
+      }
+    } catch {
+      /* 继续走第 3 条 */
+    }
+  }
+
+  // 3) 约定文件名兜底（只在这一步才列目录，常见路径省一次 readdir）
+  try {
+    const files = new Set((await listWorkFiles(workName)).map(file => file.path));
+    for (const candidate of CONVENTIONAL_COVERS) {
+      if (files.has(candidate)) {
+        const hit = await toDataUrl(workName, candidate);
+        if (hit) return hit;
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+
+  return null;
 }

@@ -1313,3 +1313,62 @@
 .sheet-action.ai-on {
   color: var(--color-accent-primary);
 }
+
+/* ══════ 设为封面（v4.2.0） ══════ */
+
+.cover-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  padding: 4px 12px 12px;
+  overflow-y: auto;
+  max-height: min(52vh, 420px);
+}
+
+.cover-cell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.1));
+  border-radius: 10px;
+  background: var(--color-bg-secondary);
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.cover-cell img {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  display: block;
+}
+
+.cover-cell-ph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1 / 1;
+  font-size: 12px;
+  opacity: 0.55;
+}
+
+.cover-cell-name {
+  padding: 4px 6px 6px;
+  font-size: 10.5px;
+  line-height: 1.25;
+  color: var(--color-text-secondary, rgba(255, 255, 255, 0.6));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cover-cell.active {
+  border-color: var(--color-accent-primary, #4dabf7);
+  box-shadow: 0 0 0 1px var(--color-accent-primary, #4dabf7) inset;
+}
+
+@media (max-width: 360px) {
+  .cover-grid { grid-template-columns: repeat(2, 1fr); }
+}

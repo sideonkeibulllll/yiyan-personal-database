@@ -71,6 +71,8 @@ export const DEFAULT_MCP_GROUPS: McpGroupConfig[] = [
     icon: '📁',
     desc: '作品/文件两级读写（写入免确认） / 删除（需你确认）',
     tools: [...FILE_TOOLS],
+    /** v4.2.0：新增 edit_file / search_in_work / read_upload / copy_file / set_cover */
+    toolsEpoch: 2,
     builtin: true,
     visible: true,
   },
@@ -132,12 +134,19 @@ export function resolveMcpGroups(raw?: McpGroupConfig[] | null): McpGroupConfig[
 
     const def = DEFAULT_MCP_GROUPS.find(d => d.id === g.id);
     if (def) {
+      // v4.2.0：出厂组升级过工具集（toolsEpoch 提升）→ 把新工具补进老配置（只补不删，一次性）
+      const savedEpoch = typeof g.toolsEpoch === 'number' ? g.toolsEpoch : 1;
+      const epochRaised = typeof def.toolsEpoch === 'number' && savedEpoch < def.toolsEpoch;
+      const tools = epochRaised
+        ? Array.from(new Set([...sanitizeTools(g.tools), ...def.tools]))
+        : sanitizeTools(g.tools);
       merged.push({
         id: def.id,
         label: (g.label || def.label).trim(),
         icon: g.icon || def.icon,
         desc: g.desc ?? def.desc,
-        tools: sanitizeTools(g.tools),
+        tools,
+        toolsEpoch: def.toolsEpoch,
         builtin: true,
         visible: g.visible !== false,
       });

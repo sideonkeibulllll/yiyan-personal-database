@@ -171,7 +171,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
   const toolFiles = useMemo<Array<{ work: string; page?: string; hint?: string }>>(() => {
     if (msg.role !== 'tool') return [];
     const name = msg.toolName ?? '';
-    if (!['write_file', 'write_files', 'read_file', 'list_files'].includes(name)) return [];
+    if (!['write_file', 'write_files', 'read_file', 'list_files', 'edit_file', 'copy_file', 'search_in_work', 'set_cover'].includes(name)) return [];
     try {
       const parsed = JSON.parse(msg.content) as { success?: boolean; data?: Record<string, unknown> };
       if (parsed?.success !== true) return [];
@@ -186,6 +186,24 @@ const ChatMessageItem = memo(function ChatMessageItem({
           page: page || undefined,
           hint: name === 'write_file' ? '已写入 · 点击打开' : '点击打开',
         });
+      }
+
+      // edit_file：局部修改，卡片指向改的第一个文件
+      if (name === 'edit_file' && work && Array.isArray(data.files)) {
+        const first = (data.files as Array<{ path?: unknown; edits?: unknown }>)
+          .map((item) => (typeof item?.path === 'string' ? item.path.trim() : ''))
+          .find(Boolean);
+        const edits = (data.files as Array<{ edits?: unknown }>)
+          .reduce((sum, item) => sum + (typeof item?.edits === 'number' ? item.edits : 0), 0);
+        if (first) out[0] = { work, page: first, hint: `已改 ${edits} 处 · 点击打开` };
+      }
+
+      // copy_file：复制进来的第一个文件
+      if (name === 'copy_file' && work && Array.isArray(data.copied)) {
+        const first = (data.copied as Array<{ path?: unknown }>)
+          .map((item) => (typeof item?.path === 'string' ? item.path.trim() : ''))
+          .find(Boolean);
+        if (first) out[0] = { work, page: first, hint: `已复制 ${data.copied.length} 个 · 点击打开` };
       }
 
       // write_files：一次写一批，卡片指向其中第一个页面（没有页面就指第一个文件）

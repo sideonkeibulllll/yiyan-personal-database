@@ -62,7 +62,9 @@ import {
   saveChatImage,
   readChatImageForModel,
   deleteChatImageDir,
+  buildChatFileBlock,
 } from '@/services/attachmentService';
+import { saveChatUpload, copyIntoUploads } from '@/services/chatUploads';
 import { Capacitor } from '@capacitor/core';
 import { isElectron } from '@/services/electronAdapter';
 import { loadSessionsSync, createId, generateTitle, buildModelOptions, parseModelValue, truncateApiMessagesSafely, loadChatDrafts, saveChatDraft, deleteChatDraft, buildUserMessageContent } from './chatUtils';
@@ -429,7 +431,7 @@ export function ChatPage() {
             continue;
           }
           usedChars += doc.text.length;
-          texts.push({ id: createId(), ...doc });
+          texts.push({ id: createId(), ...doc, file });
           continue;
         }
         if (!isTextLikeFile(file)) {
@@ -446,7 +448,7 @@ export function ChatPage() {
           continue;
         }
         usedChars += parsed.text.length;
-        texts.push({ id: createId(), ...parsed });
+        texts.push({ id: createId(), ...parsed, file });
       }
 
       if (images.length > 0) await appendPendingImages(images);
@@ -1035,10 +1037,7 @@ export function ChatPage() {
     }
 
 
-    // v3.6.3: 待发送文本文件拼成正文块（带文件名与结束标记，模型能分清哪段是文件）
-    const fileBlock = pendingFiles
-      .map(f => `【文件：${f.name}${f.truncated ? '（内容过长已截断）' : ''}】\n${f.text}\n【文件结束】`)
-      .join('\n\n');
+    // v4.2.0: 文本文件块在「图片落盘」之后构建（要先落地拿 chat-files 路径，见下方）
 
     // v2.6.3: 记录本次是否有预备条目被消费（发送后据此决定是否清除，避免误清）
     const preparedIds: string[] = (window as any)['__yiyan_prepared_entry_ids__'] || [];
@@ -1073,13 +1072,42 @@ export function ChatPage() {
      * 落盘失败的单张跳过；全部失败则中止本次发送（文字也一起保留在输入框）。
      */
     setIsLoading(true);
+
+    /* === v4.2.0: 文本文件落地（原样副本进 chat-files/，AI 可用 copy_file 直接搬进作品） ===
+     * 落地失败不拦发送：拿不到路径就退回「只有正文」的老行为，至少对话还能继续。
+     */
+    let fileBlock = '';
+    if (pendingFiles.length > 0) {
+      const blocks = await Promise.all(pendingFiles.map(async f => {
+        let cachePath = f.cachePath;
+        if (!cachePath && f.file) {
+          const ref = await saveChatUpload(sessionId, f.file);
+          if (ref) cachePath = ref.path;
+        }
+        return buildChatFileBlock({
+          name: f.name,
+          text: f.text,
+          truncated: f.truncated,
+          cachePath,
+        });
+      }));
+      fileBlock = blocks.join('\n\n');
+    }
+
     const sentImages: ChatImage[] = [];
     const imageParts: ApiContentPart[] = [];
+    /** 图片在 chat-files 里的副本路径（告诉 AI，方便它 copy_file 进作品） */
+    const imageCopies: string[] = [];
     if (hasImages) {
       try {
         for (const p of pendingImages) {
           const ref = await saveChatImage(sessionId, { base64: p.base64, mimeType: p.mimeType });
           sentImages.push(ref);
+          // v4.2.0: 再存一份进上传缓存——会话删了、历史图不重发时，
+          // AI 依然能把这张图 copy_file 进作品
+          const baseName = ref.path.split('/').pop() || `img-${Date.now().toString(36)}.jpg`;
+          const copy = await copyIntoUploads(sessionId, ref.path, baseName);
+          if (copy) imageCopies.push(copy.path);
           const forModel = await readChatImageForModel(ref.path);
           if (forModel) {
             imageParts.push({
@@ -1102,7 +1130,11 @@ export function ChatPage() {
     // 添加用户消息
     // v3.6.0: 挂载的提示词按顺序拼在用户消息最前面（可见、可回看、重发不丢）
     // v3.6.3: 文本文件块排在提示词之后、正文之前
-    const bodyText = [fileBlock, text].filter(part => part.length > 0).join('\n\n');
+    // v4.2.0: 末尾附图片副本路径（AI 想「把这张图放进作品」时直接 copy_file）
+    const imageHint = imageCopies.length > 0
+      ? `〔图片本地副本：${imageCopies.join('、')} · 要把图放进作品就用 copy_file 原样复制，别用 write_image 重发 base64〕`
+      : '';
+    const bodyText = [fileBlock, text, imageHint].filter(part => part.length > 0).join('\n\n');
     const userMsg: ChatMessage = {
       id: createId(),
       role: 'user',

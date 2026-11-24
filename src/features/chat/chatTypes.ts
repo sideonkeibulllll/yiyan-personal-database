@@ -30,10 +30,12 @@ export interface PendingChatImage {
 }
 
 /**
- * 尚未发送的文本文件（v3.6.3）
+ * 尚未发送的文本文件（v3.6.3，v4.2.0 加原始 File 引用）
  *
- * 内容在发送时拼进 user 消息正文（`【文件：name】…【文件结束】`），
- * 不落盘、不新增字段 —— 历史/备份/导出天然跟着 messages 走。
+ * 发送时两件事同时发生：
+ * - 内容（可能只贴开头，见 buildChatFileBlock）拼进 user 消息正文
+ * - 原始字节落一份到 chat-files/<sessionId>/，消息里给出路径，
+ *   AI 可以用 copy_file 原样搬进作品（不用重打内容）
  */
 export interface PendingChatFile {
   id: string;
@@ -43,6 +45,10 @@ export interface PendingChatFile {
   text: string;
   /** 读取时是否因超长被截断 */
   truncated: boolean;
+  /** 原始 File（发送时落地用；只在内存里，不落库） */
+  file?: File;
+  /** 已落地的本地副本路径（chat-files/…） */
+  cachePath?: string;
 }
 
 export interface ChatMessage {

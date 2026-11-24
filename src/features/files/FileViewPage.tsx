@@ -28,6 +28,7 @@ import {
   readWorkManifest,
   readWorkText,
   renameWork,
+  setWorkCover,
   writeWorkBinary,
   writeWorkText,
   type WorkFile,
@@ -64,7 +65,7 @@ import { goBack } from '@/utils/navBack';
 import './Files.css';
 
 type Mode = 'preview' | 'source';
-type Panel = null | 'pages' | 'actions' | 'ai' | 'versions' | 'appdata' | 'newfile';
+type Panel = null | 'pages' | 'actions' | 'ai' | 'versions' | 'appdata' | 'newfile' | 'cover';
 
 interface PendingAiAsk {
   id: string;
@@ -168,6 +169,8 @@ export function FileViewPage() {
   const [aiPendingAsk, setAiPendingAsk] = useState<PendingAiAsk | null>(null);
   const [versions, setVersions] = useState<FileVersion[]>([]);
   const [appStat, setAppStat] = useState<{ keys: number; bytes: number }>({ keys: 0, bytes: 0 });
+  /** 设为封面面板的缩略图（按需加载，最多 24 张） */
+  const [coverThumbs, setCoverThumbs] = useState<Record<string, string>>({});
 
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   // 桥注入时的初始配置：只跟「日额度/联网开关」有关，不跟已用次数走。
@@ -275,6 +278,25 @@ export function FileViewPage() {
   }, [work, loadFile, requestedPage, location.key]);
 
   useEffect(() => { void load(); }, [load]);
+
+  // v4.2.0: 打开「设为封面」时才读缩略图（图片多的作品不必每次进页面都解码）
+  useEffect(() => {
+    if (panel !== 'cover') return;
+    let cancelled = false;
+    void (async () => {
+      const images = files.filter(file => isImagePath(file.path)).slice(0, 24);
+      const out: Record<string, string> = {};
+      for (const image of images) {
+        const b64 = await readWorkBinary(work, image.path);
+        if (b64) {
+          const ext = (image.path.split('.').pop() || 'png').toLowerCase();
+          out[image.path] = `data:${ext === 'jpg' ? 'image/jpeg' : `image/${ext}`};base64,${b64}`;
+        }
+      }
+      if (!cancelled) setCoverThumbs(out);
+    })();
+    return () => { cancelled = true; };
+  }, [panel, files, work]);
 
   const entryHtml = entry !== null && isHtmlPath(entry);
   // v3.9.0：任意 html 页都能预览 —— 作品包里的页面要能互相点开
@@ -509,6 +531,18 @@ export function FileViewPage() {
     }
     await load();
     flash(ok > 0 ? `已导入 ${ok} 个文件` : '没有导入任何文件');
+  };
+
+  /* === v4.2.0: 设为封面（写 mod.json，html 一个字节都不动） === */
+  const handleSetCover = async (path: string | null) => {
+    try {
+      await setWorkCover(work, path);
+      setManifest(await readWorkManifest(work));
+      flash(path ? `封面已设为「${path}」` : '封面已取消');
+      setPanel(null);
+    } catch {
+      window.alert('设置封面失败，请重试');
+    }
   };
 
   const handleDeleteFile = async () => {
@@ -878,6 +912,14 @@ export function FileViewPage() {
               </button>
               <button
                 type="button"
+                className={`sheet-action ${manifest?.cover ? 'ai-on' : ''}`}
+                onClick={() => setPanel('cover')}
+              >
+                <span className="sheet-action-icon">▣</span>
+                <span>设为封面</span>
+              </button>
+              <button
+                type="button"
                 className={`sheet-action ${aiGrant.enabled ? 'ai-on' : ''}`}
                 onClick={() => setPanel('ai')}
               >
@@ -921,6 +963,50 @@ export function FileViewPage() {
                 <span>删除作品</span>
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 设为封面面板：只写 mod.json，不动 html（v4.2.0） */}
+      {panel === 'cover' && (
+        <div className="files-sheet-mask" onClick={() => setPanel(null)}>
+          <div className="files-sheet" onClick={e => e.stopPropagation()}>
+            <div className="sheet-grabber" />
+            <div className="sheet-head">
+              <h3>设为封面</h3>
+              <span className="sheet-sub">
+                {manifest?.cover ? `当前：${manifest.cover}` : '当前没有封面'}
+              </span>
+            </div>
+            <div className="cover-grid">
+              {files.filter(file => isImagePath(file.path)).map(image => (
+                <button
+                  key={image.path}
+                  type="button"
+                  className={`cover-cell ${manifest?.cover === image.path ? 'active' : ''}`}
+                  onClick={() => void handleSetCover(image.path)}
+                  title={image.path}
+                >
+                  {coverThumbs[image.path]
+                    ? <img src={coverThumbs[image.path]} alt="" />
+                    : <span className="cover-cell-ph">{(image.path.split('.').pop() || '?').toUpperCase()}</span>}
+                  <span className="cover-cell-name">{image.path}</span>
+                </button>
+              ))}
+              {files.filter(file => isImagePath(file.path)).length === 0 && (
+                <p className="files-empty-hint">
+                  作品里还没有图片。用「画图」画一张，或在聊天里让 AI 把图片 copy 进来。
+                </p>
+              )}
+            </div>
+            {manifest?.cover && (
+              <div className="sheet-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
+                <button type="button" className="sheet-action danger" onClick={() => void handleSetCover(null)}>
+                  <span className="sheet-action-icon">×</span>
+                  <span>取消封面</span>
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -127,6 +127,39 @@ export async function readWorkManifest(rawName: string): Promise<WorkManifest | 
   }
 }
 
+/**
+ * 设置（或取消）作品封面 —— **写 mod.json，不动任何 html**（v4.2.0）
+ *
+ * 为什么要有这条路：v3.8.0 只认入口 html 的 `<meta name="cover">`，
+ * 于是「给作品加个封面」= 整份 html 重写。封面本来就是作品的元信息，
+ * 不该绑在内容文件里；mod.json 的 cover 字段才是它的家。
+ *
+ * @param coverPath 作品内图片相对路径；传 null 表示取消封面
+ */
+export async function setWorkCover(rawName: string, coverPath: string | null): Promise<void> {
+  const name = sanitizeWorkName(rawName);
+  const raw = await readRaw(name, 'mod.json');
+  let manifest: Record<string, unknown> = {};
+  if (raw) {
+    try {
+      const parsed = JSON.parse(base64ToText(raw)) as unknown;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        manifest = parsed as Record<string, unknown>;
+      }
+    } catch {
+      // mod.json 坏了就当空的，下面重建一份最小清单
+    }
+  }
+  if (coverPath) {
+    manifest.cover = sanitizeRelPath(coverPath);
+  } else {
+    delete manifest.cover;
+  }
+  if (typeof manifest.spec !== 'number') manifest.spec = 1;
+  if (typeof manifest.name !== 'string' || !manifest.name) manifest.name = name;
+  await writeWorkText(name, 'mod.json', `${JSON.stringify(manifest, null, 2)}\n`, { reason: 'system' });
+}
+
 /** 由原文件名推入口名：demo.html → index.html */
 export function entryNameFor(fileName: string): string {
   const dot = fileName.lastIndexOf('.');
@@ -322,6 +355,51 @@ export async function writeWorkText(
 /** 读二进制（返回 base64 原样，图片用） */
 export function readWorkBinary(rawName: string, rel: string): Promise<string | null> {
   return readRaw(sanitizeWorkName(rawName), sanitizeRelPath(rel));
+}
+
+/**
+ * 按行读文本（v4.2.0）——大文件读全文会直接把上下文撑爆，
+ * AI 又有 search_in_work 指到行号，按段读才是正常姿势。
+ *
+ * @param offset 起始行号（1-based）
+ * @param limit  最多返回多少行（1~2000，默认 400）
+ */
+export async function readWorkTextRange(
+  rawName: string,
+  rel: string,
+  offset = 1,
+  limit = 400,
+): Promise<{ path: string; text: string; offset: number; lines: number; totalLines: number; chars: number } | null> {
+  const name = sanitizeWorkName(rawName);
+  const relPath = sanitizeRelPath(rel);
+  const base64 = await readRaw(name, relPath);
+  if (base64 === null) return null;
+  const all = base64ToText(base64);
+  const rows = all.split('\n');
+  const start = Math.max(1, Math.floor(offset));
+  const count = Math.max(1, Math.min(2000, Math.floor(limit)));
+  const sliced = rows.slice(start - 1, start - 1 + count);
+  return {
+    path: relPath,
+    text: sliced.join('\n'),
+    offset: start,
+    lines: sliced.length,
+    totalLines: rows.length,
+    chars: all.length,
+  };
+}
+
+/** 把一个作品里的文件原样复制到另一个作品（v4.2.0，copy_file 用，不经模型） */
+export async function copyWorkFile(
+  fromWork: string,
+  fromPath: string,
+  toWork: string,
+  toPath: string,
+): Promise<{ from: string; to: string; bytes: number } | null> {
+  const src = await readRaw(sanitizeWorkName(fromWork), sanitizeRelPath(fromPath));
+  if (src === null) return null;
+  const saved = await writeWorkBinary(toWork, toPath, src);
+  return { from: `${sanitizeWorkName(fromWork)}/${sanitizeRelPath(fromPath)}`, to: saved, bytes: Math.floor((src.length * 3) / 4) };
 }
 
 /** 写二进制（入参就是 base64，如图片字节） */

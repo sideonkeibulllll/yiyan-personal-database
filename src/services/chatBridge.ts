@@ -31,7 +31,10 @@
 import {
   listWorks, listWorkFiles, readWorkText, writeWorkText, writeWorkBinary,
   deleteWorkFile, createWork, renameWork, deleteWork, workExists, entryNameFor,
+  readWorkTextRange, copyWorkFile, setWorkCover, sanitizeRelPath,
 } from './workLibrary';
+import { applyEdits, describeEditFailure, EDIT_MAX_PER_FILE } from './workPatch';
+import { isUploadPath, readUploadBase64, readUploadText } from './chatUploads';
 import { bytesToBase64, drawTraeImage } from './traeImage';
 import { buildWorkCatalog } from './workCatalog';
 import { WORK_AI_GUIDE } from '@/utils/workAiBridge';
@@ -696,19 +699,21 @@ export const BRIDGE_TOOLS: BridgeTool[] = [
   },
   {
     name: 'read_file',
-    description: '读取作品内某个文本文件的全文（超过 20 万字符会截断并在结果里标注）。图片不要用它读。',
+    description: '读取作品内某个文本文件（超过 20 万字符会截断并在结果里标注）。文件很大时用 offset/limit 按行读——不确定内容在哪，先用 search_in_work 定位行号再读那一段，别一上来读整本。图片不要用它读。',
     parameters: {
       type: 'object',
       properties: {
         work: { type: 'string', description: '作品名' },
         path: { type: 'string', description: '相对路径，如 index.html 或 app.css' },
+        offset: { type: 'number', description: '可选：起始行号（1-based），传了就按行读' },
+        limit: { type: 'number', description: '可选：最多返回多少行，默认 400，最大 2000' },
       },
       required: ['work', 'path'],
     },
   },
   {
     name: 'write_file',
-    description: '在作品里新建或覆盖一个文本文件（同路径即覆盖，迭代作品的常态）。**不需要用户确认**，只在用户明确要求写文件/做作品时使用。多文件作品可把样式/脚本拆到 app.css / app.js 再引用。\n【封面约定】我们会提取 html 里的封面做封面：需要封面时用 draw_image 画一张图存进作品（如 cover.jpg），再在 index.html 的 <head> 里写 <meta name="cover" content="cover.jpg">，作品列表就会显示它。',
+    description: '**新建**作品文件，或整体重写一个文件（同路径即覆盖）。**不需要用户确认**。\n⚠️ 改已有文件不要用它——用 edit_file 做局部替换；只有「整页重构 / 整份换掉」才用 write_file 重写全文。\n【封面】不要为了封面去改 html：画好图（draw_image）或把图搬进来（copy_file）之后，调 set_cover 写 mod.json 就行。',
     parameters: {
       type: 'object',
       properties: {
@@ -768,6 +773,108 @@ export const BRIDGE_TOOLS: BridgeTool[] = [
       required: ['work', 'files'],
     },
   },
+  /* === v4.2.0: 局部编辑 / 搜索 / 复制 / 封面声明（治「加一行也要重写全文」） === */
+  {
+    name: 'edit_file',
+    description: '局部修改作品里的文本文件——只给「原文片段」和「替换成什么」，**不重写整份文件**。改已有文件一律优先用它：加一行 meta、改个颜色、调个函数、换句文案，都别用 write_file 把全文重打一遍（长文件重打必漏行）。\n规则：find 必须在文件里恰好出现 1 次；出现 0 次或多次会失败并回传附近行号，照着文件里的真实内容（含缩进、标点）多带 2~4 行上下文再试。要批量替换同一片段（如全站换字）就显式传 all: true。一个文件的多处 edits 按顺序应用；**任何一处失败整批都不写入**（原子），不会留下改了一半的文件。',
+    parameters: {
+      type: 'object',
+      properties: {
+        work: { type: 'string', description: '作品名' },
+        files: {
+          type: 'array',
+          description: '要修改的文件（最多 12 个），每个文件可带多处编辑（最多 10 处）',
+          items: {
+            type: 'object',
+            properties: {
+              path: { type: 'string', description: '相对路径，如 index.html' },
+              edits: {
+                type: 'array',
+                description: '按顺序应用的替换列表',
+                items: {
+                  type: 'object',
+                  properties: {
+                    find: { type: 'string', description: '要替换的原文（带上下文保证唯一；不要写省略号）' },
+                    replace: { type: 'string', description: '替换成的内容（空字符串 = 删掉这段）' },
+                    all: { type: 'boolean', description: 'true 表示允许 find 出现多次并全部替换（默认 false）' },
+                  },
+                  required: ['find', 'replace'],
+                },
+              },
+            },
+            required: ['path', 'edits'],
+          },
+        },
+      },
+      required: ['work', 'files'],
+    },
+  },
+  {
+    name: 'search_in_work',
+    description: '在作品里搜文本，返回「文件:行号: 内容」。想改某个东西但不确定在哪、或文件很大不想通读时，**先搜再改**（比 read_file 读全文省得多）。默认忽略大小写、按纯文本匹配；传 regex: true 才按正则解析。',
+    parameters: {
+      type: 'object',
+      properties: {
+        work: { type: 'string', description: '作品名' },
+        query: { type: 'string', description: '要找的内容（纯文本或正则）' },
+        path: { type: 'string', description: '可选：只搜这个文件（相对路径）' },
+        regex: { type: 'boolean', description: '按正则表达式匹配（默认 false）' },
+        max: { type: 'number', description: '最多返回多少条，默认 30，最大 80' },
+      },
+      required: ['work', 'query'],
+    },
+  },
+  {
+    name: 'read_upload',
+    description: '按行读用户这次对话上传的文件（本地副本，路径形如 chat-files/…，聊天消息里会给）。聊天里的大文件只贴了开头，要看具体内容时用它；只是想把文件原样放进作品就直接 copy_file，不用读。',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: '本地副本路径（chat-files/…）' },
+        offset: { type: 'number', description: '起始行号，1-based，默认 1' },
+        limit: { type: 'number', description: '最多返回多少行，默认 400，最大 2000' },
+      },
+      required: ['path'],
+    },
+  },
+  {
+    name: 'copy_file',
+    description: '把已有文件**原样复制**进作品（字节级搬运，不经过你的输出，也不占上下文）。用户说「把刚上传的文件/图片放进作品」「把 A 作品里的图搬到 B」时**必须**用它——绝不要用 write_file 重新打一遍内容。\n源有两种：source="upload" + path（聊天消息里给出的 chat-files/… 路径）；source="work" + from_work + path（另一个作品里的文件）。默认不覆盖已有文件（重名会报错并给建议名），确实要覆盖传 overwrite: true。',
+    parameters: {
+      type: 'object',
+      properties: {
+        to_work: { type: 'string', description: '目标作品名（不存在会自动创建）' },
+        files: {
+          type: 'array',
+          description: '要复制的文件列表（最多 12 个）',
+          items: {
+            type: 'object',
+            properties: {
+              source: { type: 'string', description: 'upload（聊天上传缓存）或 work（另一个作品）' },
+              path: { type: 'string', description: '源文件路径：upload 用 chat-files/…；work 用作品内相对路径' },
+              from_work: { type: 'string', description: 'source=work 时的源作品名' },
+              as: { type: 'string', description: '可选：目标相对路径。不传则用原文件名放在作品根目录' },
+              overwrite: { type: 'boolean', description: '目标已存在时是否覆盖（默认 false）' },
+            },
+            required: ['source', 'path'],
+          },
+        },
+      },
+      required: ['to_work', 'files'],
+    },
+  },
+  {
+    name: 'set_cover',
+    description: '给作品设封面：只写 mod.json 的 cover 字段，**不动任何 html**。封面图必须是作品里已有的图片（先用 draw_image 画一张，或用 copy_file 把用户上传的图搬进来）。path 传空字符串表示取消封面。作品列表的封面优先级：mod.json > 入口 html 的 <meta name="cover"> > 约定文件名 cover.jpg/png。',
+    parameters: {
+      type: 'object',
+      properties: {
+        work: { type: 'string', description: '作品名' },
+        path: { type: 'string', description: '作品内图片相对路径（如 cover.jpg、assets/a.png）；空字符串取消封面' },
+      },
+      required: ['work', 'path'],
+    },
+  },
   {
     name: 'build_catalog',
     description: '给作品生成 / 更新目录页（入口页）。扫描作品内全部 html，按目录分组列成「卡片 + 搜索框」的页面，写成 index.html（这个名字被占用时退到 _index.html），同时写入 mod.json。\n写完多个页面后调它一次，散页面就变成结构完整的作品包；重复调用会原地更新同一张目录页，不会越堆越多。页面少于 2 个时不需要调。',
@@ -784,7 +891,7 @@ export const BRIDGE_TOOLS: BridgeTool[] = [
   /* === v3.8.0: 画图（TRAE 文生图，约 8.8 积分/张，自动走积分最多的账号） === */
   {
     name: 'draw_image',
-    description: '文生图并直接存进作品文件夹（TRAE seedream，1920x1920 约 8.8 积分/张，走账号倾向里积分最多的号）。画完返回保存路径。典型用法：给作品画封面——存成 cover.jpg 并按封面约定在 index.html 加 <meta name="cover" content="cover.jpg">。同一 prompt 有缓存不会重复扣费。纯几何/图标请直接写 SVG/CSS，别浪费积分。',
+    description: '文生图并直接存进作品文件夹（TRAE seedream，1920x1920 约 8.8 积分/张，走账号倾向里积分最多的号）。画完返回保存路径。典型用法：给作品画封面——存成 cover.jpg，然后调 set_cover 设成封面（**不要**去改 html）。同一 prompt 有缓存不会重复扣费。纯几何/图标请直接写 SVG/CSS，别浪费积分。',
     parameters: {
       type: 'object',
       properties: {
@@ -857,7 +964,7 @@ export const PROMPT_TOOLS = [
   'get_prompt',
   'save_prompt',
 ];
-/** 文件与作品工具（v3.8.0）：作品管理 + 作品内文件读写；删除类需确认 */
+/** 文件与作品工具（v3.8.0，v4.2.0 加局部编辑/搜索/复制/封面声明）：删除类需确认 */
 export const FILE_TOOLS = [
   'list_works',
   'create_work',
@@ -867,6 +974,11 @@ export const FILE_TOOLS = [
   'read_file',
   'write_file',
   'write_files',
+  'edit_file',
+  'search_in_work',
+  'read_upload',
+  'copy_file',
+  'set_cover',
   'build_catalog',
   'write_image',
   'delete_file',
@@ -906,6 +1018,8 @@ export const TOOL_DISPLAY_NAMES: Record<string, string> = {
   list_prompts: '查看提示词库', get_prompt: '读取提示词', save_prompt: '保存提示词',
   list_works: '查看作品列表', create_work: '新建作品', rename_work: '重命名作品', delete_work: '删除作品',
   list_files: '列出作品文件', read_file: '读取文件', write_file: '写入文件', write_files: '批量写入文件',
+  edit_file: '局部修改文件', search_in_work: '作品内搜索', read_upload: '读取上传文件',
+  copy_file: '复制文件进作品', set_cover: '设置作品封面',
   build_catalog: '生成目录页', write_image: '写入图片',
   delete_file: '删除文件', draw_image: '绘制图片',
   web_search: '联网搜索', web_fetch: '读取网页',
@@ -2483,6 +2597,30 @@ export async function executeToolCall(
         const work = typeof args.work === 'string' ? args.work.trim() : '';
         const path = typeof args.path === 'string' ? args.path.trim() : '';
         if (!work || !path) return { success: false, error: 'work / path 必填' };
+        // v4.2.0：带 offset/limit 就按行读（大文件别整本灌进上下文）
+        const rawOffset = Number(args.offset);
+        const rawLimit = Number(args.limit);
+        if (Number.isFinite(rawOffset) || Number.isFinite(rawLimit)) {
+          const slice = await readWorkTextRange(
+            work,
+            path,
+            Number.isFinite(rawOffset) ? rawOffset : 1,
+            Number.isFinite(rawLimit) ? rawLimit : 400,
+          );
+          if (!slice) return { success: false, error: `文件不存在：${work}/${path}` };
+          return {
+            success: true,
+            data: {
+              name: work,
+              path: slice.path,
+              offset: slice.offset,
+              lines: slice.lines,
+              totalLines: slice.totalLines,
+              chars: slice.chars,
+              content: slice.text,
+            },
+          };
+        }
         const file = await readWorkText(work, path);
         if (!file) return { success: false, error: `文件不存在：${work}/${path}` };
         return {
@@ -2581,6 +2719,255 @@ export async function executeToolCall(
           ...(written.length === 0 ? { error: '一个文件都没写成功' } : {}),
         };
       }
+      case 'edit_file': {
+        const work = typeof args.work === 'string' ? args.work.trim() : '';
+        if (!work) return { success: false, error: 'work 必填' };
+        const rawFiles = Array.isArray(args.files) ? (args.files as Array<Record<string, unknown>>) : [];
+        if (rawFiles.length === 0) return { success: false, error: 'files 不能为空' };
+        if (rawFiles.length > 12) {
+          return { success: false, error: `一次最多改 12 个文件，当前 ${rawFiles.length} 个，请分批发` };
+        }
+
+        const changed: Array<{
+          path: string; edits: number; lines: number[]; charsBefore: number; charsAfter: number;
+        }> = [];
+        const failed: Array<{ path: string; error: string }> = [];
+        let totalEdits = 0;
+
+        for (const item of rawFiles) {
+          const path = typeof item.path === 'string' ? item.path.trim() : '';
+          const rawEdits = Array.isArray(item.edits) ? (item.edits as Array<Record<string, unknown>>) : [];
+          if (!path) { failed.push({ path: '(空)', error: 'path 为空' }); continue; }
+          if (rawEdits.length === 0) { failed.push({ path, error: 'edits 为空' }); continue; }
+          if (rawEdits.length > EDIT_MAX_PER_FILE) {
+            failed.push({ path, error: `单个文件最多 ${EDIT_MAX_PER_FILE} 处编辑，请拆分` });
+            continue;
+          }
+
+          const file = await readWorkText(work, path);
+          if (!file) { failed.push({ path, error: '文件不存在（新建文件请用 write_file / write_files）' }); continue; }
+
+          const edits = rawEdits.map(edit => ({
+            find: typeof edit.find === 'string' ? edit.find : '',
+            replace: typeof edit.replace === 'string' ? edit.replace : '',
+            all: edit.all === true,
+          }));
+          const result = applyEdits(file.text, edits);
+          if (!result.ok) {
+            failed.push({ path, error: describeEditFailure(result.failure) });
+            continue;
+          }
+          if (result.text === file.text) { failed.push({ path, error: '替换后内容没有变化' }); continue; }
+
+          await writeWorkText(work, path, result.text, { reason: 'ai' });
+          totalEdits += result.applied.length;
+          changed.push({
+            path,
+            edits: result.applied.length,
+            lines: result.applied.flatMap(entry => entry.lines).slice(0, 20),
+            charsBefore: result.before,
+            charsAfter: result.after,
+          });
+        }
+
+        if (changed.length === 0) {
+          return {
+            success: false,
+            error: `一处都没改成：\n${failed.map(item => `· ${item.path}：${item.error}`).join('\n')}`,
+          };
+        }
+        return {
+          success: true,
+          data: {
+            name: work,
+            files: changed,
+            failed: failed.length > 0 ? failed : undefined,
+            message: `改了 ${changed.length} 个文件、共 ${totalEdits} 处${failed.length > 0 ? `，${failed.length} 个失败` : ''}（没重写整份文件）`,
+            hint: failed.length > 0
+              ? '失败的都是原子作废的，按回执里的行号补上下文再调一次即可；已成功的不受影响'
+              : undefined,
+          },
+        };
+      }
+      case 'search_in_work': {
+        const work = typeof args.work === 'string' ? args.work.trim() : '';
+        const query = typeof args.query === 'string' ? args.query : '';
+        if (!work || !query) return { success: false, error: 'work / query 必填' };
+        const only = typeof args.path === 'string' && args.path.trim()
+          ? args.path.trim().replace(/\\/g, '/').replace(/^\/+/, '')
+          : '';
+        const useRegex = args.regex === true;
+        const rawMax = Number(args.max);
+        const max = Number.isFinite(rawMax) ? Math.min(80, Math.max(1, Math.floor(rawMax))) : 30;
+
+        let re: RegExp | null = null;
+        if (useRegex) {
+          try {
+            re = new RegExp(query, 'i');
+          } catch (err) {
+            return { success: false, error: `正则无效：${(err as Error).message}` };
+          }
+        }
+        const needle = query.toLowerCase();
+        const allFiles = await listWorkFiles(work);
+        const targets = only ? allFiles.filter(file => file.path === only) : allFiles;
+        if (targets.length === 0) return { success: false, error: `作品里没有这个文件：${only}` };
+
+        const hits: Array<{ path: string; line: number; text: string }> = [];
+        let scanned = 0;
+        for (const file of targets) {
+          if (hits.length >= max) break;
+          // 二进制 / 超大文件跳过（搜了也没意义，还慢）
+          if (/\.(png|jpe?g|gif|webp|bmp|ico|pdf|zip|gz|woff2?|ttf|otf|mp3|mp4|wav|webm)$/i.test(file.path)) continue;
+          if (file.size > 2_000_000) continue;
+          const content = await readWorkText(work, file.path);
+          if (!content) continue;
+          scanned += 1;
+          const rows = content.text.split('\n');
+          for (let i = 0; i < rows.length && hits.length < max; i++) {
+            const row = rows[i]!;
+            const matched = re ? re.test(row) : row.toLowerCase().includes(needle);
+            if (matched) hits.push({ path: file.path, line: i + 1, text: row.trim().slice(0, 200) });
+          }
+        }
+        return {
+          success: true,
+          data: {
+            work,
+            query,
+            hits,
+            scanned,
+            truncated: hits.length >= max,
+            message: hits.length > 0
+              ? `找到 ${hits.length} 处（扫了 ${scanned} 个文本文件）`
+              : '没找到，换个更短的关键词或去掉正则试试',
+          },
+        };
+      }
+      case 'read_upload': {
+        const path = typeof args.path === 'string' ? args.path.trim() : '';
+        if (!path) return { success: false, error: 'path 必填' };
+        if (!isUploadPath(path)) {
+          return { success: false, error: '只能读聊天上传缓存（路径以 chat-files/ 开头，聊天消息里会给）' };
+        }
+        const rawOffset = Number(args.offset);
+        const rawLimit = Number(args.limit);
+        const slice = await readUploadText(
+          path,
+          Number.isFinite(rawOffset) ? rawOffset : 1,
+          Number.isFinite(rawLimit) ? rawLimit : 400,
+        );
+        if (!slice) {
+          return { success: false, error: `读不到：${path}（可能已被 60 天缓存清理，或不是文本文件）` };
+        }
+        return {
+          success: true,
+          data: {
+            path: slice.path,
+            offset: slice.offset,
+            lines: slice.lines,
+            totalLines: slice.totalLines,
+            truncated: slice.truncated,
+            content: slice.text,
+          },
+        };
+      }
+      case 'copy_file': {
+        const toWork = typeof args.to_work === 'string' ? args.to_work.trim() : '';
+        const rawList = Array.isArray(args.files) ? (args.files as Array<Record<string, unknown>>) : [];
+        if (!toWork) return { success: false, error: 'to_work 必填' };
+        if (rawList.length === 0) return { success: false, error: 'files 不能为空' };
+        if (rawList.length > 12) return { success: false, error: `一次最多复制 12 个文件，请分批发` };
+
+        const existing = new Set((await listWorkFiles(toWork)).map(file => file.path));
+        const copied: Array<{ from: string; path: string; bytes: number; source: string }> = [];
+        const failed: Array<{ path: string; error: string }> = [];
+
+        for (const item of rawList) {
+          const source = item.source === 'work' ? 'work' : 'upload';
+          const path = typeof item.path === 'string' ? item.path.trim() : '';
+          const fromWork = typeof item.from_work === 'string' ? item.from_work.trim() : '';
+          const overwrite = item.overwrite === true;
+          if (!path) { failed.push({ path: '(空)', error: 'path 为空' }); continue; }
+
+          const baseName = path.replace(/\\/g, '/').split('/').pop() || 'file';
+          const target = sanitizeRelPath(
+            typeof item.as === 'string' && item.as.trim() ? item.as.trim() : baseName,
+          );
+          if (!target) { failed.push({ path, error: '目标路径为空' }); continue; }
+          if (existing.has(target) && !overwrite) {
+            failed.push({ path, error: `目标已存在：${target}（换个别名 as，或传 overwrite: true）` });
+            continue;
+          }
+
+          if (source === 'work') {
+            if (!fromWork) { failed.push({ path, error: 'source=work 时必须给 from_work' }); continue; }
+            const hit = await copyWorkFile(fromWork, path, toWork, target);
+            if (!hit) { failed.push({ path, error: `源文件不存在：${fromWork}/${path}` }); continue; }
+            existing.add(target);
+            copied.push({ from: hit.from, path: target, bytes: hit.bytes, source: 'work' });
+            continue;
+          }
+
+          if (!isUploadPath(path)) {
+            failed.push({ path, error: 'source=upload 的 path 必须是 chat-files/… （聊天消息里给的本地副本路径）' });
+            continue;
+          }
+          const base64 = await readUploadBase64(path);
+          if (!base64) { failed.push({ path, error: '读不到源文件（可能已被 60 天缓存清理）' }); continue; }
+          await writeWorkBinary(toWork, target, base64);
+          existing.add(target);
+          copied.push({
+            from: path,
+            path: target,
+            bytes: Math.floor((base64.length * 3) / 4),
+            source: 'upload',
+          });
+        }
+
+        if (copied.length === 0) {
+          return {
+            success: false,
+            error: `一个都没复制成功：\n${failed.map(item => `· ${item.path}：${item.error}`).join('\n')}`,
+          };
+        }
+        return {
+          success: true,
+          data: {
+            name: toWork,
+            copied,
+            total: copied.length,
+            failed: failed.length > 0 ? failed : undefined,
+            message: `已原样复制 ${copied.length} 个文件进「${toWork}」（字节级，没经过重写）`,
+          },
+        };
+      }
+      case 'set_cover': {
+        const work = typeof args.work === 'string' ? args.work.trim() : '';
+        const path = typeof args.path === 'string' ? args.path.trim() : '';
+        if (!work) return { success: false, error: 'work 必填' };
+        if (path) {
+          const clean = path.replace(/\\/g, '/').replace(/^\/+/, '');
+          if (!/\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(clean)) {
+            return { success: false, error: '封面必须是图片文件（png / jpg / webp / svg / bmp）' };
+          }
+          const files = await listWorkFiles(work);
+          if (!files.some(file => file.path === clean)) {
+            return { success: false, error: `作品里没有这个图片：${clean}（先用 draw_image 画，或 copy_file 把图搬进来）` };
+          }
+        }
+        await setWorkCover(work, path || null);
+        return {
+          success: true,
+          data: {
+            name: work,
+            cover: path || null,
+            message: path
+              ? `封面已设为「${path}」（写进 mod.json，html 一个字节都没动）`
+              : '封面已取消',
+          },
+        };
+      }
       case 'build_catalog': {
         const work = typeof args.work === 'string' ? args.work.trim() : '';
         if (!work) return { success: false, error: 'work 必填' };
@@ -2619,7 +3006,7 @@ export async function executeToolCall(
             uid: result.uid,
             bytes: result.bytes.length,
             message: `${result.cached ? '命中缓存（未扣积分）' : '已生成'}「${saved}」`
-              + `，账号 ${result.uid.slice(-6)}。记得在 index.html 加 <meta name="cover" content="${path}"> 作为封面`,
+              + `，账号 ${result.uid.slice(-6)}。要当封面就调 set_cover（work="${work}"，path="${path}"），不要改 html`,
           },
         };
       }

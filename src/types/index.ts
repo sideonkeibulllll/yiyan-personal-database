@@ -824,6 +824,12 @@ export interface McpGroupConfig {
   icon: string;
   desc?: string;
   tools: string[];
+  /**
+   * 工具集版本（v4.2.0）：出厂组新增工具时递增。
+   * 老配置存的 toolsEpoch 更低 → 解析时把该组的新工具补进来（只补不删，一次性），
+   * 否则升级后用户会「看不到新工具」还以为没更新。
+   */
+  toolsEpoch?: number;
   /** 内置组不可删除（可以停用、可以改工具集） */
   builtin: boolean;
   /**

@@ -157,10 +157,11 @@ function pickImagesViaInput(multiple: boolean): Promise<SelectedImage[]> {
 // ==================== 选择文件（v3.6.3）====================
 
 /**
- * 选中的文本文件（内容只拼进消息正文，不落盘、不进附件表）。
+ * 选中的文本文件（v4.2.0 起：内容拼进正文 + 原始字节落一份本地副本）。
  *
- * 为什么不落盘：Chat 历史本来就是 messages 整段 JSON，文本直接进正文
- * 可以跟着会话一起备份/导出，不需要第二套文件路径映射。
+ * 为什么现在要落盘：以前只有文本，AI 想「把这个文件放进作品」只能重打一遍内容。
+ * 落地后消息里会给出 `chat-files/…` 路径，AI 用 copy_file 字节级搬运即可（零 token）。
+ * 缓存是临时的（60 天 / 300MB），作品里那份才是长期的。
  */
 export interface SelectedTextFile {
   /** 原始文件名（拼进消息里给模型看） */
@@ -171,6 +172,41 @@ export interface SelectedTextFile {
   text: string;
   /** 是否因为超长被截断 */
   truncated: boolean;
+  /** v4.2.0：发送时落地的本地副本路径（chat-files/…），失败则没有 */
+  cachePath?: string;
+}
+
+/** 内联进消息正文的字符上限（v4.2.0）：超过只贴开头 */
+export const CHAT_FILE_INLINE_MAX_CHARS = 30_000;
+/** 超长文件内联时保留的开头字数 */
+export const CHAT_FILE_PREVIEW_CHARS = 2_000;
+
+/**
+ * 拼一个聊天文件块（`【文件：…】…【文件结束】`）。
+ *
+ * 三种形态：
+ * - 有本地副本且内容不长 → 全文 + 一行「本地副本」提示（AI 既懂内容、又能原样搬运）
+ * - 有本地副本且超 3 万字 → 只贴开头 2000 字 + 提示用 read_upload / copy_file
+ * - 没有本地副本（落盘失败/超大）→ 退回老行为：全文照贴，别让 AI 两眼一抹黑
+ */
+export function buildChatFileBlock(file: {
+  name: string;
+  text: string;
+  truncated?: boolean;
+  cachePath?: string;
+}): string {
+  const note = file.truncated ? '（内容过长已截断）' : '';
+  const loc = file.cachePath
+    ? `〔本地副本 ${file.cachePath} · 要把它放进作品就用 copy_file（原样复制，别重写内容）；要看具体内容用 read_upload 按行读〕`
+    : '';
+  const tooLong = !!file.cachePath && file.text.length > CHAT_FILE_INLINE_MAX_CHARS;
+  if (!tooLong) {
+    const body = loc ? `${loc}\n${file.text}` : file.text;
+    return `【文件：${file.name}${note}】\n${body}\n【文件结束】`;
+  }
+  const preview = file.text.slice(0, CHAT_FILE_PREVIEW_CHARS);
+  const rest = file.text.length - CHAT_FILE_PREVIEW_CHARS;
+  return `【文件：${file.name}${note}】\n${loc}\n${preview}\n…（后面 ${rest} 字没有贴出来；要看细节用 read_upload，要整份放进作品用 copy_file）\n【文件结束】`;
 }
 
 /** 单文件读取上限（字符） */

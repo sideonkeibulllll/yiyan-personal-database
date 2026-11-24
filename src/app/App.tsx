@@ -11,6 +11,7 @@ import { useTagStore } from '@/stores/tagStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useTodoStore } from '@/stores/todoStore';
 import { matchesAutoWeekdays } from '@/utils/todoWeekdays';
+import { cleanupChatUploads } from '@/services/chatUploads';
 
 /** Triangle alert icon */
 const TriangleAlertSvg = () => (
@@ -243,6 +244,9 @@ async function runDailyMaintenance(): Promise<void> {
  * 不阻塞界面显示，启动关键路径之外执行
  */
 async function runBackgroundTasks(): Promise<void> {
+  // v4.2.0: 聊天上传缓存清理（60 天过期 + 300MB 上限，一天只跑一次；不阻塞主流程）
+  cleanupChatUploads().catch(() => {});
+
   // v3.5.0: 每日维护（「今日处理」过天自动完成）
   await runDailyMaintenance();
 
