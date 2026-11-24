@@ -41,6 +41,22 @@ export interface WorkInfo {
   size: number;
   mtime: number;
   fileCount: number;
+  /**
+   * 封面图相对路径（v4.2.1）：`mod.json.cover` 或约定的 `cover.jpg/png`。
+   * 只覆盖「文件能直接看出来」的两种来源；html `<meta name="cover">` 要另外解析，
+   * 这里不做（list 每次进页面都跑，不能为封面把每个作品 html 都读一遍）。
+   */
+  cover: string | null;
+  /** 封面来源：manifest=mod.json 声明，file=约定文件名，null=没声明 */
+  coverSource: 'manifest' | 'file' | null;
+}
+
+/** 约定封面文件名（根目录或 assets/ 下） */
+const CONVENTIONAL_COVER_RE = /^(?:assets\/)?cover\.(?:jpe?g|png|webp)$/i;
+
+/** 从文件清单里挑约定封面（v4.2.1：给 listWorks / extractWorkCover 共用） */
+export function findConventionalCover(paths: string[]): string | null {
+  return paths.find(path => CONVENTIONAL_COVER_RE.test(path)) ?? null;
 }
 
 export interface WorkTextContent {
@@ -282,6 +298,9 @@ export async function listWorks(): Promise<WorkInfo[]> {
       if (files.length === 0) continue;
       const paths = files.map(f => f.path);
       const manifest = await readWorkManifest(base);
+      // v4.2.1：清单声明的封面色必须真的在文件里（用户可能删了图），否则退到约定名
+      const declared = manifest?.cover && paths.includes(manifest.cover) ? manifest.cover : null;
+      const conventional = declared ? null : findConventionalCover(paths);
       out.push({
         name: base,
         entry: pickEntry(paths, manifest?.entry),
@@ -289,6 +308,8 @@ export async function listWorks(): Promise<WorkInfo[]> {
         size: files.reduce((sum, f) => sum + f.size, 0),
         mtime: files.reduce((max, f) => Math.max(max, f.mtime), 0),
         fileCount: files.length,
+        cover: declared ?? conventional,
+        coverSource: declared ? 'manifest' : (conventional ? 'file' : null),
       });
     } else {
       // 容错：works/ 下散落的旧式单文件，也包装成单文件作品展示
@@ -299,6 +320,8 @@ export async function listWorks(): Promise<WorkInfo[]> {
         size: typeof (entry as { size?: number }).size === 'number' ? (entry as { size?: number }).size! : 0,
         mtime: typeof (entry as { mtime?: number }).mtime === 'number' ? (entry as { mtime?: number }).mtime! : 0,
         fileCount: 1,
+        cover: null,
+        coverSource: null,
       });
     }
   }

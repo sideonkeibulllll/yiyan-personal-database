@@ -10,7 +10,7 @@
  * 而且 build_catalog 生成的目录页作品会把 cover 写进 mod.json，列表页却读不到。
  * 现在 mod.json 是主通道，meta 是兼容通道。
  */
-import { isImagePath, listWorkFiles, readWorkBinary, readWorkManifest, readWorkText, sanitizeRelPath } from '@/services/workLibrary';
+import { findConventionalCover, isImagePath, listWorkFiles, readWorkBinary, readWorkManifest, readWorkText, sanitizeRelPath } from '@/services/workLibrary';
 
 const EXT_MIME: Record<string, string> = {
   png: 'image/png',
@@ -30,11 +30,7 @@ export function parseCoverMeta(html: string): string | null {
   return value ? value.trim() : null;
 }
 
-/** 约定文件名，按优先级排列 */
-const CONVENTIONAL_COVERS = [
-  'cover.jpg', 'cover.jpeg', 'cover.png', 'cover.webp',
-  'assets/cover.jpg', 'assets/cover.jpeg', 'assets/cover.png', 'assets/cover.webp',
-];
+/** 约定文件名交给 workLibrary 的 findConventionalCover 判定（与列表页同一套规则，v4.2.1） */
 
 async function toDataUrl(workName: string, rel: string): Promise<string | null> {
   if (!isImagePath(rel)) return null;
@@ -77,12 +73,11 @@ export async function extractWorkCover(workName: string, entryPath: string | nul
 
   // 3) 约定文件名兜底（只在这一步才列目录，常见路径省一次 readdir）
   try {
-    const files = new Set((await listWorkFiles(workName)).map(file => file.path));
-    for (const candidate of CONVENTIONAL_COVERS) {
-      if (files.has(candidate)) {
-        const hit = await toDataUrl(workName, candidate);
-        if (hit) return hit;
-      }
+    const paths = (await listWorkFiles(workName)).map(file => file.path);
+    const conventional = findConventionalCover(paths);
+    if (conventional) {
+      const hit = await toDataUrl(workName, conventional);
+      if (hit) return hit;
     }
   } catch {
     /* ignore */

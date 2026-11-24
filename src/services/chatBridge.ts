@@ -34,6 +34,8 @@ import {
   readWorkTextRange, copyWorkFile, setWorkCover, sanitizeRelPath,
 } from './workLibrary';
 import { applyEdits, describeEditFailure, EDIT_MAX_PER_FILE } from './workPatch';
+import { parseCoverMeta } from '@/utils/workCover';
+import { includesWholeWord, isAsciiWordQuery } from '@/utils/workSearch';
 import { isUploadPath, readUploadBase64, readUploadText } from './chatUploads';
 import { bytesToBase64, drawTraeImage } from './traeImage';
 import { buildWorkCatalog } from './workCatalog';
@@ -69,6 +71,8 @@ function toStringArray(value: unknown): string[] {
   if (typeof value === 'string' && value.length > 0) return [value];
   return [];
 }
+
+/* === v4.2.1: 作品内搜索的词边界（实现在 utils/workSearch.ts，纯函数可单测） === */
 
 /** 
  * 待办标签默认颜色（与待办编辑页「+ 新标签」的默认色一致）。
@@ -652,8 +656,14 @@ export const BRIDGE_TOOLS: BridgeTool[] = [
   /* === v3.8.0: 文件与作品（一个作品 = 一个文件夹，入口 index.html / index.md / …） === */
   {
     name: 'list_works',
-    description: '列出「文件与作品」里的全部作品（每个作品是一个文件夹：入口文件 + 可选的 css/js/图片等）。想知道有哪些作品、某作品存不存在时先调它。',
-    parameters: { type: 'object', properties: {}, required: [] },
+    description: '列出「文件与作品」里的全部作品：入口文件、是否网页、文件数、字节数、修改时间、**封面**（cover + coverSource）。想知道有哪些作品、哪个有封面、某作品存不存在时先调它。\n默认 cover 只认 mod.json 与约定的 cover.jpg/png（不读 html，快）；要把入口 html 里的 <meta name="cover"> 也算进来就传 with_cover_meta: true（会多读几次 html，作品多时慢一点）。',
+    parameters: {
+      type: 'object',
+      properties: {
+        with_cover_meta: { type: 'boolean', description: '可选：连 html <meta name="cover"> 一起解析（默认 false，省 IO）' },
+      },
+      required: [],
+    },
   },
   {
     name: 'create_work',
@@ -811,7 +821,7 @@ export const BRIDGE_TOOLS: BridgeTool[] = [
   },
   {
     name: 'search_in_work',
-    description: '在作品里搜文本，返回「文件:行号: 内容」。想改某个东西但不确定在哪、或文件很大不想通读时，**先搜再改**（比 read_file 读全文省得多）。默认忽略大小写、按纯文本匹配；传 regex: true 才按正则解析。',
+    description: '在作品里搜文本，返回「文件:行号: 内容」。想改某个东西但不确定在哪、或文件很大不想通读时，**先搜再改**（比 read_file 读全文省得多）。默认忽略大小写：ASCII 词（如 cover、flex）走**整词匹配**——不会再把 discover / recovered 这种半截词捞进来；中文照旧按子串。传 regex: true 按正则解析；想强制关掉整词（搜子串）传 whole_word: false。同一个文件最多回 8 条，免得一个文件吃满名额。',
     parameters: {
       type: 'object',
       properties: {
@@ -819,6 +829,7 @@ export const BRIDGE_TOOLS: BridgeTool[] = [
         query: { type: 'string', description: '要找的内容（纯文本或正则）' },
         path: { type: 'string', description: '可选：只搜这个文件（相对路径）' },
         regex: { type: 'boolean', description: '按正则表达式匹配（默认 false）' },
+        whole_word: { type: 'boolean', description: '可选：true 强制整词、false 强制子串；不传则 ASCII 词自动整词、中文自动子串' },
         max: { type: 'number', description: '最多返回多少条，默认 30，最大 80' },
       },
       required: ['work', 'query'],
@@ -2546,12 +2557,47 @@ export async function executeToolCall(
 
       case 'list_works': {
         const works = await listWorks();
+        const withMeta = args.with_cover_meta === true;
+        // v4.2.1：把封面带出来（mod.json / 约定名零额外 IO；html meta 只在显式要求时补读）
+        let metaScanned = 0;
+        const items = await Promise.all(works.map(async w => {
+          let cover = w.cover;
+          let coverSource: 'manifest' | 'file' | 'meta' | null = w.coverSource;
+          if (!cover && withMeta && w.entry && /\.html?$/i.test(w.entry) && metaScanned < 20) {
+            metaScanned += 1;
+            try {
+              const entryText = await readWorkText(w.name, w.entry);
+              const fromMeta = entryText ? parseCoverMeta(entryText.text) : null;
+              if (fromMeta && /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(fromMeta)) {
+                cover = fromMeta;
+                coverSource = 'meta';
+              }
+            } catch {
+              /* 单个失败不影响列表 */
+            }
+          }
+          return {
+            name: w.name,
+            entry: w.entry ?? undefined,
+            isHtml: w.isHtml,
+            files: w.fileCount,
+            bytes: w.size,
+            mtime: w.mtime || undefined,
+            cover: cover ?? undefined,
+            coverSource: coverSource ?? undefined,
+          };
+        }));
+        const withoutCover = items.filter(item => !item.cover).length;
         return {
           success: true,
           data: {
-            total: works.length,
-            works: works.map(w => ({ name: w.name, entry: w.entry ?? undefined, files: w.fileCount, bytes: w.size })),
-            hint: works.length === 0 ? '还没有作品；可以 create_work 新建，或 write_file 直接写 index.html' : undefined,
+            total: items.length,
+            works: items,
+            hint: items.length === 0
+              ? '还没有作品；可以 create_work 新建，或 write_file 直接写 index.html'
+              : (withoutCover > 0 && !withMeta
+                ? `${withoutCover} 个作品没有声明封面（cover 只认 mod.json 与 cover.jpg/png；html 里写 <meta name="cover"> 的要传 with_cover_meta: true 才看得到）`
+                : undefined),
           },
         };
       }
@@ -2808,13 +2854,21 @@ export async function executeToolCall(
             return { success: false, error: `正则无效：${(err as Error).message}` };
           }
         }
+        // v4.2.1：ASCII 词默认整词匹配（治 discover / recovered 这种半截命中）
+        const wholeWordArg = args.whole_word;
+        const autoWholeWord = isAsciiWordQuery(query);
+        const useWholeWord = !useRegex && (wholeWordArg === true || (wholeWordArg !== false && autoWholeWord));
+        const mode: 'regex' | 'whole-word' | 'substring' = useRegex ? 'regex' : (useWholeWord ? 'whole-word' : 'substring');
         const needle = query.toLowerCase();
         const allFiles = await listWorkFiles(work);
         const targets = only ? allFiles.filter(file => file.path === only) : allFiles;
         if (targets.length === 0) return { success: false, error: `作品里没有这个文件：${only}` };
 
+        /** 同一个文件最多回 8 条：否则一个 5000 行的 html 能把整页名额吃光 */
+        const PER_FILE_MAX = 8;
         const hits: Array<{ path: string; line: number; text: string }> = [];
         let scanned = 0;
+        let cappedFiles = 0;
         for (const file of targets) {
           if (hits.length >= max) break;
           // 二进制 / 超大文件跳过（搜了也没意义，还慢）
@@ -2824,10 +2878,16 @@ export async function executeToolCall(
           if (!content) continue;
           scanned += 1;
           const rows = content.text.split('\n');
+          let fileHits = 0;
           for (let i = 0; i < rows.length && hits.length < max; i++) {
             const row = rows[i]!;
-            const matched = re ? re.test(row) : row.toLowerCase().includes(needle);
-            if (matched) hits.push({ path: file.path, line: i + 1, text: row.trim().slice(0, 200) });
+            const matched = re
+              ? re.test(row)
+              : (useWholeWord ? includesWholeWord(row, query) : row.toLowerCase().includes(needle));
+            if (!matched) continue;
+            if (fileHits >= PER_FILE_MAX) { cappedFiles += 1; break; }
+            hits.push({ path: file.path, line: i + 1, text: row.trim().slice(0, 200) });
+            fileHits += 1;
           }
         }
         return {
@@ -2835,12 +2895,15 @@ export async function executeToolCall(
           data: {
             work,
             query,
+            mode,
             hits,
             scanned,
+            cappedFiles: cappedFiles > 0 ? cappedFiles : undefined,
             truncated: hits.length >= max,
             message: hits.length > 0
-              ? `找到 ${hits.length} 处（扫了 ${scanned} 个文本文件）`
-              : '没找到，换个更短的关键词或去掉正则试试',
+              ? `找到 ${hits.length} 处（扫了 ${scanned} 个文本文件，${mode === 'whole-word' ? '整词匹配' : mode === 'regex' ? '正则匹配' : '子串匹配'}）`
+                + (cappedFiles > 0 ? `；有 ${cappedFiles} 个文件命中超过 ${PER_FILE_MAX} 条，只回了前 ${PER_FILE_MAX} 条 —— 缩小关键词或指定 path 更准` : '')
+              : `没找到${mode === 'whole-word' ? '（当前是整词匹配，想搜子串就传 whole_word: false）' : ''}，换个更短的关键词试试`,
           },
         };
       }
