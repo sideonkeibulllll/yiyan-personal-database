@@ -690,8 +690,27 @@ export function FileViewPage() {
     URL.revokeObjectURL(url);
   };
 
-  const switchFile = async (path: string) => {
+  /**
+   * 作品内的前进栈（v4.2.3）
+   *
+   * 之前「退出」一律回入口页（目录），但用户从 目录→一→二→三 一路点下来时，
+   * 期望的是**退回上一页**（浏览器语义），而不是一步跳回目录。
+   * 这里只记路径：切页压栈、退出弹栈，栈空了才真的离开作品。
+   */
+  const navStackRef = useRef<string[]>([]);
+  useEffect(() => { navStackRef.current = []; }, [work]);
+
+  /**
+   * 切到作品内某一页。
+   * @param fromBack true = 由「退出/返回」触发，不要再往栈里压（否则会 A↔B 死循环）
+   */
+  const switchFile = async (path: string, opts: { fromBack?: boolean } = {}) => {
     if (path === currentPath) return;
+    if (!opts.fromBack) {
+      const stack = navStackRef.current;
+      if (stack[stack.length - 1] !== currentPath) stack.push(currentPath);
+      if (stack.length > 20) stack.shift();
+    }
     if (path !== entry) rememberPage(work, path);
     setEditing(false);
     setCurrentPath(path);
@@ -715,12 +734,19 @@ export function FileViewPage() {
   );
 
   /* v4.2.2：每次渲染刷新「退出」的实现 —— 多页作品先回目录页，在目录页再退才离开作品 */
+  /* v4.2.3：退出 = 作品内逐层后退（目录→一→二→三 退到二），栈空了才离开作品 */
   backImplRef.current = () => {
-    const multiPage = htmlPages.length > 1;
-    if (multiPage && entry && currentPath !== entry && isHtmlPath(currentPath)) {
-      setEditing(false);
-      setPanel(null);
-      void switchFile(entry);
+    setEditing(false);
+    setPanel(null);
+    const stack = navStackRef.current;
+    const prev = stack.pop();
+    if (prev && prev !== currentPath) {
+      void switchFile(prev, { fromBack: true });
+      return;
+    }
+    // 栈空但不在入口页（深链 ?page=xxx 直接进来的）→ 兜底回入口，再退一次才离开
+    if (htmlPages.length > 1 && entry && currentPath !== entry && isHtmlPath(currentPath)) {
+      void switchFile(entry, { fromBack: true });
       return;
     }
     if (backTo) navigate(backTo, { replace: true });
