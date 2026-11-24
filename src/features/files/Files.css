@@ -759,3 +759,444 @@
   gap: 6px;
   flex-shrink: 0;
 }
+
+/* ══════ 作品详情页 v3.9.0：全屏内容 + 可拖动悬浮岛 ══════ */
+
+.file-view-page {
+  position: relative;
+  display: block;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+/* 内容层铺满整屏：标题栏、文件条、工具行全部退场 */
+.file-view-page .file-view-frame,
+.file-view-page .file-view-editor,
+.file-view-page .file-view-body {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  flex: none;
+}
+
+.file-view-page .file-view-frame {
+  background: #fff;
+  border: none;
+}
+
+/* 源码 / 编辑要躲开悬浮岛，不然前两行永远被压着 */
+.file-view-page .file-view-body,
+.file-view-page .file-view-editor {
+  padding: calc(env(safe-area-inset-top) + 58px) 16px calc(24px + env(safe-area-inset-bottom));
+}
+
+.file-view-page .file-view-body {
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* 编辑时底部有保存栏，正文别被压住 */
+.file-view-page .file-view-editor {
+  padding-bottom: calc(88px + env(safe-area-inset-bottom));
+}
+
+.file-view-page > .files-empty {
+  position: absolute;
+  inset: 0;
+  justify-content: center;
+  padding: 40px 24px;
+}
+
+/* ── 悬浮球：一颗球，点开向左展开三个圆钮 ── */
+.island-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 28;
+  background: transparent;
+}
+
+.file-island {
+  position: absolute;
+  z-index: 30;
+  right: 14px;
+  bottom: calc(22px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 9px;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: grab;
+  transition: opacity 0.4s ease;
+}
+
+.file-island:active {
+  cursor: grabbing;
+}
+
+.file-island.expanded {
+  cursor: default;
+}
+
+.file-island.dim {
+  opacity: 0.4;
+}
+
+.file-island.dim:hover,
+.file-island.dim:focus-within,
+.file-island.dim:active {
+  opacity: 1;
+}
+
+.island-orb {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(22, 23, 30, 0.82);
+  color: #f2f2f7;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  backdrop-filter: blur(18px) saturate(1.35);
+  -webkit-backdrop-filter: blur(18px) saturate(1.35);
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.42);
+  animation: orbIn 0.18s cubic-bezier(0.34, 1.4, 0.64, 1) both;
+}
+
+.island-orb:active {
+  transform: scale(0.92);
+}
+
+.island-orb.main {
+  animation: none;
+}
+
+@keyframes orbIn {
+  from { transform: scale(0.4); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.orb-glyph {
+  font-size: 15px;
+  line-height: 1;
+  letter-spacing: 1px;
+  transform: translateY(-2px);
+}
+
+.orb-glyph.list {
+  font-size: 17px;
+  letter-spacing: 0;
+  transform: translateY(-1px);
+}
+
+/* ── 编辑态底部保存栏 ── */
+.file-edit-bar {
+  position: absolute;
+  z-index: 30;
+  left: 12px;
+  right: 12px;
+  bottom: calc(16px + env(safe-area-inset-bottom));
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 14px;
+  background: rgba(22, 23, 30, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.45);
+}
+
+.edit-bar-btn {
+  flex: none;
+  height: 34px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #f2f2f7;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.edit-bar-btn.primary {
+  background: var(--color-accent-primary);
+  color: #fff;
+}
+
+.edit-bar-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: rgba(242, 242, 247, 0.55);
+  text-align: center;
+}
+
+/* ── 页面侧栏：从右边浮出来，盖在 html 上 ── */
+.files-side-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  justify-content: flex-end;
+  animation: sheetMaskIn 0.16s ease;
+}
+
+.files-side {
+  width: min(80vw, 340px);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg-elevated);
+  border-left: 1px solid var(--color-border-primary);
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  animation: sideSlideIn 0.22s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+@keyframes sideSlideIn {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+.side-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 12px 8px 18px;
+}
+
+.side-head h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.side-count {
+  font-size: 11.5px;
+  color: var(--color-text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.side-close {
+  margin-left: auto;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 50%;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.side-tools {
+  flex: none;
+  display: flex;
+  padding: 0 12px 8px;
+}
+
+.side-tools .sheet-toggle {
+  margin-left: 0;
+}
+
+.side-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 8px 12px;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ── 底部抽屉 ── */
+.files-sheet-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: flex-end;
+  background: rgba(0, 0, 0, 0.45);
+  animation: sheetMaskIn 0.16s ease;
+}
+
+@keyframes sheetMaskIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.files-sheet {
+  width: 100%;
+  max-height: 76dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg-elevated);
+  border-radius: 18px 18px 0 0;
+  border-top: 1px solid var(--color-border-primary);
+  padding-bottom: calc(6px + env(safe-area-inset-bottom));
+  animation: sheetSlideUp 0.22s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.files-sheet.tall {
+  max-height: 82dvh;
+}
+
+@keyframes sheetSlideUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+.sheet-grabber {
+  flex: none;
+  width: 34px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--color-border-primary);
+  margin: 8px auto 2px;
+}
+
+.sheet-head {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 18px 10px;
+}
+
+.sheet-head h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sheet-sub {
+  flex: none;
+  font-size: 11.5px;
+  color: var(--color-text-tertiary);
+}
+
+.sheet-toggle {
+  margin-left: auto;
+  flex: none;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border-primary);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.sheet-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 12px 10px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.sheet-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 10px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sheet-row:hover {
+  background: var(--color-bg-secondary);
+}
+
+.sheet-row.active {
+  background: var(--color-bg-secondary);
+  color: var(--color-accent-primary);
+}
+
+.sheet-row-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sheet-row-meta {
+  flex: none;
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+}
+
+.sheet-row-tag {
+  flex: none;
+  font-size: 10px;
+  line-height: 1;
+  padding: 3px 5px;
+  border-radius: 5px;
+  color: var(--color-accent-primary);
+  border: 1px solid currentColor;
+  opacity: 0.75;
+}
+
+.sheet-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  padding: 2px 12px 10px;
+  overflow-y: auto;
+}
+
+.sheet-action {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 4px;
+  border: none;
+  border-radius: 12px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+  font-size: 11.5px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.sheet-action:hover {
+  background: var(--color-bg-tertiary, rgba(255, 255, 255, 0.07));
+}
+
+.sheet-action.danger {
+  color: var(--color-error);
+}
+
+.sheet-action-icon {
+  font-size: 15px;
+  line-height: 1;
+  opacity: 0.75;
+}
+
+@media (max-width: 360px) {
+  .island-name { max-width: 32vw; }
+  .sheet-grid { grid-template-columns: repeat(3, 1fr); }
+}

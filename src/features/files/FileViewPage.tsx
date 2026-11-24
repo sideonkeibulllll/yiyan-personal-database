@@ -25,6 +25,7 @@ import {
   migrateLegacyFlatFiles,
   pickEntry,
   readWorkBinary,
+  readWorkManifest,
   readWorkText,
   renameWork,
   writeWorkBinary,
@@ -42,14 +43,47 @@ import {
   VERSION_KEEP,
   type FileVersion,
 } from '@/services/fileAssets';
-import { buildStorageShimScript, injectScripts } from '@/utils/htmlStorageShim';
+import { buildWorkPreview, parseNavTarget } from '@/utils/workPreview';
 import { bytesToBase64 } from '@/services/traeImage';
 import { IconBack, IconCopy, IconCheck, IconEdit, IconTrash, IconRename, IconPlus } from '@/components/icons';
 import { goBack } from '@/utils/navBack';
 import './Files.css';
 
 type Mode = 'preview' | 'source';
-type Panel = null | 'versions' | 'appdata' | 'newfile';
+type Panel = null | 'pages' | 'actions' | 'versions' | 'appdata' | 'newfile';
+
+const ISLAND_POS_KEY = 'yiyan_island_pos_v1';
+
+interface IslandPos {
+  left: number;
+  top: number;
+}
+
+/** 读上次拖到的位置；按视口比例回溯，换机型也不会跑到屏幕外 */
+function loadIslandPos(): IslandPos | null {
+  try {
+    const raw = localStorage.getItem(ISLAND_POS_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { rx?: number; ry?: number };
+    if (typeof parsed.rx !== 'number' || typeof parsed.ry !== 'number') return null;
+    const left = Math.min(Math.max(parsed.rx * window.innerWidth, 8), window.innerWidth - 120);
+    const top = Math.min(Math.max(parsed.ry * window.innerHeight, 8), window.innerHeight - 64);
+    return { left, top };
+  } catch {
+    return null;
+  }
+}
+
+function saveIslandPos(pos: IslandPos): void {
+  try {
+    localStorage.setItem(
+      ISLAND_POS_KEY,
+      JSON.stringify({ rx: pos.left / window.innerWidth, ry: pos.top / window.innerHeight }),
+    );
+  } catch {
+    /* 存不了无所谓 */
+  }
+}
 
 const REASON_LABEL: Record<FileVersion['reason'], string> = {
   save: '手动保存',
@@ -88,7 +122,11 @@ export function FileViewPage() {
   const [newFileName, setNewFileName] = useState('');
 
   const [previewData, setPreviewData] = useState<Record<string, string>>({});
+  // 文档和它的来源页绑在一起：只有 ready 的才拿去渲染 iframe。
+  // （iframe 先挂载再改 srcDoc，部分内核不会重新加载文档，会白屏）
+  const [previewDoc, setPreviewDoc] = useState<{ path: string; html: string } | null>(null);
   const [previewToken, setPreviewToken] = useState(0);
+  const [showAllFiles, setShowAllFiles] = useState(false);
   const [panel, setPanel] = useState<Panel>(null);
   const [versions, setVersions] = useState<FileVersion[]>([]);
   const [appStat, setAppStat] = useState<{ keys: number; bytes: number }>({ keys: 0, bytes: 0 });
@@ -97,6 +135,18 @@ export function FileViewPage() {
   const appDataRef = useRef<Record<string, string>>({});
   const saveTimerRef = useRef<number | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
+
+  // 可拖动的悬浮球：收起是一颗球，点开横向展开成 退出 / 操作 / 选页
+  const [islandPos, setIslandPos] = useState<IslandPos | null>(() => loadIslandPos());
+  const [islandDim, setIslandDim] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const islandRef = useRef<HTMLDivElement | null>(null);
+  const suppressClickRef = useRef(false);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setIslandDim(true), 3200);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   const flash = useCallback((msg: string) => {
     setDirtyHint(msg);
@@ -127,7 +177,9 @@ export function FileViewPage() {
       setLoaded(true);
       return;
     }
-    const entryPath = pickEntry(list.map(f => f.path));
+    // 作品包导入的作品带 mod.json，入口以清单为准（指向生成的目录页）
+    const manifest = await readWorkManifest(work);
+    const entryPath = pickEntry(list.map(f => f.path), manifest?.entry);
     setFiles(list);
     setEntry(entryPath);
     const path = entryPath ?? list[0].path;
@@ -144,14 +196,26 @@ export function FileViewPage() {
   useEffect(() => { void load(); }, [load]);
 
   const entryHtml = entry !== null && isHtmlPath(entry);
-  const isEntryView = currentPath === entry;
-  const canPreview = entryHtml && isEntryView;
+  // v3.9.0：任意 html 页都能预览 —— 作品包里的页面要能互相点开
+  const canPreview = isHtmlPath(currentPath);
 
-  // 预览文档：存储垫片（按作品名分库）
-  const previewHtml = useMemo(() => {
-    if (!canPreview || !loaded || missing) return '';
-    return injectScripts(text, [buildStorageShimScript(previewData)]);
-  }, [text, previewData, previewToken, canPreview, loaded, missing]);
+  // 预览文档：当前页的相对资源懒内联 + 存储垫片 + 包内链接拦截
+  useEffect(() => {
+    let cancelled = false;
+    if (!canPreview || !loaded || missing) {
+      setPreviewDoc(null);
+      return;
+    }
+    void (async () => {
+      const report = await buildWorkPreview(work, currentPath, previewData);
+      if (cancelled) return;
+      setPreviewDoc({ path: currentPath, html: report?.html ?? '' });
+    })();
+    return () => { cancelled = true; };
+  }, [work, currentPath, previewData, previewToken, canPreview, loaded, missing]);
+
+  /** 只有当前页的文档已经就绪，才允许渲染 iframe */
+  const previewReady = previewDoc !== null && previewDoc.path === currentPath && previewDoc.html !== '';
 
   // iframe 消息桥：应用数据回写
   useEffect(() => {
@@ -175,6 +239,28 @@ export function FileViewPage() {
       if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
     };
   }, [work]);
+
+  // iframe 消息桥：包内链接跳转（目录页点卡片 → 切到那一页继续预览）
+  useEffect(() => {
+    const onMessage = (ev: MessageEvent) => {
+      const win = iframeRef.current?.contentWindow;
+      if (!win || ev.source !== win) return;
+      const data = ev.data as Record<string, unknown> | null;
+      if (!data || typeof data.__yiyanNav !== 'string') return;
+      const baseDir = currentPath.includes('/') ? currentPath.slice(0, currentPath.lastIndexOf('/')) : '';
+      const target = parseNavTarget(baseDir, data.__yiyanNav);
+      if (!target) return;
+      if (!files.some(item => item.path === target.path)) {
+        flash(`包里没有「${target.path}」`);
+        return;
+      }
+      setEditing(false);
+      setCurrentPath(target.path);
+      void loadFile(target.path);
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [currentPath, files, loadFile, flash]);
 
   const save = async () => {
     try {
@@ -332,93 +418,282 @@ export function FileViewPage() {
     await loadFile(path);
   };
 
+  /** 作品内所有 html 页面 —— 悬浮球的「选页」侧栏靠它，不用退回目录页重选 */
+  const htmlPages = useMemo(() => {
+    const list = files.filter(item => isHtmlPath(item.path));
+    // 入口永远排第一，页码才有意义
+    const index = list.findIndex(item => item.path === entry);
+    if (index > 0) {
+      const [head] = list.splice(index, 1);
+      list.unshift(head);
+    }
+    return list;
+  }, [files, entry]);
+  const pageIndex = useMemo(
+    () => htmlPages.findIndex(item => item.path === currentPath),
+    [htmlPages, currentPath],
+  );
+
+  // ===== 悬浮球拖动（拖完记住位置，点按钮不误触） =====
+  // 不能在 pointerdown 就 setPointerCapture：捕获后 click 会落到容器上，按钮永远点不动。
+  // 改成 window 级监听，只有真的移动超过 6px 才算拖动。
+  const onIslandDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (expanded) return;
+    const el = islandRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const drag = { px: e.clientX, py: e.clientY, ox: rect.left, oy: rect.top, moved: false };
+    setIslandDim(false);
+
+    const onMove = (ev: PointerEvent) => {
+      const dx = ev.clientX - drag.px;
+      const dy = ev.clientY - drag.py;
+      if (!drag.moved && Math.abs(dx) + Math.abs(dy) < 6) return;
+      drag.moved = true;
+      const maxLeft = Math.max(8, window.innerWidth - el.offsetWidth - 8);
+      const maxTop = Math.max(8, window.innerHeight - el.offsetHeight - 8);
+      setIslandPos({
+        left: Math.min(Math.max(drag.ox + dx, 8), maxLeft),
+        top: Math.min(Math.max(drag.oy + dy, 8), maxTop),
+      });
+    };
+
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      if (!drag.moved) return;
+      // 拖动结束浏览器还会补一个 click，先吞掉，免得一拖就跳页
+      suppressClickRef.current = true;
+      window.setTimeout(() => { suppressClickRef.current = false; }, 120);
+      const finalRect = el.getBoundingClientRect();
+      saveIslandPos({ left: finalRect.left, top: finalRect.top });
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+  };
+
   return (
     <div className="file-view-page">
-      <header className="files-head">
-        <button type="button" className="files-back" onClick={handleBack} title="返回上一页">
-          <IconBack />
-        </button>
-        <div className="files-title">
-          <h1 className="file-view-name">{work || '作品'}</h1>
-          <span className="files-sub">
-            {files.length} 个文件{dirtyHint ? ` · ${dirtyHint}` : ''}
-          </span>
-        </div>
-        <div className="file-view-actions">
-          {canPreview && !editing && (
-            <button
-              type="button"
-              className="files-icon-btn"
-              onClick={() => setMode(mode === 'preview' ? 'source' : 'preview')}
-              title={mode === 'preview' ? '看源码' : '看预览'}
-            >
-              {mode === 'preview' ? '源码' : '预览'}
-            </button>
-          )}
-          {!editing && !imageData && (
-            <button type="button" className="files-icon-btn" onClick={copyAll} title="复制全文">
-              {copied ? <IconCheck size={14} /> : <IconCopy size={14} />}
-            </button>
-          )}
-          {!editing && !imageData && (
-            <button type="button" className="files-icon-btn" onClick={() => setEditing(true)} title="编辑当前文件">
-              <IconEdit size={14} />
-            </button>
-          )}
-          {editing && (
-            <>
-              <button type="button" className="files-icon-btn" onClick={() => { setDraft(text); setEditing(false); }}>取消</button>
-              <button type="button" className="files-icon-btn primary" onClick={save}>保存</button>
-            </>
-          )}
-          <button type="button" className="files-icon-btn danger" onClick={handleDeleteWork} title="删除作品">
-            <IconTrash size={14} />
-          </button>
-        </div>
-      </header>
+      {/* 悬浮球：收起是一颗球，点开向左长成 退出 / 操作 / 选页 三个圆钮 */}
+      {!editing && (
+        <>
+          {expanded && <div className="island-scrim" onClick={() => setExpanded(false)} />}
+          <div
+            ref={islandRef}
+            className={`file-island ${expanded ? 'expanded' : ''} ${islandDim && !expanded ? 'dim' : ''}`}
+            style={islandPos
+              ? { right: Math.max(8, window.innerWidth - islandPos.left - 40), top: islandPos.top }
+              : undefined}
+            onPointerDown={onIslandDown}
+            onClickCapture={e => {
+              if (suppressClickRef.current) {
+                e.stopPropagation();
+                e.preventDefault();
+              }
+            }}
+          >
+            {expanded ? (
+              <>
+                <button
+                  type="button"
+                  className="island-orb"
+                  onClick={() => { setExpanded(false); handleBack(); }}
+                  title="退出作品"
+                >
+                  <IconBack size={17} />
+                </button>
+                <button
+                  type="button"
+                  className="island-orb"
+                  onClick={() => { setExpanded(false); setPanel('actions'); }}
+                  title="作品操作"
+                >
+                  <span className="orb-glyph">···</span>
+                </button>
+                {htmlPages.length > 1 && (
+                  <button
+                    type="button"
+                    className="island-orb"
+                    onClick={() => { setExpanded(false); setPanel('pages'); }}
+                    title={`选择页面（${pageIndex >= 0 ? pageIndex + 1 : 1}/${htmlPages.length}）`}
+                  >
+                    <span className="orb-glyph list">≡</span>
+                  </button>
+                )}
+              </>
+            ) : (
+              <button
+                type="button"
+                className="island-orb main"
+                onClick={() => { setExpanded(true); setIslandDim(false); }}
+                title={`${work || '作品'}${pageIndex >= 0 ? ` · 第 ${pageIndex + 1}/${htmlPages.length} 页` : ''}`}
+              >
+                <span className="orb-glyph">···</span>
+              </button>
+            )}
+          </div>
+        </>
+      )}
 
-      {/* 文件条：作品内的文件切换 */}
-      {loaded && !missing && (
-        <div className="file-view-tools">
-          {files.map(f => (
-            <button
-              key={f.path}
-              type="button"
-              className={`files-chip ${f.path === currentPath ? 'active' : ''}`}
-              onClick={() => void switchFile(f.path)}
-            >
-              {f.path}
-            </button>
-          ))}
-          <button type="button" className="files-chip ghost" onClick={() => { setNewFileName('app.js'); setPanel('newfile'); }}>
-            <IconPlus size={12} /> 文件
-          </button>
-          <button type="button" className="files-chip ghost" onClick={() => importInputRef.current?.click()}>导入</button>
-          <input
-            ref={importInputRef}
-            type="file"
-            multiple
-            style={{ display: 'none' }}
-            onChange={e => { void handleImportFiles(e.target.files); e.target.value = ''; }}
-          />
+      {/* 编辑态：底部一条保存栏，不跟悬浮球抢位置 */}
+      {editing && (
+        <div className="file-edit-bar">
+          <button type="button" className="edit-bar-btn" onClick={() => { setDraft(text); setEditing(false); }}>取消</button>
+          <span className="edit-bar-path">{currentPath}</span>
+          <button type="button" className="edit-bar-btn primary" onClick={save}>保存</button>
         </div>
       )}
 
-      {/* 工具行 */}
-      {loaded && !missing && !editing && (
-        <div className="file-view-tools">
-          <button type="button" className="files-chip" onClick={() => void openVersions()}>历史版本</button>
-          {entryHtml && (
-            <button type="button" className="files-chip" onClick={() => void openAppData()}>应用数据</button>
-          )}
-          <button type="button" className="files-chip" onClick={handleDeleteFile}>删除此文件</button>
-          <button type="button" className="files-chip" onClick={() => { setRenameValue(work); setRenaming(true); }}>
-            <IconRename size={12} /> 重命名
-          </button>
-          <button type="button" className="files-chip" onClick={handleDuplicate}>复制一份</button>
-          <span className="file-view-tools-note">
-            {entryHtml ? '封面取自 meta name="cover"' : ''}
-          </span>
+      {dirtyHint && <div className="files-toast">{dirtyHint}</div>}
+
+      <input
+        ref={importInputRef}
+        type="file"
+        multiple
+        style={{ display: 'none' }}
+        onChange={e => { void handleImportFiles(e.target.files); e.target.value = ''; }}
+      />
+
+      {/* 页面侧栏：从右边浮出来，盖在 html 上，不挤压内容 */}
+      {panel === 'pages' && (
+        <div className="files-side-mask" onClick={() => setPanel(null)}>
+          <aside className="files-side" onClick={e => e.stopPropagation()}>
+            <header className="side-head">
+              <h3>页面</h3>
+              <span className="side-count">{pageIndex >= 0 ? `${pageIndex + 1} / ${htmlPages.length}` : ''}</span>
+              <button type="button" className="side-close" onClick={() => setPanel(null)} title="关闭">×</button>
+            </header>
+            <div className="side-tools">
+              <button
+                type="button"
+                className="sheet-toggle"
+                onClick={() => setShowAllFiles(value => !value)}
+              >
+                {showAllFiles ? `只看页面 ${htmlPages.length}` : `全部文件 ${files.length}`}
+              </button>
+            </div>
+            <div className="side-list">
+              {(showAllFiles ? files : htmlPages).map(item => (
+                <button
+                  key={item.path}
+                  type="button"
+                  className={`sheet-row ${item.path === currentPath ? 'active' : ''}`}
+                  onClick={() => { void switchFile(item.path); setPanel(null); }}
+                >
+                  <span className="sheet-row-name">{item.path}</span>
+                  {item.path === entry && <span className="sheet-row-tag">入口</span>}
+                  <span className="sheet-row-meta">{formatFileSize(item.size)}</span>
+                </button>
+              ))}
+              {!showAllFiles && htmlPages.length === 0 && (
+                <p className="files-empty-hint">这个作品里没有 html 页面。</p>
+              )}
+            </div>
+          </aside>
+        </div>
+      )}
+
+      {/* 操作抽屉：原本摊成两行的工具全收在这里 */}
+      {panel === 'actions' && (
+        <div className="files-sheet-mask" onClick={() => setPanel(null)}>
+          <div className="files-sheet" onClick={e => e.stopPropagation()}>
+            <div className="sheet-grabber" />
+            <div className="sheet-head">
+              <h3>{work}</h3>
+              <span className="sheet-sub">
+                {files.length} 个文件 · {formatFileSize(files.reduce((sum, item) => sum + item.size, 0))}
+              </span>
+            </div>
+            <div className="sheet-grid">
+              {canPreview && (
+                <button
+                  type="button"
+                  className="sheet-action"
+                  onClick={() => { setMode(mode === 'preview' ? 'source' : 'preview'); setPanel(null); }}
+                >
+                  <span className="sheet-action-icon">{mode === 'preview' ? '</>' : '◉'}</span>
+                  <span>{mode === 'preview' ? '源码' : '预览'}</span>
+                </button>
+              )}
+              {!imageData && (
+                <button
+                  type="button"
+                  className="sheet-action"
+                  onClick={() => { setEditing(true); setPanel(null); }}
+                >
+                  <IconEdit size={17} />
+                  <span>编辑</span>
+                </button>
+              )}
+              {!imageData && (
+                <button
+                  type="button"
+                  className="sheet-action"
+                  onClick={() => { void copyAll(); setPanel(null); }}
+                >
+                  {copied ? <IconCheck size={17} /> : <IconCopy size={17} />}
+                  <span>{copied ? '已复制' : '复制全文'}</span>
+                </button>
+              )}
+              <button type="button" className="sheet-action" onClick={() => void openVersions()}>
+                <span className="sheet-action-icon">⟲</span>
+                <span>历史版本</span>
+              </button>
+              {canPreview && (
+                <button type="button" className="sheet-action" onClick={() => void openAppData()}>
+                  <span className="sheet-action-icon">{'{}'}</span>
+                  <span>应用数据</span>
+                </button>
+              )}
+              <button
+                type="button"
+                className="sheet-action"
+                onClick={() => { setNewFileName('app.js'); setPanel('newfile'); }}
+              >
+                <IconPlus size={17} />
+                <span>新建文件</span>
+              </button>
+              <button type="button" className="sheet-action" onClick={() => importInputRef.current?.click()}>
+                <span className="sheet-action-icon">↧</span>
+                <span>导入文件</span>
+              </button>
+              <button
+                type="button"
+                className="sheet-action"
+                onClick={() => { setRenameValue(work); setRenaming(true); setPanel(null); }}
+              >
+                <IconRename size={17} />
+                <span>重命名</span>
+              </button>
+              <button
+                type="button"
+                className="sheet-action"
+                onClick={() => { void handleDuplicate(); setPanel(null); }}
+              >
+                <span className="sheet-action-icon">⧉</span>
+                <span>复制一份</span>
+              </button>
+              <button
+                type="button"
+                className="sheet-action"
+                onClick={() => { setPanel(null); void handleDeleteFile(); }}
+              >
+                <span className="sheet-action-icon">−</span>
+                <span>删除此文件</span>
+              </button>
+              <button
+                type="button"
+                className="sheet-action danger"
+                onClick={() => { void handleDeleteWork(); setPanel(null); }}
+              >
+                <IconTrash size={17} />
+                <span>删除作品</span>
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -534,14 +809,14 @@ export function FileViewPage() {
         <div className="file-view-body"><pre>{text}</pre></div>
       )}
 
-      {loaded && !missing && !editing && canPreview && mode === 'preview' && (
+      {loaded && !missing && !editing && canPreview && mode === 'preview' && previewReady && (
         <iframe
-          key={previewToken}
+          key={`${currentPath}-${previewToken}`}
           ref={iframeRef}
           className="file-view-frame"
           title={work}
           sandbox="allow-scripts allow-forms allow-popups allow-modals"
-          srcDoc={previewHtml}
+          srcDoc={previewDoc?.html ?? ''}
         />
       )}
     </div>

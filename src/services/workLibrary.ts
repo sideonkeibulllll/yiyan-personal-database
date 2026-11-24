@@ -73,15 +73,56 @@ export function isImagePath(path: string): boolean {
   return /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(path);
 }
 
-/** 入口挑选：index.html 优先，其次任意 index.*，最后按名排序第一个 */
-export function pickEntry(files: string[]): string | null {
+/**
+ * 入口挑选：清单声明的优先 → index.html → 任意 index.* → 按名排序第一个。
+ * `declared` 来自作品内的 mod.json（作品包导入时写进去的），指向生成的目录页。
+ */
+export function pickEntry(files: string[], declared?: string | null): string | null {
   if (files.length === 0) return null;
+  if (declared) {
+    const hit = files.find(f => f === declared);
+    if (hit) return hit;
+  }
   const sorted = [...files].sort((a, b) => a.localeCompare(b));
   const indexHtml = sorted.find(f => /^index\.html?$/i.test(f));
   if (indexHtml) return indexHtml;
   const anyIndex = sorted.find(f => /^index\.[a-z0-9]+$/i.test(f));
   if (anyIndex) return anyIndex;
   return sorted[0];
+}
+
+export interface WorkManifest {
+  id?: string;
+  name?: string;
+  version?: string;
+  /** 清单声明的入口（作品包导入的目录页） */
+  entry?: string;
+  cover?: string;
+  description?: string;
+  /** 入口是打包器生成的目录页 */
+  generatedEntry?: boolean;
+}
+
+/** 读作品内的 mod.json（没有或不合法就返回 null，不影响老作品） */
+export async function readWorkManifest(rawName: string): Promise<WorkManifest | null> {
+  const raw = await readRaw(sanitizeWorkName(rawName), 'mod.json');
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(base64ToText(raw)) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== 'object') return null;
+    const entry = typeof parsed.entry === 'string' ? sanitizeRelPath(parsed.entry) : '';
+    return {
+      id: typeof parsed.id === 'string' ? parsed.id : undefined,
+      name: typeof parsed.name === 'string' ? parsed.name : undefined,
+      version: typeof parsed.version === 'string' ? parsed.version : undefined,
+      entry: entry || undefined,
+      cover: typeof parsed.cover === 'string' ? sanitizeRelPath(parsed.cover) : undefined,
+      description: typeof parsed.description === 'string' ? parsed.description : undefined,
+      generatedEntry: parsed.generated_entry === true,
+    };
+  } catch {
+    return null;
+  }
 }
 
 /** 由原文件名推入口名：demo.html → index.html */
@@ -202,9 +243,10 @@ export async function listWorks(): Promise<WorkInfo[]> {
     if (entry.type === 'directory') {
       const files = await listWorkFiles(base);
       const paths = files.map(f => f.path);
+      const manifest = await readWorkManifest(base);
       out.push({
         name: base,
-        entry: pickEntry(paths),
+        entry: pickEntry(paths, manifest?.entry),
         isHtml: isHtmlPath(base) || paths.some(p => isHtmlPath(p)),
         size: files.reduce((sum, f) => sum + f.size, 0),
         mtime: files.reduce((max, f) => Math.max(max, f.mtime), 0),

@@ -41,6 +41,7 @@ import {
 } from '@/services/fileAssets';
 import { extractWorkCover } from '@/utils/workCover';
 import { bytesToBase64 } from '@/services/traeImage';
+import { describeBundleResult, importBundle, looksLikeZip } from '@/services/workBundle';
 import { localDateKey } from '@/utils/localDate';
 import { IconBack, IconFile, IconPlus, IconTrash, IconCopy, IconEdit, IconCheck } from '@/components/icons';
 import { goBack } from '@/utils/navBack';
@@ -55,7 +56,7 @@ const FILTERS: Array<{ key: Filter; label: string }> = [
   { key: 'other', label: '其他' },
 ];
 
-const IMPORT_ACCEPT = '.html,.htm,.txt,.md,.markdown,.css,.js,.json,.csv,.svg,.xml,.yml,.yaml,.png,.jpg,.jpeg,.gif,.webp';
+const IMPORT_ACCEPT = '.html,.htm,.txt,.md,.markdown,.css,.js,.json,.csv,.svg,.xml,.yml,.yaml,.png,.jpg,.jpeg,.gif,.webp,.zip';
 
 const TEMPLATES: Array<{ key: string; label: string; name: string; content: string }> = [
   { key: 'blank', label: '空白', name: 'untitled.txt', content: '' },
@@ -123,6 +124,7 @@ export function FileManagerPage({ embedded = false }: FileManagerPageProps) {
   const [renameValue, setRenameValue] = useState('');
   const [menuFor, setMenuFor] = useState<WorkInfo | null>(null);
   const [toast, setToast] = useState('');
+  const [importing, setImporting] = useState('');
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const pressTimerRef = useRef<number | null>(null);
 
@@ -187,16 +189,16 @@ export function FileManagerPage({ embedded = false }: FileManagerPageProps) {
     return pool[hashStr(localDateKey()) % pool.length];
   }, [unpinnedItems, searching]);
 
-  /** 默认区：最近使用倒序（没记录过的用 mtime 兜底） */
+  /** 默认区：最近使用倒序（今日一亮已经露过脸的不重复出现） */
   const recentItems = useMemo(() => {
-    const arr = [...unpinnedItems];
+    const arr = unpinnedItems.filter(item => item.work.name !== dailyPick?.work.name);
     arr.sort((a, b) => {
       const ta = a.meta?.lastOpenedAt || a.work.mtime || 0;
       const tb = b.meta?.lastOpenedAt || b.work.mtime || 0;
       return tb - ta || a.work.name.localeCompare(b.work.name);
     });
     return arr;
-  }, [unpinnedItems]);
+  }, [unpinnedItems, dailyPick]);
 
   const totalSize = useMemo(() => works.reduce((sum, w) => sum + (w.size || 0), 0), [works]);
 
@@ -240,8 +242,27 @@ export function FileManagerPage({ embedded = false }: FileManagerPageProps) {
   const handleImport = async (list: FileList | null) => {
     if (!list || list.length === 0) return;
     let ok = 0;
+    const notes: string[] = [];
+    const failures: string[] = [];
+
     for (const file of Array.from(list)) {
       try {
+        // 作品包：一个 zip = 一个作品（清单 + 生成的目录页）
+        if (await looksLikeZip(file)) {
+          setImporting(`导入 ${file.name}`);
+          const result = await importBundle(file, {
+            onProgress: (done, total) => setImporting(`解包 ${done}/${total}`),
+          });
+          if (result.ok) {
+            ok += 1;
+            notes.push(describeBundleResult(result));
+            if (result.warnings.length > 0) notes.push(`· ${result.warnings.join('；')}`);
+          } else {
+            failures.push(`「${file.name}」没导入：${result.message ?? '未知原因'}`);
+          }
+          continue;
+        }
+
         const name = await uniqueWorkName(file.name);
         const entry = entryNameFor(file.name);
         if (isImagePath(file.name)) {
@@ -252,12 +273,21 @@ export function FileManagerPage({ embedded = false }: FileManagerPageProps) {
           await writeWorkText(name, entry, text, { reason: 'system' });
         }
         ok += 1;
-      } catch {
-        /* 单个失败不拦整体 */
+      } catch (err) {
+        failures.push(`「${file.name}」导入出错：${err instanceof Error ? err.message : String(err)}`);
       }
     }
+
+    setImporting('');
     await refresh();
-    flash(ok > 0 ? `已导入 ${ok} 个作品` : '没有导入任何文件');
+    if (failures.length > 0) {
+      window.alert([...failures, ...notes].join('\n\n'));
+    }
+    if (ok > 0) {
+      flash(notes[0] ?? `已导入 ${ok} 个作品`);
+    } else if (failures.length === 0) {
+      flash('没有导入任何文件');
+    }
   };
 
   const handleRename = async () => {
@@ -372,8 +402,14 @@ export function FileManagerPage({ embedded = false }: FileManagerPageProps) {
           </span>
         </div>
         <div className="files-head-actions">
-          <button type="button" className="files-new ghost" onClick={() => importInputRef.current?.click()}>
-            导入
+          <button
+            type="button"
+            className="files-new ghost"
+            onClick={() => importInputRef.current?.click()}
+            disabled={importing !== ''}
+            title="导入 html/文本/图片，或 .mod.zip 作品包"
+          >
+            {importing || '导入'}
           </button>
           <button type="button" className="files-new" onClick={() => setCreating(true)}>
             <IconPlus size={16} />
@@ -424,8 +460,8 @@ export function FileManagerPage({ embedded = false }: FileManagerPageProps) {
             <IconFile size={30} />
             <p>还没有作品喵。</p>
             <p className="files-empty-hint">
-              从文件管理器「导入」一个 html，或者去 Chat 让 AI 直接写 ——
-              记得在 MCP 面板勾上「文件与作品」，写完点开就能玩。
+              从文件管理器「导入」一个 html，或者把整个网页文件夹打成 .mod.zip 一次导进来；
+              也可以去 Chat 让 AI 直接写 —— 记得在 MCP 面板勾上「文件与作品」。
             </p>
             <div className="files-empty-actions">
               <button type="button" className="files-create-btn" onClick={() => importInputRef.current?.click()}>导入文件</button>
