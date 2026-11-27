@@ -284,97 +284,102 @@ export function QuickMenu({
   ];
 
   return (
-    <div className="quick-menu-overlay" onClick={onClose}>
-      <div className="quick-menu glass" onClick={e => e.stopPropagation()}>
+    <div className="qm-overlay" onClick={onClose}>
+      <div className="qm-sheet" onClick={e => e.stopPropagation()}>
+        <span className="qm-grip" aria-hidden />
 
-        {/* === 主菜单面板 === */}
+        {/* === 主菜单面板：2 列动作盘 === */}
         {panel === 'menu' && (
           <>
-            <div className="menu-header">
-              <span className="menu-title">快捷操作</span>
-              <button className="menu-close" onClick={onClose}><CloseIcon /></button>
+            <div className="qm-head">
+              <span className="qm-head-spacer" aria-hidden />
+              <span className="qm-head-title">这一张记忆</span>
+              <button className="qm-icon-btn" onClick={onClose} aria-label="关闭"><CloseIcon /></button>
             </div>
 
-            <div className="menu-items">
-              {menuItems.map((item) => (
-                <button
-                  key={item.label}
-                  className="menu-item"
-                  onClick={() => {
-                    if (!item.action) return;
-                    item.action();
-                    if (item.closeOnClick) onClose();
-                  }}
-                >
-                  <span className="item-icon">{item.icon}</span>
-                  <span className="item-label">{item.label}</span>
-                </button>
-              ))}
+            <div className="qm-grid">
+              {menuItems.map((item) => {
+                const primary = item.label === '转为待办' || item.label === '编辑新建的待办';
+                return (
+                  <button
+                    key={item.label}
+                    className={`qm-action${primary ? ' is-accent' : ''}`}
+                    onClick={() => {
+                      if (!item.action) return;
+                      item.action();
+                      if (item.closeOnClick) onClose();
+                    }}
+                  >
+                    <span className="qm-action-icon">{item.icon}</span>
+                    <span className="qm-action-label">{item.label}</span>
+                  </button>
+                );
+              })}
+            </div>
 
-              {/* b.2: 分隔线 + 直接显示时间（默认创建时间，编辑后显示更新时间） */}
-              <div className="menu-divider" />
-              <div className="menu-info-item">
-                <span className="item-icon"><ClockIcon /></span>
-                <span className="item-label">{timeLabel}：{timeValue}</span>
-              </div>
+            {/* b.2: 直接显示时间（默认创建时间，编辑后显示更新时间） */}
+            <div className="qm-meta">
+              <span className="qm-meta-icon"><ClockIcon /></span>
+              <span className="qm-meta-label">{timeLabel}</span>
+              <span className="qm-meta-value">{timeValue}</span>
             </div>
           </>
         )}
 
         {/* === 组选择器面板（b.3: 多选）=== */}
         {panel === 'group' && (
-          <div className="group-panel">
-            <div className="menu-header">
-              <button className="menu-back" onClick={() => setPanel('menu')}><ChevronLeftIcon /></button>
-              <span className="menu-title">组标签（可多选）</span>
-              <button className="menu-close" onClick={onClose}><CloseIcon /></button>
+          <div className="qm-sub">
+            <div className="qm-head">
+              <button className="qm-icon-btn" onClick={() => setPanel('menu')} aria-label="返回"><ChevronLeftIcon /></button>
+              <span className="qm-head-title">组标签（可多选）</span>
+              <button className="qm-icon-btn" onClick={onClose} aria-label="关闭"><CloseIcon /></button>
             </div>
 
-            <div className="group-picker-list">
+            <div className="qm-group-list">
               {/* 取消分组选项 */}
               <button
-                className={`group-picker-item ${selectedGroupIds.length === 0 ? 'selected' : ''}`}
+                className={`qm-group-item ${selectedGroupIds.length === 0 ? 'is-selected' : ''}`}
                 onClick={() => setSelectedGroupIds([])}
               >
-                <span className="group-picker-icon"><FileTextIcon /></span>
-                <span className="group-picker-name">未分组</span>
-                {selectedGroupIds.length === 0 && <span className="group-picker-check">&#10003;</span>}
+                <span className="qm-group-icon"><FileTextIcon /></span>
+                <span className="qm-group-name">未分组</span>
+                {selectedGroupIds.length === 0 && <span className="qm-group-check">&#10003;</span>}
               </button>
 
               {isLoadingGroups ? (
-                <div className="group-picker-loading">加载中...</div>
+                <div className="qm-group-note">读取中…</div>
               ) : groups.length > 0 ? (
                 groups.map(group => (
                   <button
                     key={group.id}
-                    className={`group-picker-item ${selectedGroupIds.includes(group.id) ? 'selected' : ''}`}
+                    className={`qm-group-item ${selectedGroupIds.includes(group.id) ? 'is-selected' : ''}`}
                     onClick={() => toggleGroupSelection(group.id)}
                   >
-                    <span className="group-picker-icon"><FolderIcon /></span>
-                    <span className="group-picker-name">{group.name}</span>
-                    {selectedGroupIds.includes(group.id) && <span className="group-picker-check">&#10003;</span>}
+                    <span className="qm-group-icon"><FolderIcon /></span>
+                    <span className="qm-group-name">{group.name}</span>
+                    {selectedGroupIds.includes(group.id) && <span className="qm-group-check">&#10003;</span>}
                   </button>
                 ))
               ) : (
-                <div className="group-picker-empty">还没有创建组</div>
+                <div className="qm-group-note">还没有创建组</div>
               )}
             </div>
 
-            {/* 底部操作按钮 */}
-            <div className="group-picker-actions">
+            {/* 底部操作 */}
+            <div className="qm-confirm-row">
               <button
-                className="group-picker-btn group-picker-cancel"
+                className="qm-btn qm-btn-ghost"
                 onClick={() => setPanel('menu')}
                 disabled={isSaving}
               >
                 取消
               </button>
               <button
-                className="group-picker-btn group-picker-confirm"
+                className="qm-btn qm-btn-primary"
                 onClick={handleSaveGroups}
                 disabled={isSaving}
               >
-                {isSaving ? '保存中...' : '确定'}
+                {isSaving ? '保存中…' : '确定'}
               </button>
             </div>
           </div>
@@ -382,29 +387,29 @@ export function QuickMenu({
 
         {/* === AI 对话面板 === */}
         {panel === 'ai-chat' && (
-          <div className="group-panel ai-chat-panel">
-            <div className="menu-header">
-              <button className="menu-back" onClick={() => setPanel('menu')}><ChevronLeftIcon /></button>
-              <span className="menu-title">AI 对话</span>
-              <button className="menu-close" onClick={onClose}><CloseIcon /></button>
+          <div className="qm-sub">
+            <div className="qm-head">
+              <button className="qm-icon-btn" onClick={() => setPanel('menu')} aria-label="返回"><ChevronLeftIcon /></button>
+              <span className="qm-head-title">AI 对话</span>
+              <button className="qm-icon-btn" onClick={onClose} aria-label="关闭"><CloseIcon /></button>
             </div>
 
-            <div className="ai-chat-options">
+            <div className="qm-chat-options">
               {/* b.6: 就此内容谈话 — 跳到 AI 页面并选中数据 */}
-              <button className="ai-chat-option" onClick={handleStartChat}>
-                <span className="ai-chat-option-icon"><MessageCircleIcon /></span>
-                <div className="ai-chat-option-text">
-                  <div className="ai-chat-option-title">就此内容谈话</div>
-                  <div className="ai-chat-option-desc">跳转到 AI 页面，将此条目作为对话上下文</div>
-                </div>
+              <button className="qm-chat-option" onClick={handleStartChat}>
+                <span className="qm-chat-icon"><MessageCircleIcon /></span>
+                <span className="qm-chat-text">
+                  <span className="qm-chat-title">就此内容谈话</span>
+                  <span className="qm-chat-desc">跳转到 AI 页面，把这条记忆当上下文</span>
+                </span>
               </button>
               {/* b.5: 添加预备 — 对接 ChatPage 数据选择器，添加后自动选中 */}
-              <button className="ai-chat-option" onClick={handleAddPrepare}>
-                <span className="ai-chat-option-icon"><PaperclipIcon /></span>
-                <div className="ai-chat-option-text">
-                  <div className="ai-chat-option-title">添加预备</div>
-                  <div className="ai-chat-option-desc">存入预备列表，下次打开 AI 对话时自动选中</div>
-                </div>
+              <button className="qm-chat-option" onClick={handleAddPrepare}>
+                <span className="qm-chat-icon"><PaperclipIcon /></span>
+                <span className="qm-chat-text">
+                  <span className="qm-chat-title">添加预备</span>
+                  <span className="qm-chat-desc">存进预备列表，下次对话自动带上</span>
+                </span>
               </button>
             </div>
           </div>

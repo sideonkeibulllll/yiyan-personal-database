@@ -480,3 +480,248 @@
 .suggestion-apply-btn:active {
   transform: scale(0.95);
 }
+
+
+/* ============ v2 · 书签墙 ============
+   结构决策：连线不是表格，是两列卡片墙。
+   域名/来源做小字，内容做正文，整张卡可点。 */
+
+.link-page {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg-primary);
+}
+
+.link-page .page-header {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) 44px;
+  align-items: center;
+  height: 46px;
+  padding: 0 8px;
+  flex-shrink: 0;
+}
+
+.link-page .page-title {
+  margin: 0;
+  text-align: center;
+  font-size: 15px;
+  font-weight: 550;
+  letter-spacing: -0.01em;
+}
+
+.link-page .back-btn,
+.link-page .add-link-btn {
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: var(--color-text-secondary);
+}
+
+.link-page .add-link-btn {
+  color: var(--color-accent-primary);
+}
+
+.link-page .back-btn:active,
+.link-page .add-link-btn:active {
+  background: rgba(255, 255, 255, 0.05);
+  transform: scale(0.92);
+}
+
+.link-page .page-content {
+  flex: 1;
+  padding: 6px 18px calc(28px + var(--safe-bottom));
+}
+
+.link-page .section-title {
+  margin: 18px 0 9px;
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-text-tertiary);
+}
+
+/* 当前条目：一张纸，不是一张卡 */
+.link-page .current-entry {
+  padding: 16px 2px 18px;
+  background: transparent !important;
+  box-shadow: none !important;
+  border-radius: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.link-page .entry-content {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.75;
+  color: var(--color-text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ===== 两列卡片墙 ===== */
+.link-page .links-container > .section-title {
+  grid-column: 1 / -1;
+  margin-top: 22px;
+}
+
+.link-page .links-container {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.link-page .link-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 104px;
+  padding: 13px;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-tertiary) !important;
+  box-shadow: var(--edge-top) !important;
+  cursor: pointer;
+  transition:
+    transform var(--duration-fast) var(--ease-spring),
+    background var(--duration-fast) var(--ease-out);
+}
+
+.link-page .link-item:active {
+  transform: scale(0.975);
+  background: var(--color-bg-elevated) !important;
+}
+
+.link-page .link-content {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.link-page .link-title,
+.link-page .entry-content-title {
+  font-size: 13.5px;
+  font-weight: 550;
+  line-height: 1.5;
+  color: var(--color-text-primary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.link-page .link-description {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--color-text-tertiary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.link-page .link-icon {
+  display: inline-flex;
+  margin-top: 2px;
+  color: var(--color-text-disabled);
+}
+
+.link-page .link-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: auto;
+  font-size: 10.5px;
+  color: var(--color-text-disabled);
+}
+
+.link-page .meta-icon {
+  display: inline-flex;
+  color: var(--color-star);
+}
+
+/* 空态 */
+.link-page .empty-links {
+  padding: 46px 20px 34px;
+  text-align: center;
+}
+
+.link-page .empty-text {
+  margin: 12px 0 0;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+.link-page .empty-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--color-text-disabled);
+}
+
+/* AI 建议 */
+.link-page .connection-suggestion-section {
+  margin-top: 22px;
+}
+
+.link-page .connection-suggest-btn {
+  width: 100%;
+  height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-tertiary) !important;
+  box-shadow: var(--edge-top) !important;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.link-page .connection-suggestions {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.link-page .suggestions-label {
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-text-tertiary);
+}
+
+.link-page .suggestion-item {
+  padding: 13px 14px;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-tertiary) !important;
+  box-shadow: var(--edge-top) !important;
+}
+
+/* 顶条收尾：返回键不要圆形底，胶囊不要被拉满 */
+.tag-manage-page .back-btn,
+.link-page .back-btn,
+.link-page .add-link-btn,
+.export-page .back-btn {
+  background: transparent !important;
+  box-shadow: none !important;
+  border: 0;
+  color: var(--color-text-secondary);
+}
+
+.tag-manage-page .merge-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: flex-start;
+  width: auto;
+}

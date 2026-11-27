@@ -1,15 +1,17 @@
 /**
- * 待办编辑页 v2
- * 编辑字段：标题、开始时间、结束时间、今日处理、标签、备注
- * v2 变更：
- * - c: 支持添加图片附件
- * - c: 待办删除时图片附件不保留
+ * 待办编辑页 v3
+ *
+ * 结构决策：先在卡片上把这条待办"看见"，再逐项调参数。
+ * - 上半：一张和待办清单里一模一样的预览卡，标题直接打在卡上，改一个字卡就变
+ * - 下半：参数行（52px），点某一行才从底部升起抽屉，控件都住在抽屉里
+ * - 顶部 44px 返回条：取消 / 新建·编辑 / 保存（唯一保存入口）
+ *
+ * 逻辑沿用 v2：字段、保存、删除、标签池编辑、图片附件一个都没有动。
  */
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTodoStore } from '@/stores/todoStore';
 import { useTodoTagStore } from '@/stores/todoTagStore';
-import { BottomNav } from '@/components/BottomNav';
 import { getTodoDatabase } from '@/services/todoDatabase';
 import { pickImages, saveImageForTodo, readTodoThumbAsSrc, deleteTodoAttachmentFiles, deleteAllTodoAttachments } from '@/services/todoAttachmentService';
 import { getTodoAttachments as loadTodoAttachmentsMeta, appendTodoAttachment, removeTodoAttachment, clearTodoAttachments } from '@/services/todoAttachmentsMeta';
@@ -25,6 +27,22 @@ function toDateTimeLocal(ts?: number): string {
   return new Date(ts - offset).toISOString().slice(0, 16);
 }
 
+/** 参数行里的时间文案（M/D HH:mm） */
+function formatRowTime(ts?: number): string {
+  if (!ts) return '';
+  const d = new Date(ts);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** 预览卡上的时刻（HH:mm） */
+function formatClock(ts?: number): string {
+  if (!ts) return '--:--';
+  const d = new Date(ts);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 /** 快捷时间预设
  * type: 'relative' = 基于已选时间递增/递减
  * type: 'absolute' = 绝对时间
@@ -38,6 +56,9 @@ const TIME_PRESETS: { label: string; offsetMinutes: number; type: 'relative' | '
   { label: '明天6点', offsetMinutes: -3, type: 'absolute' },
 ];
 
+/** 标签颜色：六个圆点，和卡片左侧那道记号同一个暖色系 */
+const TAG_COLORS = ['#f76707', '#f59f00', '#fa5252', '#d6336c', '#6aa8ff', '#46e0a5'];
+
 /** 获取明天指定小时的时间戳 */
 function getTomorrowAtHour(hour: number): number {
   const now = new Date();
@@ -45,6 +66,9 @@ function getTomorrowAtHour(hour: number): number {
   now.setHours(hour, 0, 0, 0);
   return now.getTime();
 }
+
+/** 抽屉："哪一行被点开了" */
+type SheetKey = 'start' | 'end' | 'tags' | 'note' | 'photos';
 
 export function TodoEditPage() {
   const { id } = useParams<{ id: string }>();
@@ -72,6 +96,8 @@ export function TodoEditPage() {
   const [thumbSrcs, setThumbSrcs] = useState<Record<string, string>>({});
   const [isPickingImages, setIsPickingImages] = useState(false);
   const todoIdRef = useRef<string | null>(null);
+  // 本版新增：当前打开的参数抽屉（纯 UI 状态）
+  const [openSheet, setOpenSheet] = useState<SheetKey | null>(null);
 
   const updateTodo = useTodoStore(state => state.updateTodo);
   const addTodo = useTodoStore(state => state.addTodo);
@@ -309,310 +335,424 @@ export function TodoEditPage() {
     setEditingTagId(null);
   }, [editingTagId, tags, deleteTag]);
 
+  /* === 预览卡用的派生值（纯展示，无副作用） === */
+  const previewTags = useMemo(
+    () => selectedTagIds
+      .map(tagId => tags.find(t => t.id === tagId))
+      .filter((t): t is NonNullable<typeof t> => Boolean(t)),
+    [selectedTagIds, tags],
+  );
+
+  const previewColor = previewTags.length > 0 && previewTags[previewTags.length - 1]?.color
+    ? previewTags[previewTags.length - 1].color!
+    : 'var(--color-accent-primary)';
+
+  const previewTime = (startTime || endTime)
+    ? `${formatClock(startTime)} – ${formatClock(endTime)}`
+    : '未设时间';
+
+  const closeSheet = useCallback(() => setOpenSheet(null), []);
+
+  const sheetTitle = openSheet === 'start' ? '开始时间'
+    : openSheet === 'end' ? '结束时间'
+      : openSheet === 'tags' ? '标签'
+        : openSheet === 'note' ? '备注'
+          : openSheet === 'photos' ? '图片附件'
+            : '';
+
   if (loading) {
     return (
       <div className="todo-edit-page">
-        <main className="page-content">
-          <div className="todo-edit-loading">加载中...</div>
+        <header className="te-bar">
+          <button type="button" className="te-bar-text" onClick={() => navigate('/todo')}>取消</button>
+          <span className="te-bar-title">编辑</span>
+          <span className="te-bar-text is-ghost">保存</span>
+        </header>
+        <main className="te-body">
+          <div className="te-loading">正在翻开这条待办…</div>
         </main>
-        <BottomNav />
       </div>
     );
   }
 
   return (
     <div className="todo-edit-page">
-      <main className="page-content">
-        <div className="todo-edit-header">
-          <button className="todo-edit-back" onClick={() => navigate('/todo')}>←</button>
-          <h2>{isNew ? '新建待办' : '编辑待办'}</h2>
-          {!isNew && (
-            <button
-              className="todo-edit-delete-btn"
-              onClick={handleDelete}
-              title="删除此待办"
-            >
-              删除
-            </button>
-          )}
+      {/* ══ 顶部返回条：保存只有这一个入口 ══ */}
+      <header className="te-bar">
+        <button type="button" className="te-bar-text" onClick={() => navigate('/todo')}>取消</button>
+        <span className="te-bar-title">{isNew ? '新建' : '编辑'}</span>
+        <button
+          type="button"
+          className="te-bar-text te-bar-save"
+          onClick={handleSave}
+          disabled={!title.trim() || saving}
+        >
+          {saving ? '保存中' : '保存'}
+        </button>
+      </header>
+
+      <main className="te-body">
+        {/* ══ 预览卡：你正在造的这条待办，就长这样 ══ */}
+        <label className="te-preview" style={{ '--te-color': previewColor } as React.CSSProperties}>
+          <span className="te-preview-bar" aria-hidden="true" />
+          <div className="te-preview-main">
+            <input
+              type="text"
+              className="te-preview-input"
+              value={title}
+              onChange={e => setTitle(e.target.value)}
+              placeholder="要做点什么？"
+              aria-label="待办标题"
+              autoFocus
+            />
+            <div className="te-preview-meta">
+              <span className="te-preview-time">{previewTime}</span>
+              {isToday && <span className="te-preview-badge">今日</span>}
+              {previewTags.map(tag => (
+                <span key={tag.id} className="te-preview-tag">
+                  <i style={{ background: tag.color || 'var(--color-text-tertiary)' }} aria-hidden="true" />
+                  {tag.name}
+                </span>
+              ))}
+              {note.trim() && <span className="te-preview-note">有备注</span>}
+            </div>
+          </div>
+        </label>
+
+        {/* ══ 参数行：左标签右值，点一下才展开控件 ══ */}
+        <div className="te-params">
+          <button type="button" className="te-row" onClick={() => setOpenSheet('start')}>
+            <span className="te-row-label">开始</span>
+            <span className={`te-row-value${startTime ? '' : ' is-empty'}`}>
+              {startTime ? formatRowTime(startTime) : '未设置'}
+            </span>
+            <svg className="te-row-chev" width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M3 1.5 5.5 4 3 6.5" />
+            </svg>
+          </button>
+
+          <button type="button" className="te-row" onClick={() => setOpenSheet('end')}>
+            <span className="te-row-label">结束</span>
+            <span className={`te-row-value${endTime ? '' : ' is-empty'}`}>
+              {endTime ? formatRowTime(endTime) : '未设置'}
+            </span>
+            <svg className="te-row-chev" width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M3 1.5 5.5 4 3 6.5" />
+            </svg>
+          </button>
+
           <button
-            className="todo-edit-save"
-            onClick={handleSave}
-            disabled={!title.trim() || saving}
+            type="button"
+            className="te-row"
+            role="switch"
+            aria-checked={isToday}
+            onClick={() => setIsToday(v => !v)}
           >
-            {saving ? '保存中...' : '保存'}
+            <span className="te-row-label">今日处理</span>
+            <span className={`te-switch${isToday ? ' on' : ''}`} aria-hidden="true"><i /></span>
+          </button>
+
+          <button type="button" className="te-row" onClick={() => setOpenSheet('tags')}>
+            <span className="te-row-label">标签</span>
+            <span className={`te-row-value${previewTags.length ? '' : ' is-empty'}`}>
+              {previewTags.length > 0 ? previewTags.map(t => t.name).join('、') : '未选'}
+            </span>
+            <svg className="te-row-chev" width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M3 1.5 5.5 4 3 6.5" />
+            </svg>
+          </button>
+
+          <button type="button" className="te-row" onClick={() => setOpenSheet('note')}>
+            <span className="te-row-label">备注</span>
+            <span className={`te-row-value${note.trim() ? '' : ' is-empty'}`}>
+              {note.trim() ? note.trim().replace(/\s+/g, ' ').slice(0, 18) : '未填写'}
+            </span>
+            <svg className="te-row-chev" width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M3 1.5 5.5 4 3 6.5" />
+            </svg>
+          </button>
+
+          <button type="button" className="te-row" onClick={() => setOpenSheet('photos')}>
+            <span className="te-row-label">图片</span>
+            <span className={`te-row-value${attachments.length ? '' : ' is-empty'}`}>
+              {attachments.length > 0 ? `${attachments.length} 张` : '未添加'}
+            </span>
+            <svg className="te-row-chev" width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M3 1.5 5.5 4 3 6.5" />
+            </svg>
           </button>
         </div>
 
-        <div className="todo-edit-form">
-          {/* 标题 */}
-          <div className="form-group">
-            <label className="form-label">标题</label>
-            <input
-              type="text"
-              className="form-input glass"
-              value={title}
-              onChange={e => setTitle(e.target.value)}
-              placeholder="待办标题..."
-              autoFocus
-            />
-          </div>
+        {/* 底部只留一句提示 + 已有待办的删除入口（保存已在顶栏） */}
+        <p className="te-hint">
+          {isNew ? '保存后落到这一天的时间线里' : '改完点右上角保存'}
+        </p>
+        {!isNew && (
+          <button type="button" className="te-delete" onClick={handleDelete}>
+            删除这条待办
+          </button>
+        )}
+      </main>
 
-          {/* 开始时间 */}
-          <div className="form-group">
-            <label className="form-label">开始时间</label>
-            <div className="time-presets">
-              {TIME_PRESETS.map(p => (
-                <button
-                  key={p.label}
-                  className="time-preset-chip"
-                  onClick={() => handlePresetTime(p, 'start')}
-                >
-                  {p.label}
-                </button>
-              ))}
+      {/* ══ 参数抽屉：只有点开的那一项才出现 ══ */}
+      {openSheet && (
+        <>
+          <div className="te-sheet-scrim" onClick={closeSheet} />
+          <div className="te-sheet" role="dialog" aria-label={sheetTitle}>
+            <span className="te-grip" aria-hidden="true" />
+            <div className="te-sheet-head">
+              <span className="te-sheet-title">{sheetTitle}</span>
+              <button type="button" className="te-sheet-done" onClick={closeSheet}>完成</button>
             </div>
-            <input
-              type="datetime-local"
-              className="form-input glass"
-              value={toDateTimeLocal(startTime)}
-              onChange={e => setStartTime(e.target.value ? new Date(e.target.value).getTime() : undefined)}
-            />
-          </div>
 
-          {/* 结束时间 */}
-          <div className="form-group">
-            <label className="form-label">结束时间</label>
-            <div className="time-presets">
-              {TIME_PRESETS.map(p => (
-                <button
-                  key={p.label}
-                  className="time-preset-chip"
-                  onClick={() => handlePresetTime(p, 'end')}
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
-            <input
-              type="datetime-local"
-              className="form-input glass"
-              value={toDateTimeLocal(endTime)}
-              onChange={e => setEndTime(e.target.value ? new Date(e.target.value).getTime() : undefined)}
-            />
-          </div>
-
-          {/* 今日处理 */}
-          <label className="todo-edit-toggle">
-            <input
-              type="checkbox"
-              checked={isToday}
-              onChange={e => setIsToday(e.target.checked)}
-            />
-            <span>今日处理</span>
-          </label>
-
-          {/* 标签 */}
-          <div className="form-group">
-            <label className="form-label">标签</label>
-            {/* 已选标签区（带小x删除） */}
-            {selectedTagIds.length > 0 && (
-              <div className="selected-tags-list">
-                {selectedTagIds.map(tagId => {
-                  const tag = tags.find(t => t.id === tagId);
-                  if (!tag) return null;
-                  return (
-                    <div
-                      key={tagId}
-                      className="selected-tag-chip"
-                      style={{ borderColor: tag.color || undefined, background: tag.color ? tag.color + '22' : undefined }}
-                    >
-                      <span
-                        className="selected-tag-color-dot"
-                        style={{ background: tag.color || 'var(--color-text-tertiary)' }}
-                      />
-                      <span className="selected-tag-name">{tag.name}</span>
+            <div className="te-sheet-body">
+              {(openSheet === 'start' || openSheet === 'end') && (
+                <>
+                  <div className="te-presets">
+                    {TIME_PRESETS.map(p => (
                       <button
-                        className="selected-tag-remove"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedTagIds(prev => prev.filter(id => id !== tagId));
-                        }}
-                        title="移除标签"
+                        key={p.label}
+                        type="button"
+                        className="te-chip"
+                        onClick={() => handlePresetTime(p, openSheet === 'start' ? 'start' : 'end')}
                       >
-                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M18 6 6 18M6 6l12 12" />
-                        </svg>
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                  <input
+                    type="datetime-local"
+                    className="te-input"
+                    aria-label={openSheet === 'start' ? '开始时间' : '结束时间'}
+                    value={toDateTimeLocal(openSheet === 'start' ? startTime : endTime)}
+                    onChange={e => {
+                      const ts = e.target.value ? new Date(e.target.value).getTime() : undefined;
+                      if (openSheet === 'start') setStartTime(ts);
+                      else setEndTime(ts);
+                    }}
+                  />
+                  <p className="te-sheet-note">
+                    {openSheet === 'start' ? '保存时会按开始时间归到那一天' : '不设结束时间也可以'}
+                  </p>
+                </>
+              )}
+
+              {openSheet === 'tags' && (
+                <>
+                  {selectedTagIds.length > 0 && (
+                    <div className="te-selected-tags">
+                      {selectedTagIds.map(tagId => {
+                        const tag = tags.find(t => t.id === tagId);
+                        if (!tag) return null;
+                        return (
+                          <span
+                            key={tagId}
+                            className="te-selected-tag"
+                            style={{ borderColor: tag.color || undefined, background: tag.color ? tag.color + '22' : undefined }}
+                          >
+                            <i style={{ background: tag.color || 'var(--color-text-tertiary)' }} aria-hidden="true" />
+                            <span>{tag.name}</span>
+                            <button
+                              type="button"
+                              className="te-selected-remove"
+                              onClick={e => {
+                                e.stopPropagation();
+                                setSelectedTagIds(prev => prev.filter(t => t !== tagId));
+                              }}
+                              aria-label={`移除标签 ${tag.name}`}
+                            >
+                              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true">
+                                <path d="M18 6 6 18M6 6l12 12" />
+                              </svg>
+                            </button>
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  <div className="te-tag-list">
+                    {sortedTags.map(tag => (
+                      <span key={tag.id} className="te-tag-wrap">
+                        <button
+                          type="button"
+                          className={`te-tag${selectedTagIds.includes(tag.id) ? ' on' : ''}`}
+                          style={tag.color ? { borderColor: selectedTagIds.includes(tag.id) ? tag.color : undefined } : undefined}
+                          onClick={() => {
+                            // v2.10.0: 记录点击，下次进入编辑页时该标签排到最前
+                            markTodoTagClicked(tag.id);
+                            setSelectedTagIds(prev =>
+                              prev.includes(tag.id)
+                                ? prev.filter(t => t !== tag.id)
+                                : [...prev, tag.id] // 追加到末尾：最近添加的在右侧
+                            );
+                          }}
+                          onDoubleClick={() => {
+                            // 双击删除整个标签（保留快捷方式；也可用右侧 ✎ 打开编辑面板）
+                            if (confirm(`确定删除标签 "${tag.name}" 吗？`)) {
+                              deleteTag(tag.id);
+                              clearTodoTagRecent(tag.id);
+                              setSelectedTagIds(prev => prev.filter(t => t !== tag.id));
+                            }
+                          }}
+                        >
+                          <i className="te-tag-dot" style={{ background: tag.color || 'var(--color-text-tertiary)' }} aria-hidden="true" />
+                          {tag.name}
+                        </button>
+                        <button
+                          type="button"
+                          className="te-tag-edit"
+                          title="编辑标签（改名 / 改色 / 删除）"
+                          onClick={() => handleOpenTagEdit(tag)}
+                          aria-label={`编辑标签 ${tag.name}`}
+                        >
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                            <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+                          </svg>
+                        </button>
+                      </span>
+                    ))}
+                    <button
+                      type="button"
+                      className="te-tag-new"
+                      onClick={() => { setShowTagEditor(!showTagEditor); setEditingTagId(null); }}
+                    >
+                      + 新标签
+                    </button>
+                  </div>
+
+                  {showTagEditor && (
+                    <div className="te-tag-editor">
+                      <input
+                        type="text"
+                        className="te-input"
+                        value={newTagName}
+                        onChange={e => setNewTagName(e.target.value)}
+                        placeholder="标签名…"
+                      />
+                      <TagColorRow value={newTagColor} onChange={setNewTagColor} />
+                      <button
+                        type="button"
+                        className="te-tag-confirm"
+                        onClick={handleCreateTag}
+                        disabled={!newTagName.trim()}
+                      >
+                        创建
                       </button>
                     </div>
-                  );
-                })}
-              </div>
-            )}
-            {/* 可选标签列表（单击选中；右侧 ✎ 编辑；v2.10.0 按最近点击排序） */}
-            <div className="tag-list">
-              {sortedTags.map(tag => (
-                <span key={tag.id} className="tag-chip-wrap">
-                  <button
-                    className={`tag-chip ${selectedTagIds.includes(tag.id) ? 'active' : ''}`}
-                    style={tag.color ? { borderColor: selectedTagIds.includes(tag.id) ? tag.color : undefined } : undefined}
-                    onClick={() => {
-                      // v2.10.0: 记录点击，下次进入编辑页时该标签排到最前
-                      markTodoTagClicked(tag.id);
-                      setSelectedTagIds(prev =>
-                        prev.includes(tag.id)
-                          ? prev.filter(t => t !== tag.id)
-                          : [...prev, tag.id] // 追加到末尾：最近添加的在右侧
-                      );
-                    }}
-                    onDoubleClick={() => {
-                      // 双击删除整个标签（保留快捷方式；也可用右侧 ✎ 打开编辑面板）
-                      if (confirm(`确定删除标签 "${tag.name}" 吗？`)) {
-                        deleteTag(tag.id);
-                        clearTodoTagRecent(tag.id);
-                        setSelectedTagIds(prev => prev.filter(t => t !== tag.id));
-                      }
-                    }}
-                  >
-                    <span
-                      className="tag-color-dot"
-                      style={{ background: tag.color || 'var(--color-text-tertiary)' }}
-                    />
-                    {tag.name}
-                  </button>
-                  <button
-                    className="tag-chip-edit"
-                    title="编辑标签（改名 / 改色 / 删除）"
-                    onClick={() => handleOpenTagEdit(tag)}
-                  >
-                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
-                    </svg>
-                  </button>
-                </span>
-              ))}
-              <button
-                className="tag-add-btn"
-                onClick={() => { setShowTagEditor(!showTagEditor); setEditingTagId(null); }}
-              >
-                + 新标签
-              </button>
-            </div>
-
-            {showTagEditor && (
-              <div className="tag-editor glass">
-                <input
-                  type="text"
-                  className="form-input glass"
-                  value={newTagName}
-                  onChange={e => setNewTagName(e.target.value)}
-                  placeholder="标签名..."
-                />
-                <div className="color-picker">
-                  <input
-                    type="color"
-                    value={newTagColor}
-                    onChange={e => setNewTagColor(e.target.value)}
-                  />
-                  <span className="color-hint">标签颜色</span>
-                </div>
-                <button
-                  className="tag-editor-confirm"
-                  onClick={handleCreateTag}
-                  disabled={!newTagName.trim()}
-                >
-                  创建
-                </button>
-              </div>
-            )}
-
-            {/* v2.10.0: 已有标签编辑面板（改名 / 改色 / 删除） */}
-            {editingTagId && (
-              <div className="tag-editor glass">
-                <div className="tag-editor-title">
-                  编辑标签「{tags.find(t => t.id === editingTagId)?.name || ''}」
-                </div>
-                <input
-                  type="text"
-                  className="form-input glass"
-                  value={editTagName}
-                  onChange={e => setEditTagName(e.target.value)}
-                  placeholder="标签名..."
-                />
-                <div className="color-picker">
-                  <input
-                    type="color"
-                    value={editTagColor}
-                    onChange={e => setEditTagColor(e.target.value)}
-                  />
-                  <span className="color-hint">标签颜色</span>
-                </div>
-                <div className="tag-editor-actions">
-                  <button className="tag-editor-delete" onClick={handleDeleteTagFromEditor}>
-                    删除标签
-                  </button>
-                  <button className="tag-editor-cancel" onClick={() => setEditingTagId(null)}>
-                    取消
-                  </button>
-                  <button
-                    className="tag-editor-confirm"
-                    onClick={handleSaveTagEdit}
-                    disabled={!editTagName.trim()}
-                  >
-                    保存
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* 备注 */}
-          <div className="form-group">
-            <label className="form-label">备注</label>
-            <textarea
-              className="form-input glass"
-              value={note}
-              onChange={e => setNote(e.target.value)}
-              placeholder="添加备注..."
-              rows={3}
-            />
-          </div>
-
-          {/* c: 图片附件 */}
-          <div className="form-group">
-            <label className="form-label">图片附件</label>
-            <div className="todo-attachments">
-              {attachments.map(att => (
-                <div key={att.id} className="todo-attachment-item">
-                  {thumbSrcs[att.id] && (
-                    <img src={thumbSrcs[att.id]} alt="附件" className="todo-attachment-thumb" />
                   )}
-                  <button
-                    className="todo-attachment-delete"
-                    onClick={() => handleDeleteAttachment(att)}
-                    title="删除"
-                  >
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M18 6 6 18M6 6l12 12" />
-                    </svg>
-                  </button>
-                </div>
-              ))}
-              <button
-                className="todo-attachment-add"
-                onClick={handlePickImages}
-                disabled={isPickingImages}
-              >
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 5v14M5 12h14" />
-                </svg>
-                <span>{isPickingImages ? '选择中...' : '添加图片'}</span>
-              </button>
+
+                  {/* v2.10.0: 已有标签编辑面板（改名 / 改色 / 删除） */}
+                  {editingTagId && (
+                    <div className="te-tag-editor">
+                      <div className="te-tag-editor-title">
+                        编辑「{tags.find(t => t.id === editingTagId)?.name || ''}」
+                      </div>
+                      <input
+                        type="text"
+                        className="te-input"
+                        value={editTagName}
+                        onChange={e => setEditTagName(e.target.value)}
+                        placeholder="标签名…"
+                      />
+                      <TagColorRow value={editTagColor} onChange={setEditTagColor} />
+                      <div className="te-tag-editor-actions">
+                        <button type="button" className="te-tag-danger" onClick={handleDeleteTagFromEditor}>
+                          删除标签
+                        </button>
+                        <button type="button" className="te-tag-ghost" onClick={() => setEditingTagId(null)}>
+                          取消
+                        </button>
+                        <button
+                          type="button"
+                          className="te-tag-confirm"
+                          onClick={handleSaveTagEdit}
+                          disabled={!editTagName.trim()}
+                        >
+                          保存
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {openSheet === 'note' && (
+                <>
+                  <textarea
+                    className="te-textarea"
+                    value={note}
+                    onChange={e => setNote(e.target.value)}
+                    placeholder="这件事的来龙去脉…"
+                    rows={5}
+                  />
+                  <p className="te-sheet-note">备注会跟在标题下面，显示在清单里</p>
+                </>
+              )}
+
+              {openSheet === 'photos' && (
+                <>
+                  <div className="te-attachments">
+                    {attachments.map(att => (
+                      <div key={att.id} className="te-attachment">
+                        {thumbSrcs[att.id] && (
+                          <img src={thumbSrcs[att.id]} alt="附件" className="te-attachment-thumb" />
+                        )}
+                        <button
+                          type="button"
+                          className="te-attachment-delete"
+                          onClick={() => handleDeleteAttachment(att)}
+                          aria-label="删除这张图片"
+                        >
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true">
+                            <path d="M18 6 6 18M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      className="te-attachment-add"
+                      onClick={handlePickImages}
+                      disabled={isPickingImages}
+                    >
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M12 5v14M5 12h14" />
+                      </svg>
+                      <span>{isPickingImages ? '选择中…' : '添加图片'}</span>
+                    </button>
+                  </div>
+                  <p className="te-sheet-note">最多 9 张，删除待办时一起清理</p>
+                </>
+              )}
             </div>
           </div>
-        </div>
-      </main>
-      <BottomNav />
+        </>
+      )}
+    </div>
+  );
+}
+
+/** 六个色点 + 自定义色盘（替代原来一整排色块） */
+function TagColorRow({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="te-colors">
+      {TAG_COLORS.map(c => (
+        <button
+          key={c}
+          type="button"
+          className={`te-color${value.toLowerCase() === c.toLowerCase() ? ' on' : ''}`}
+          style={{ '--te-dot': c } as React.CSSProperties}
+          onClick={() => onChange(c)}
+          aria-label={`颜色 ${c}`}
+        />
+      ))}
+      <label
+        className={`te-color te-color-custom${TAG_COLORS.some(c => c.toLowerCase() === value.toLowerCase()) ? '' : ' on'}`}
+        title="自定义颜色"
+      >
+        <input type="color" value={value} onChange={e => onChange(e.target.value)} />
+      </label>
     </div>
   );
 }

@@ -194,22 +194,29 @@ export function FileManagerWindow({
 
   return (
     <div className={`fm-window ${isActive ? 'active' : ''} ${side}`}>
-      <div className="fm-window-path">
-        {state.path.map((seg, i) => (
-          <span key={i} className="fm-path-segment">
-            {i > 0 && <span className="fm-path-sep">/</span>}
-            <span className="fm-path-label">{seg.label}</span>
-          </span>
-        ))}
+      {/* 32px 拖拽条：三个圆点 + 路径，给窗口一个「窗口」身份 */}
+      <div className="fm-window-bar">
+        <span className="fm-dots" aria-hidden="true"><i /><i /><i /></span>
+        <div className="fm-window-path">
+          {state.path.map((seg, i) => (
+            <span key={i} className="fm-path-segment">
+              {i > 0 && <span className="fm-path-sep">/</span>}
+              <span className="fm-path-label">{seg.label}</span>
+            </span>
+          ))}
+        </div>
         {multiSelectMode && (
           <button className="fm-multi-exit" onClick={handleExitMultiSelect}><XSvg /> 退出多选</button>
         )}
       </div>
       <div className="fm-window-content">
         {loading ? (
-          <div className="fm-loading">加载中...</div>
+          <div className="fm-loading"><i />读取中</div>
         ) : items.length === 0 ? (
-          <div className="fm-empty">暂无数据</div>
+          <div className="fm-empty">
+            <b>这一层是空的</b>
+            <span>换一层看看，或者长按窗口里的文件夹新建。</span>
+          </div>
         ) : (
           <ul className="fm-list">
             {items.map(item => {

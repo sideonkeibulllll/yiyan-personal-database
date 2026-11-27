@@ -1,5 +1,11 @@
 /**
- * Chat 页消息列表 - 消息渲染、思维链、工具调用结果、危险操作确认卡片、选中模式
+ * Chat 页消息列表 —— 一条「对话流」，不是气泡墙
+ *
+ * 结构决策：
+ * - AI 消息不套气泡，100% 宽直接排在纸面上（20px 内边距，16px/1.78 正文）；
+ * - 用户消息右对齐，78% 最大宽，珊瑚色薄底，右下角收紧；
+ * - 日期分隔是居中的 11px 小字，不是横线；
+ * - 复制 / 删除这一轮收在每条消息右下角，hover 或长按时才浮出来。
  *
  * 状态与业务逻辑由父组件 ChatPage 持有，本组件只负责展示。
  *
@@ -7,7 +13,7 @@
  * 流式期间父组件高频更新 messages 时，只有「正在写入的最后一条」消息重渲染，
  * 历史消息（引用未变）全部跳过 —— 修复长对话下流式卡顿的主因之一。
  */
-import { memo, useMemo, useState, useEffect, useRef } from 'react';
+import { memo, useMemo, useState, useEffect, useRef, Fragment } from 'react';
 import type { RefObject } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { renderMarkdown } from '@/utils/markdown';
@@ -37,6 +43,23 @@ interface ChatMessageListProps {
 
 /** v4.3.0：长按 600ms 删除这一轮；松手即取消，删后由输入区给 5 秒撤销 */
 const HOLD_DELETE_MS = 600;
+
+/** 日期分组键（本地时区） */
+function dayKey(ts: number): string {
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+}
+
+/** 日期分隔文案：今天 / 昨天 / 11月27日 */
+function dayLabel(ts: number): string {
+  const now = new Date();
+  const d = new Date(ts);
+  if (dayKey(ts) === dayKey(now.getTime())) return '今天';
+  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+  if (dayKey(ts) === dayKey(yesterday.getTime())) return '昨天';
+  const md = `${d.getMonth() + 1}月${d.getDate()}日`;
+  return d.getFullYear() === now.getFullYear() ? md : `${d.getFullYear()}年${md}`;
+}
 
 function TurnDeleteButton({ onDelete }: { onDelete: () => void }) {
   const [holding, setHolding] = useState(false);
@@ -341,9 +364,11 @@ const ChatMessageItem = memo(function ChatMessageItem({
     [confirm, msg.role, msg.content],
   );
 
+  const canAct = msg.role === 'assistant' && !confirm && !streamingActive && !selectMode;
+
   return (
     <div
-      className={`chat-message ${msg.role} ${selectMode ? 'select-mode' : ''} ${isSelected ? 'selected' : ''} ${confirm ? 'confirm-msg' : ''}`}
+      className={`chat-message chat5-msg ${msg.role} ${selectMode ? 'select-mode' : ''} ${isSelected ? 'selected' : ''} ${confirm ? 'confirm-msg' : ''}`}
       data-msg-id={msg.id}
       onClick={isSelectable ? () => onToggleSelect(msg.id) : undefined}
     >
@@ -353,14 +378,13 @@ const ChatMessageItem = memo(function ChatMessageItem({
           {isSelected && <IconCheck />}
         </div>
       )}
-      <div className="message-avatar">
-        {confirm ? '⚠️' : msg.role === 'user' ? '我' : msg.role === 'tool' ? '🔧' : 'AI'}
-      </div>
+
       <div className="message-body">
         {/* v4.3.0：assistant 的时间提到正文上方，默认可见；用户/工具消息仍留在底部 */}
         {msg.role === 'assistant' && !confirm && (
           <span className="message-time message-time-top">{formatTime(msg.timestamp)}</span>
         )}
+
         {/* 思维链内容（可折叠） */}
         {msg.reasoningContent && (
           <details className="reasoning-block" open={streamingActive}>
@@ -368,12 +392,6 @@ const ChatMessageItem = memo(function ChatMessageItem({
               <IconBrain />
               <span>思考过程</span>
               {msg.thinkingEffort && <span className="reasoning-effort">{msg.thinkingEffort}</span>}
-              {msg.role === 'assistant' && !streamingActive && onDeleteTurn && (
-                <TurnDeleteButton onDelete={() => onDeleteTurn(msg.id)} />
-              )}
-              {msg.role === 'assistant' && !streamingActive && msg.content && (
-                <TurnCopyButton text={msg.content} />
-              )}
             </summary>
             <div className="reasoning-content">{msg.reasoningContent}</div>
           </details>
@@ -475,12 +493,6 @@ const ChatMessageItem = memo(function ChatMessageItem({
         {msg.isThinking && !msg.reasoningContent && (
           <span className="message-tag">
             深度思考 · {msg.thinkingEffort}
-            {msg.role === 'assistant' && !streamingActive && onDeleteTurn && (
-              <TurnDeleteButton onDelete={() => onDeleteTurn(msg.id)} />
-            )}
-            {msg.role === 'assistant' && !streamingActive && msg.content && (
-              <TurnCopyButton text={msg.content} />
-            )}
           </span>
         )}
 
@@ -501,6 +513,14 @@ const ChatMessageItem = memo(function ChatMessageItem({
           <span className="message-time">{formatTime(msg.timestamp)}</span>
         )}
       </div>
+
+      {/* 每条消息右下角的一行小动作：平时透明，hover / 长按才浮出来 */}
+      {canAct && (msg.content || msg.reasoningContent) && (
+        <div className="chat5-actions">
+          {msg.content && <TurnCopyButton text={msg.content} />}
+          {onDeleteTurn && <TurnDeleteButton onDelete={() => onDeleteTurn(msg.id)} />}
+        </div>
+      )}
     </div>
   );
 });
@@ -527,34 +547,43 @@ export function ChatMessageList({
   }, [containerRef]);
 
   return (
-    <div className="chat-messages" ref={containerRef}>
+    <div className={`chat-messages ${selectMode ? 'selecting' : ''}`} ref={containerRef}>
       {messages.length === 0 ? (
         <div className="chat-welcome">
           <span className="welcome-icon"><IconMessage /></span>
-          <h2 className="welcome-title">开始一段新对话</h2>
+          <h2 className="welcome-title">从一句话开始</h2>
           <p className="welcome-hint">
-            {hasApiKey ? '输入消息开始与 AI 对话' : '请先在设置页面配置 AI API Key'}
+            {hasApiKey ? '想到什么就打什么，AI 会接着往下聊' : '先去设置里填上 AI API Key，这里才有人接话'}
           </p>
         </div>
       ) : (
-        messages.map((msg, idx) => (
-          <ChatMessageItem
-            key={msg.id}
-            msg={msg}
-            sessionId={sessionId}
-            selectMode={selectMode}
-            isSelected={selectedMsgIds.has(msg.id)}
-            streamingActive={isLoading && idx === messages.length - 1}
-            onToggleSelect={onToggleSelect}
-            onConfirmAction={onConfirmAction}
-            onDeleteTurn={onDeleteTurn}
-          />
-        ))
+        messages.map((msg, idx) => {
+          const prev = messages[idx - 1];
+          const showDay = !prev || dayKey(prev.timestamp) !== dayKey(msg.timestamp);
+          return (
+            <Fragment key={msg.id}>
+              {showDay && (
+                <div className="chat5-day">
+                  <span>{dayLabel(msg.timestamp)}</span>
+                </div>
+              )}
+              <ChatMessageItem
+                msg={msg}
+                sessionId={sessionId}
+                selectMode={selectMode}
+                isSelected={selectedMsgIds.has(msg.id)}
+                streamingActive={isLoading && idx === messages.length - 1}
+                onToggleSelect={onToggleSelect}
+                onConfirmAction={onConfirmAction}
+                onDeleteTurn={onDeleteTurn}
+              />
+            </Fragment>
+          );
+        })
       )}
 
       {isLoading && messages.length > 0 && messages[messages.length - 1]?.role === 'user' && (
-        <div className="chat-message assistant">
-          <div className="message-avatar">AI</div>
+        <div className="chat-message chat5-msg assistant">
           <div className="message-body">
             <div className="message-content loading-dots">
               <span className="dot" /><span className="dot" /><span className="dot" />

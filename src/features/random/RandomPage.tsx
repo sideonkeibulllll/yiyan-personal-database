@@ -1,6 +1,10 @@
 /**
  * 随机浏览页面
- * 卡片堆叠流式排列，自动填屏 + 分页刷新
+ *
+ * 结构：一叠牌。
+ * 视口里只摊开一张主卡，主卡下沿露出下一两张卡的薄边；
+ * 抽卡时主卡向上飞出，下一张从牌堆里顶上来。
+ * 筛选从右上角一颗圆钮进入底部抽屉（EntryFilterPanel）。
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -22,9 +26,6 @@ import { hasLocalOriginal, addMissingOriginal } from '@/services/syncService';
 import type { Entry } from '@/types';
 import './RandomPage.css';
 
-/** 卡片间距 (px) */
-const CARD_GAP = 12;
-
 /** 计算折叠文本：截取到第 limit 字所在行的行尾，避免半截行 */
 function getCollapsedText(content: string, limit: number): string {
   const nl = content.indexOf('\n', limit);
@@ -34,28 +35,14 @@ function getCollapsedText(content: string, limit: number): string {
 
 /** SVG icons (stroke-based, viewBox="0 0 24 24", strokeWidth="1.5") */
 const FunnelIcon = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M10 20H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6"/>
-    <path d="m3 3 9 9-3 3 9 9"/>
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4 5h16l-6.4 7.6V19l-3.2 1.6v-8L4 5Z" />
   </svg>
 );
 
 const RefreshIcon = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
     <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
-  </svg>
-);
-
-const StarFilledIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
-  </svg>
-);
-
-const InboxIcon = () => (
-  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-    <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
-    <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
   </svg>
 );
 
@@ -88,10 +75,15 @@ export function RandomPage() {
   const [isLoading, setIsLoading] = useState(false);
   // 已展开全文的卡片 id 集合（长文本折叠）
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
-  // 卡片堆叠滚动容器（刷新后回顶部）
+  // 卡片堆叠定位锚点（刷新后复位）
   const cardsStackRef = useRef<HTMLDivElement>(null);
   // 上次抽取的 id 列表，用于避免连续两屏重复
   const lastIdsRef = useRef<Set<string>>(new Set());
+
+  // 牌堆：当前摊开的是第几张（0 起），以及「正在飞出去」的中间态
+  const [cardIndex, setCardIndex] = useState(0);
+  const [leaving, setLeaving] = useState(false);
+  const drawTimerRef = useRef<ReturnType<typeof setTimeout>>();
 
   // v2.12.0: 「直达卡片」——通知点击 / 外部跳转（?focus=<id>）时置顶并短暂高亮
   const [searchParams, setSearchParams] = useSearchParams();
@@ -456,7 +448,7 @@ export function RandomPage() {
   const handleRefresh = useCallback(() => {
     setIsLoading(true);
     getRandomEntries();
-    // 内部滚动容器 + 页面级滚动双重复位，确保任何一层滚动了都能回到顶部
+    // 内部锚点 + 页面级滚动双重复位，确保任何一层滚动了都能回到顶部
     cardsStackRef.current?.scrollTo({ top: 0 });
     window.scrollTo({ top: 0 });
     document.documentElement.scrollTop = 0;
@@ -516,163 +508,265 @@ export function RandomPage() {
     };
   }, []);
 
+  // 清理抽卡计时器
+  useEffect(() => {
+    return () => {
+      if (drawTimerRef.current) clearTimeout(drawTimerRef.current);
+    };
+  }, []);
+
+  // 牌堆换了一批（刷新 / 筛选 / 直达）→ 重新从第一张摊开。
+  // 只认 id 顺序：星标、编辑这类「同批内容变了」的更新不该让牌跳回第一张。
+  const deckKey = currentEntries.map(e => e.id).join('|');
+  useEffect(() => {
+    if (drawTimerRef.current) {
+      clearTimeout(drawTimerRef.current);
+      drawTimerRef.current = undefined;
+    }
+    setCardIndex(0);
+    setLeaving(false);
+  }, [deckKey]);
+
+  // 安全下标：批次被替换时可能短暂越界
+  const safeIndex = currentEntries.length > 0
+    ? Math.min(cardIndex, currentEntries.length - 1)
+    : 0;
+  const currentEntry = currentEntries[safeIndex];
+  const remainingCards = Math.max(0, currentEntries.length - safeIndex - 1);
+
+  // 抽下一张：主卡飞出去，260ms 后下一张顶上来；最后一张抽完就换一批
+  const handleDraw = useCallback(() => {
+    if (drawTimerRef.current) return;
+    if (currentEntries.length === 0) return;
+    const isLast = safeIndex + 1 >= currentEntries.length;
+    setLeaving(true);
+    drawTimerRef.current = setTimeout(() => {
+      drawTimerRef.current = undefined;
+      setLeaving(false);
+      if (isLast) {
+        setCardIndex(0);
+        handleRefresh();
+      } else {
+        setCardIndex(safeIndex + 1);
+      }
+    }, 260);
+  }, [safeIndex, currentEntries.length, handleRefresh]);
+
   if (isLoading) {
     return (
-      <div className="random-page">
-        <div className="loading-card glass">
-          <div className="loading-spinner" />
+      <div className="rp-page">
+        <div className="rp-loading">
+          <div className="rp-spinner" />
         </div>
       </div>
     );
   }
 
+  // 卡面右上角的小记号：只用一个点 + 一个词说清「这张是什么」
+  const markLabel = currentEntry
+    ? (currentEntry.isStarred
+      ? '星标'
+      : currentEntry.tags && currentEntry.tags.length > 0
+        ? `#${currentEntry.tags[0].name}`
+        : currentEntry.attachments && currentEntry.attachments.length > 0
+          ? `${currentEntry.attachments.length} 张图`
+          : '记忆')
+    : '';
+
   return (
-    <div className="random-page">
-      {/* 筛选按钮 - 右上角浮动（v3.5.0: 处于筛选条件中时标橙示意，不再显示上方标签块） */}
-      <button
-        className={`filter-btn ${hasActiveFilter ? 'active' : ''}`}
-        onClick={() => setShowFilter(true)}
-      >
-        <FunnelIcon />
-      </button>
+    <div className="rp-page">
+      {/* 页头：这叠牌的身份 + 唯一一颗筛选钮 */}
+      <header className="rp-mast">
+        <div className="rp-mast-id">
+          <span className="rp-mast-eyebrow">随机抽取</span>
+          <span className="rp-mast-sub">
+            {currentEntries.length > 0
+              ? `抽屉里 ${currentEntries.length} 张`
+              : '抽屉'}
+          </span>
+        </div>
+        <button
+          className={`rp-filter ${hasActiveFilter ? 'on' : ''}`}
+          onClick={() => setShowFilter(true)}
+          aria-label="筛选牌堆"
+          title="筛选"
+        >
+          <FunnelIcon />
+          {hasActiveFilter && <i className="rp-filter-mark" />}
+        </button>
+      </header>
 
-      <main className="page-content">
-        {currentEntries.length > 0 ? (
-          <>
-            <div className="cards-stack" ref={cardsStackRef}>
-              {currentEntries.map((entry) => {
-                const needsCollapse = collapseLen > 0 && entry.content.length > collapseLen;
-                const isExpanded = expandedIds.has(entry.id);
-                return (
-                  <div
-                    key={entry.id}
-                    className={`card-item ${pressedId === entry.id ? 'pressed' : ''} ${focusHighlightId === entry.id ? 'focus-highlight' : ''}`}
-                    onClick={() => handleCopy(entry)}
-                    onMouseDown={(e) => handlePressStart(entry.id, e.clientX, e.clientY)}
-                    onMouseUp={() => handlePressEnd(entry.id)}
-                    onMouseLeave={() => handlePressEnd(entry.id)}
-                    onTouchStart={(e) => handlePressStart(entry.id, e.touches[0]?.clientX, e.touches[0]?.clientY)}
-                    onTouchMove={(e) => {
-                      const t = e.touches[0];
-                      if (t) handlePressMove(entry.id, t.clientX, t.clientY);
-                    }}
-                    onTouchEnd={() => handlePressEnd(entry.id)}
-                    onTouchCancel={() => handlePressEnd(entry.id)}
-                  >
-                    <div className="entry-card glass">
-                      <div className="card-content">
-                        {needsCollapse && !isExpanded
-                          ? getCollapsedText(entry.content, collapseLen)
-                          : entry.content}
-                      </div>
+      <main className="rp-stage">
+        {currentEntry ? (
+          <div className="rp-deck cards-stack" ref={cardsStackRef} data-no-swipe>
+            {/* 牌堆下沿：还剩下的牌露出的薄边 */}
+            {remainingCards > 1 && <div className="rp-under rp-under-2" aria-hidden />}
+            {remainingCards > 0 && <div className="rp-under rp-under-1" aria-hidden />}
 
-                      {/* 长文本折叠：展开/收起 */}
-                      {needsCollapse && (
-                        <button
-                          className="card-expand-btn"
-                          onClick={(e) => { e.stopPropagation(); handleToggleExpand(entry.id); }}
-                          onMouseDown={stopPropagation}
-                          onMouseUp={stopPropagation}
-                          onTouchStart={stopPropagation}
-                          onTouchEnd={stopPropagation}
-                        >
-                          {isExpanded ? '收起' : '展开'}
-                        </button>
-                      )}
-
-                      {/* 图片附件展示 - inline 模式：纵向堆叠在文本下方 */}
-                      {attachmentMode === 'inline'
-                        && entry.attachments
-                        && entry.attachments.length > 0
-                        && (thumbSrcsByEntry[entry.id] || []).length > 0 && (
-                        <div
-                          className="card-attachments"
-                          onClick={stopPropagation}
-                          onMouseDown={stopPropagation}
-                          onMouseUp={stopPropagation}
-                          onTouchStart={stopPropagation}
-                          onTouchEnd={stopPropagation}
-                        >
-                          {thumbSrcsByEntry[entry.id].map((src, idx) => (
-                            <img
-                              key={idx}
-                              src={src}
-                              alt={`附件 ${idx + 1}`}
-                              className="card-attachment-img"
-                              loading="lazy"
-                              onClick={() => openViewer(entry.id, idx)}
-                            />
-                          ))}
-                        </div>
-                      )}
-
-                      <div className="card-meta">
-                        {entry.isStarred && (
-                          <span className="meta-star"><StarFilledIcon /></span>
-                        )}
-                        {entry.tags && entry.tags.length > 0 && (
-                          <div className="meta-tags">
-                            {entry.tags.map(tag => (
-                              <span key={tag.id} className="meta-tag">#{tag.name}</span>
-                            ))}
-                          </div>
-                        )}
-                        {/* 图片附件展示 - badge 模式：仅显示附件数量徽标 */}
-                        {attachmentMode === 'badge'
-                          && entry.attachments
-                          && entry.attachments.length > 0 && (
-                          <span
-                            className="meta-attachment-badge"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              openViewer(entry.id, 0);
-                            }}
-                            onTouchStart={(e) => e.stopPropagation()}
-                          >
-                            <PaperclipIcon /> ×{entry.attachments.length}
-                          </span>
-                        )}
-                        <span className="meta-time">
-                          {new Date(entry.createdAt).toLocaleDateString('zh-CN')}
-                        </span>
-                        {/* v2.12.0: 直达卡片浏览页（不触发卡片复制/长按） */}
-                        <button
-                          className="card-view-btn"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            navigate(`/entry/${entry.id}`);
-                          }}
-                          onMouseDown={stopPropagation}
-                          onMouseUp={stopPropagation}
-                          onTouchStart={stopPropagation}
-                          onTouchEnd={stopPropagation}
-                          title="浏览卡片"
-                          aria-label="浏览卡片"
-                        >
-                          <ChevronRightIcon />
-                        </button>
-                      </div>
-                    </div>
+            {(() => {
+              const entry = currentEntry;
+              const needsCollapse = collapseLen > 0 && entry.content.length > collapseLen;
+              const isExpanded = expandedIds.has(entry.id);
+              const isClamped = needsCollapse && !isExpanded;
+              const thumbs = thumbSrcsByEntry[entry.id] || [];
+              return (
+                <div
+                  key={entry.id}
+                  className={[
+                    'rp-card',
+                    leaving ? 'is-leaving' : '',
+                    pressedId === entry.id ? 'is-pressed' : '',
+                    focusHighlightId === entry.id ? 'is-focus' : '',
+                    isClamped ? 'is-clamped' : '',
+                    isExpanded ? 'is-expanded' : '',
+                  ].filter(Boolean).join(' ')}
+                  onClick={() => handleCopy(entry)}
+                  onMouseDown={(e) => handlePressStart(entry.id, e.clientX, e.clientY)}
+                  onMouseUp={() => handlePressEnd(entry.id)}
+                  onMouseLeave={() => handlePressEnd(entry.id)}
+                  onTouchStart={(e) => handlePressStart(entry.id, e.touches[0]?.clientX, e.touches[0]?.clientY)}
+                  onTouchMove={(e) => {
+                    const t = e.touches[0];
+                    if (t) handlePressMove(entry.id, t.clientX, t.clientY);
+                  }}
+                  onTouchEnd={() => handlePressEnd(entry.id)}
+                  onTouchCancel={() => handlePressEnd(entry.id)}
+                >
+                  {/* 右上角小记号：6px 点 + 一句小字 */}
+                  <div className="rp-card-mark">
+                    <span className="rp-mark">
+                      <i className={entry.isStarred ? 'is-accent' : ''} />
+                      {markLabel}
+                    </span>
                   </div>
-                );
-              })}
-            </div>
 
-            <div className="card-actions">
-              <button className="nav-btn glass" onClick={handleRefresh}>
-                <RefreshIcon />
-                <span>刷新下一屏</span>
-              </button>
-            </div>
-          </>
+                  {/* 正文：最多 8 行，超出从底部淡出 */}
+                  <div className="rp-card-body">
+                    <div className="rp-text">
+                      {isClamped ? getCollapsedText(entry.content, collapseLen) : entry.content}
+                    </div>
+
+                    {/* 图片附件展示 - inline 模式：纵向堆叠在文本下方 */}
+                    {attachmentMode === 'inline' && thumbs.length > 0 && (
+                      <div
+                        className="rp-attachments"
+                        onClick={stopPropagation}
+                        onMouseDown={stopPropagation}
+                        onMouseUp={stopPropagation}
+                        onTouchStart={stopPropagation}
+                        onTouchEnd={stopPropagation}
+                      >
+                        {thumbs.map((src, idx) => (
+                          <img
+                            key={idx}
+                            src={src}
+                            alt={`附件 ${idx + 1}`}
+                            className="rp-attachment"
+                            loading="lazy"
+                            onClick={() => openViewer(entry.id, idx)}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 卡脚：左边时间，中间标签/附件，右边浏览入口 */}
+                  <div className="rp-card-foot">
+                    <span className="rp-time">
+                      {new Date(entry.createdAt).toLocaleDateString('zh-CN')}
+                    </span>
+
+                    {entry.tags && entry.tags.length > 0 && (
+                      <span className="rp-foot-tags">
+                        {entry.tags.slice(0, 2).map(tag => (
+                          <span key={tag.id} className="rp-foot-tag">#{tag.name}</span>
+                        ))}
+                        {entry.tags.length > 2 && (
+                          <span className="rp-foot-tag rp-foot-tag--more">+{entry.tags.length - 2}</span>
+                        )}
+                      </span>
+                    )}
+
+                    {/* 图片附件展示 - badge 模式：仅显示附件数量徽标 */}
+                    {attachmentMode === 'badge'
+                      && entry.attachments
+                      && entry.attachments.length > 0 && (
+                      <span
+                        className="rp-foot-badge"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openViewer(entry.id, 0);
+                        }}
+                        onTouchStart={(e) => e.stopPropagation()}
+                      >
+                        <PaperclipIcon /> ×{entry.attachments.length}
+                      </span>
+                    )}
+
+                    {needsCollapse && (
+                      <button
+                        className="rp-expand"
+                        onClick={(e) => { e.stopPropagation(); handleToggleExpand(entry.id); }}
+                        onMouseDown={stopPropagation}
+                        onMouseUp={stopPropagation}
+                        onTouchStart={stopPropagation}
+                        onTouchEnd={stopPropagation}
+                      >
+                        {isExpanded ? '收起' : '展开'}
+                      </button>
+                    )}
+
+                    {/* v2.12.0: 直达卡片浏览页（不触发卡片复制/长按） */}
+                    <button
+                      className="rp-open"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        navigate(`/entry/${entry.id}`);
+                      }}
+                      onMouseDown={stopPropagation}
+                      onMouseUp={stopPropagation}
+                      onTouchStart={stopPropagation}
+                      onTouchEnd={stopPropagation}
+                      title="浏览卡片"
+                      aria-label="浏览卡片"
+                    >
+                      <ChevronRightIcon />
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
         ) : (
-          <div className="empty-state">
-            <span className="empty-icon"><InboxIcon /></span>
-            <p className="empty-text">没有符合条件的记忆</p>
-            <p className="empty-hint">尝试调整筛选条件</p>
+          <div className="s-empty">
+            <b>抽屉里还没有牌</b>
+            <span>
+              {hasActiveFilter
+                ? '当前筛选下没有可抽的记忆，放宽一点再看看。'
+                : '写下第一条记忆，它就会出现在这叠牌里。'}
+            </span>
+            <div className="rp-empty-actions">
+              {hasActiveFilter && (
+                <button className="rp-ghost" onClick={() => setShowFilter(true)}>改筛选</button>
+              )}
+              <button className="rp-cta" onClick={() => navigate('/')}>去写一条</button>
+            </div>
           </div>
         )}
       </main>
+
+      {/* 拇指区：左边抽卡，右边第几张 */}
+      {currentEntries.length > 0 && (
+        <div className="rp-dock">
+          <button className="rp-draw" onClick={handleDraw} aria-label="抽下一张">
+            <RefreshIcon />
+            <span>抽下一张</span>
+          </button>
+          <span className="rp-dock-count">
+            第 {safeIndex + 1} / 共 {currentEntries.length} 张
+          </span>
+        </div>
+      )}
 
       {/* 快捷菜单 */}
       {showMenu && menuEntry && (
@@ -773,7 +867,7 @@ export function RandomPage() {
 
       {/* 轻提示（v2.6.3） */}
       {toastMsg && (
-        <div className="toast glass">
+        <div className="rp-toast">
           <span>{toastMsg}</span>
         </div>
       )}

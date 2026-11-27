@@ -64,26 +64,36 @@ export function ChatFilePage() {
 
   return (
     <div className="chat-file-page">
-      <header className="chat-file-page-head">
+      {/* 顶部悬浮胶囊：左返回 / 中文件名 / 右复制 */}
+      <header className="chat-file-bar">
         <button type="button" className="chat-file-back" onClick={() => goBack(navigate, '/chat')} title="返回对话">
-          <IconBack />
+          <IconBack size={16} />
+          <span>返回</span>
         </button>
+
         <div className="chat-file-title">
           <span className="chat-file-name">{name || '文件内容'}</span>
           {meta && <span className="chat-file-meta">{meta}</span>}
         </div>
+
         {state === 'ok' && (
-          <button type="button" className="chat-file-copy" onClick={copyAll} title="复制全文">
+          <button type="button" className={`chat-file-copy ${copied ? 'done' : ''}`} onClick={copyAll} title="复制全文">
             {copied ? <IconCheck /> : <IconCopy />}
             <span>{copied ? '已复制' : '复制'}</span>
           </button>
         )}
       </header>
 
-      {state === 'loading' && <div className="chat-file-hint">加载中…</div>}
+      {state === 'loading' && (
+        <div className="chat-file-hint">
+          <span className="chat-file-dots"><i /><i /><i /></span>
+          <span>正在把这段内容拿回来…</span>
+        </div>
+      )}
       {state === 'missing' && (
         <div className="chat-file-hint">
-          这段文件内容已经不在了（消息被删除或会话被清理）。
+          <b>这段文件内容已经不在了</b>
+          <span>消息被删除，或者这个会话被清理掉了。</span>
           <button type="button" className="chat-file-link" onClick={() => goBack(navigate, '/chat')}>返回对话</button>
         </div>
       )}

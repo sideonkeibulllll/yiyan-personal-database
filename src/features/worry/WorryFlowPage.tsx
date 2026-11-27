@@ -1,5 +1,8 @@
 /**
- * 「怕了么」6 步引导流程页
+ * 「怕了么」6 步引导流程页（v5）
+ *
+ * 呈现：一次只给一屏一个问题
+ * 44px 顶条（返回 / 第几步）→ 2px 进度线 → 24px 的问题 → 大块选项 → 底部「上一步 / 下一步」
  *
  * 步骤：
  * 1 写下担心 → 2 初始打分 → 3 三种结局（AI 生成 + 逐张翻开）
@@ -44,7 +47,7 @@ const LOADING_TEXT_INTERVAL_MS = 2500;
 
 /** 返回箭头 */
 const BackIcon = (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
     <path d="M19 12H5" />
     <path d="M12 19l-7-7 7-7" />
   </svg>
@@ -282,6 +285,12 @@ export function WorryFlowPage() {
     })();
   }, [record, scoreAfter, updateRecord, navigate]);
 
+  /** 上一步：把草稿的 step 退一格（数据不删，随时能再往前走） */
+  const goPrev = useCallback(() => {
+    if (phase <= 1) return;
+    void updateRecord({}, (phase - 1) as Phase);
+  }, [phase, updateRecord]);
+
   // ===== 渲染 =====
   if (booting || !record) {
     return (
@@ -298,22 +307,22 @@ export function WorryFlowPage() {
   };
   const rawSum = rawProbs.worst + rawProbs.normal + rawProbs.best;
   const normalized = record.normalizedProbs;
+  const totalSteps = 6;
 
   return (
     <div className="worry-page worry-flow-page">
-      {/* 顶部栏 */}
-      <header className="worry-flow-header">
-        <button className="worry-icon-btn" onClick={() => navigate('/worries')} aria-label="返回">
+      {/* 44px 顶条：返回 / 第几步 */}
+      <header className="worry-bar">
+        <button className="worry-bar-btn" onClick={() => navigate('/worries')} aria-label="返回">
           {BackIcon}
         </button>
-        <div className="worry-flow-title">怕了么</div>
+        <span className="worry-bar-title">怕了么</span>
+        <span className="worry-bar-step">{Math.min(phase, totalSteps)} / {totalSteps}</span>
       </header>
 
-      {/* 6 段进度条 */}
+      {/* 2px 进度线：全程一条，不用六段小格子 */}
       <div className="worry-progress" aria-hidden>
-        {[1, 2, 3, 4, 5, 6].map(i => (
-          <div key={i} className={`worry-progress-seg ${i <= phase ? 'filled' : ''}`} />
-        ))}
+        <i style={{ width: `${(Math.min(phase, totalSteps) / totalSteps) * 100}%` }} />
       </div>
 
       <main className="worry-flow-body" key={showSummary ? 'summary' : phase}>
@@ -321,21 +330,24 @@ export function WorryFlowPage() {
         {phase === 1 && (
           <div className="worry-step">
             <h1 className="worry-question">此刻，你最担心的是什么？</h1>
+            <p className="worry-sub">不用写完整，一句就行。</p>
             <textarea
               className="worry-input"
               value={contentInput}
               onChange={e => setContentInput(e.target.value)}
-              placeholder="不用写完整。比如：我担心被裁，之后再 也找不到工作。"
+              placeholder="比如：我担心被裁，之后再 也找不到工作。"
               rows={4}
               autoFocus
             />
-            <button
-              className="worry-btn-primary"
-              disabled={!contentInput.trim()}
-              onClick={() => void updateRecord({ content: contentInput.trim() }, 2)}
-            >
-              下一步
-            </button>
+            <div className="worry-step-dock">
+              <button
+                className="worry-btn-primary worry-btn-big"
+                disabled={!contentInput.trim()}
+                onClick={() => void updateRecord({ content: contentInput.trim() }, 2)}
+              >
+                下一步
+              </button>
+            </div>
           </div>
         )}
 
@@ -350,14 +362,17 @@ export function WorryFlowPage() {
             <ScoreSlider value={scoreBefore} onChange={setScoreBefore} />
             <div className="worry-scale-hints">
               <span>1 = 几乎不担心</span>
-              <span>10 = 满脑子都是它，做不了别的事</span>
+              <span>10 = 满脑子都是它</span>
             </div>
-            <button
-              className="worry-btn-primary"
-              onClick={() => void updateRecord({ scoreBefore }, 3)}
-            >
-              下一步
-            </button>
+            <div className="worry-step-dock row">
+              <button className="worry-dock-text" onClick={goPrev}>上一步</button>
+              <button
+                className="worry-btn-primary worry-btn-big"
+                onClick={() => void updateRecord({ scoreBefore }, 3)}
+              >
+                下一步
+              </button>
+            </div>
           </div>
         )}
 
@@ -395,6 +410,12 @@ export function WorryFlowPage() {
                 onDone={() => void updateRecord({}, 4)}
               />
             )}
+
+            {!generating && (
+              <div className="worry-step-dock">
+                <button className="worry-dock-text" onClick={goPrev}>上一步</button>
+              </div>
+            )}
           </div>
         )}
 
@@ -427,13 +448,16 @@ export function WorryFlowPage() {
               </p>
             )}
 
-            <div className="worry-two-buttons">
+            <div className="worry-step-dock">
               <button className="worry-btn-secondary" onClick={() => void updateRecord({}, 5)}>
                 我仍然担心会发生最坏的结果
               </button>
-              <button className="worry-btn-primary" onClick={() => void updateRecord({ skippedFlip: true }, 6)}>
-                下一步
-              </button>
+              <div className="worry-step-dock row">
+                <button className="worry-dock-text" onClick={goPrev}>上一步</button>
+                <button className="worry-btn-primary worry-btn-big" onClick={() => void updateRecord({ skippedFlip: true }, 6)}>
+                  下一步
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -471,7 +495,7 @@ export function WorryFlowPage() {
                       </button>
                       {/* v3.5.0: 常显「算了，谢谢」——误入反转牌这一步也能直接跳过，不强制 AI 生成 */}
                       <button
-                        className="worry-btn-ghost"
+                        className="worry-btn-ghost worry-btn-inline"
                         onClick={() => void updateRecord({ skippedFlip: true }, 6)}
                       >
                         算了，谢谢
@@ -496,10 +520,10 @@ export function WorryFlowPage() {
                     ))}
                   </div>
                   <div className="worry-two-buttons">
-                    <button className="worry-btn-secondary" onClick={() => setFlipRevealed(false)}>
+                    <button className="worry-btn-ghost" onClick={() => setFlipRevealed(false)}>
                       翻回正面
                     </button>
-                    <button className="worry-btn-primary" onClick={() => void updateRecord({}, 6)}>
+                    <button className="worry-btn-primary worry-btn-inline" onClick={() => void updateRecord({}, 6)}>
                       继续
                     </button>
                   </div>
@@ -511,6 +535,12 @@ export function WorryFlowPage() {
               <p className="worry-flow-soul-hint">
                 AI 有一条事实档案的变更建议，已挂到「怕了么」主页，回去可以确认。
               </p>
+            )}
+
+            {!flipGenerating && (
+              <div className="worry-step-dock">
+                <button className="worry-dock-text" onClick={goPrev}>上一步</button>
+              </div>
             )}
           </div>
         )}
@@ -525,20 +555,23 @@ export function WorryFlowPage() {
             <h1 className="worry-question">现在，你还有多担心？</h1>
             <ScoreSlider value={scoreAfter} onChange={setScoreAfter} />
             <button
-              className="worry-btn-primary"
-              onClick={() => {
-                setShowSummary(true);
-                void updateRecord({ scoreAfter });
-              }}
-            >
-              下一步
-            </button>
-            <button
-              className="worry-btn-secondary worry-btn-continue-chat"
+              className="worry-btn-secondary"
               onClick={handleContinueToChat}
             >
               新建对话继续聊
             </button>
+            <div className="worry-step-dock row">
+              <button className="worry-dock-text" onClick={goPrev}>上一步</button>
+              <button
+                className="worry-btn-primary worry-btn-big"
+                onClick={() => {
+                  setShowSummary(true);
+                  void updateRecord({ scoreAfter });
+                }}
+              >
+                下一步
+              </button>
+            </div>
           </div>
         )}
 
@@ -567,17 +600,19 @@ export function WorryFlowPage() {
                 </div>
               </div>
             </div>
-            <button
-              className="worry-btn-primary"
-              onClick={() => {
-                void (async () => {
-                  await updateRecord({ status: 'completed', scoreAfter: record.scoreAfter ?? scoreAfter, step: 7 });
-                  navigate('/worries');
-                })();
-              }}
-            >
-              完成
-            </button>
+            <div className="worry-step-dock">
+              <button
+                className="worry-btn-primary worry-btn-big"
+                onClick={() => {
+                  void (async () => {
+                    await updateRecord({ status: 'completed', scoreAfter: record.scoreAfter ?? scoreAfter, step: 7 });
+                    navigate('/worries');
+                  })();
+                }}
+              >
+                完成
+              </button>
+            </div>
           </div>
         )}
       </main>

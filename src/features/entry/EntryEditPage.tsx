@@ -1,8 +1,13 @@
 /**
- * 数据编辑页面
- * 编辑条目的所有信息：内容、来源、补充、标签、组、星标
+ * 数据编辑页面（UI v5）
+ *
+ * 结构决策：这是详情页那张纸的「可写版本」。
+ *  - 顶部 44px：左「取消」、右「⋯」（属性 / 删除）
+ *  - 正文就是纸面本身：无边框、auto-grow 的 textarea，边距与详情页一致
+ *  - 所有字段（标签 / 分组 / 星标 / 来源 / 补充 / 图片）收进底部「属性」抽屉
+ *  - 底部只有一条：左「字数」、右「保存」（唯一主色，且有改动才亮）
  */
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getDatabase } from '@/services/database';
 import { useTagStore } from '@/stores/tagStore';
@@ -18,12 +23,6 @@ import type { Entry, Tag, Group, Attachment } from '@/types';
 import './EntryEditPage.css';
 
 /* SVG Icon Components */
-const IconArrowLeft = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="m12 19-7-7 7-7" /><path d="M19 12H5" />
-  </svg>
-);
-
 const IconFolder = () => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
     <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
@@ -70,6 +69,12 @@ const IconTrash = () => (
   </svg>
 );
 
+const IconDots = () => (
+  <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+    <circle cx="3" cy="8" r="1.35" /><circle cx="8" cy="8" r="1.35" /><circle cx="13" cy="8" r="1.35" />
+  </svg>
+);
+
 export function EntryEditPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -89,6 +94,9 @@ export function EntryEditPage() {
   // 弹出层
   const [showTagSelector, setShowTagSelector] = useState(false);
   const [showGroupSelector, setShowGroupSelector] = useState(false);
+  // ⋯ 菜单 / 属性抽屉
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [propsOpen, setPropsOpen] = useState(false);
 
   // b.8: 智能标签和智能组状态
   const settings = useSettingsStore(state => state.settings);
@@ -112,6 +120,9 @@ export function EntryEditPage() {
   const updateEntry = useEntryStore(state => state.updateEntry);
   const loadEntries = useEntryStore(state => state.loadEntries);
   const deleteEntry = useEntryStore(state => state.deleteEntry);
+
+  // 纸面正文自动长高
+  const contentRef = useRef<HTMLTextAreaElement>(null);
 
   // 删除整条数据
   const handleDelete = useCallback(async () => {
@@ -398,10 +409,63 @@ export function EntryEditPage() {
     return group?.name || '未分组';
   }, [groupId, allGroups]);
 
+  // 正文自动长高
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }, [content, loading]);
+
+  // 是否有未保存改动
+  const initialTagKey = useMemo(
+    () => entryTags.map(t => t.id).sort().join(','),
+    [entryTags],
+  );
+  const dirty = useMemo(() => {
+    if (id === 'new' || !entry) {
+      return Boolean(
+        content.trim() || source.trim() || supplement.trim() ||
+        selectedTagIds.length > 0 || groupId || isStarred,
+      );
+    }
+    return (
+      content !== entry.content ||
+      source !== (entry.source || '') ||
+      supplement !== (entry.supplement || '') ||
+      groupId !== entry.groupId ||
+      isStarred !== entry.isStarred ||
+      [...selectedTagIds].sort().join(',') !== initialTagKey
+    );
+  }, [id, entry, content, source, supplement, groupId, isStarred, selectedTagIds, initialTagKey]);
+
+  // 取消：有改动先问一句
+  const handleCancel = useCallback(() => {
+    if (dirty && !confirm('有未保存的修改，确定放弃吗？')) return;
+    navigate(-1);
+  }, [dirty, navigate]);
+
+  // 属性摘要：一眼看到这张纸上还有什么
+  const propsSummary = useMemo(() => {
+    const parts: string[] = [];
+    if (selectedTagIds.length > 0) parts.push(`${selectedTagIds.length} 个标签`);
+    if (groupId) parts.push(getGroupName());
+    if (isStarred) parts.push('已星标');
+    if (id && id !== 'new' && attachments.length > 0) parts.push(`${attachments.length} 张图片`);
+    if (source.trim()) parts.push('有来源');
+    if (supplement.trim()) parts.push('有补充');
+    return parts.join(' · ');
+  }, [selectedTagIds.length, groupId, isStarred, id, attachments.length, source, supplement, getGroupName]);
+
   if (loading) {
     return (
       <div className="entry-edit-page">
-        <div className="entry-edit-loading">加载中...</div>
+        <header className="entry-edit-bar">
+          <button className="entry-edit-cancel" onClick={() => navigate(-1)}>取消</button>
+          <span className="entry-edit-bar-center" />
+          <span className="entry-edit-bar-spacer" />
+        </header>
+        <div className="entry-edit-loading">正在铺开这张纸…</div>
       </div>
     );
   }
@@ -410,199 +474,234 @@ export function EntryEditPage() {
   if (!entry && id !== 'new') {
     return (
       <div className="entry-edit-page">
-        <div className="entry-edit-loading">条目不存在</div>
+        <header className="entry-edit-bar">
+          <button className="entry-edit-cancel" onClick={() => navigate(-1)}>取消</button>
+          <span className="entry-edit-bar-center" />
+          <span className="entry-edit-bar-spacer" />
+        </header>
+        <div className="entry-edit-loading">这条记忆不在了</div>
       </div>
     );
   }
 
   return (
     <div className="entry-edit-page">
-      {/* 顶部栏 */}
-      <header className="entry-edit-header">
-        <button className="entry-edit-back" onClick={() => navigate(-1)}>
-          <IconArrowLeft />
+      {/* 顶部 44px：取消 / 模式 / ⋯ */}
+      <header className="entry-edit-bar">
+        <button className="entry-edit-cancel" onClick={handleCancel}>取消</button>
+        <span className="entry-edit-bar-center">{id === 'new' ? '新记忆' : '编辑'}</span>
+        <button
+          className={`entry-edit-more${menuOpen ? ' on' : ''}`}
+          onClick={() => setMenuOpen(v => !v)}
+          aria-label="更多操作"
+          aria-expanded={menuOpen}
+        >
+          <IconDots />
         </button>
-        <h1 className="entry-edit-title">{id === 'new' ? '新建条目' : '编辑条目'}</h1>
-        <div className="entry-edit-header-spacer" />
+
+        {menuOpen && (
+          <>
+            <div className="entry-edit-scrim" onClick={() => setMenuOpen(false)} />
+            <div className="entry-edit-menu" role="menu" onClick={e => e.stopPropagation()}>
+              <button role="menuitem" onClick={() => { setMenuOpen(false); setPropsOpen(true); }}>属性</button>
+              {id && id !== 'new' && (
+                <button role="menuitem" className="is-danger" onClick={() => { setMenuOpen(false); void handleDelete(); }}>
+                  删除
+                </button>
+              )}
+            </div>
+          </>
+        )}
       </header>
 
-      {/* 表单 */}
-      <div className="entry-edit-form">
-        {/* 内容 */}
-        <div className="entry-edit-field">
-          <label className="entry-edit-label">内容</label>
+      {/* 纸面：与详情页同一套边距与字号 */}
+      <div className="entry-edit-body">
+        <div className="entry-edit-paper">
           <textarea
-            className="entry-edit-textarea glass"
+            ref={contentRef}
+            className="entry-edit-content"
             value={content}
             onChange={e => setContent(e.target.value)}
-            placeholder="输入内容..."
-            rows={4}
+            placeholder="写点什么…"
+            rows={1}
             autoFocus
           />
-        </div>
 
-        {/* 来源 */}
-        <div className="entry-edit-field">
-          <label className="entry-edit-label">来源</label>
-          <input
-            type="text"
-            className="entry-edit-input glass"
-            value={source}
-            onChange={e => setSource(e.target.value)}
-            placeholder="输入来源..."
-          />
-        </div>
-
-        {/* 补充信息 */}
-        <div className="entry-edit-field">
-          <label className="entry-edit-label">补充信息</label>
-          <textarea
-            className="entry-edit-textarea glass"
-            value={supplement}
-            onChange={e => setSupplement(e.target.value)}
-            placeholder="输入补充信息..."
-            rows={3}
-          />
-        </div>
-
-        {/* 标签 */}
-        <div className="entry-edit-field">
-          <label className="entry-edit-label">
-            标签
-            {/* b.8: 智能标签按钮 */}
-            <button
-              className="smart-suggest-btn"
-              onClick={handleSmartTagSuggest}
-              disabled={isSmartTagLoading}
-              title="AI 智能标签"
-            >
-              {isSmartTagLoading ? 'AI...' : '智能标签'}
-            </button>
-          </label>
-          <div className="entry-edit-tags">
-            {selectedTagIds.map(tagId => (
-              <span key={tagId} className="entry-edit-tag-chip">
-                <span className="entry-edit-tag-name">#{getTagName(tagId)}</span>
-                <button
-                  className="entry-edit-tag-remove"
-                  onClick={() => handleRemoveTag(tagId)}
-                >
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M18 6 6 18" /><path d="m6 6 12 12" />
-                  </svg>
-                </button>
-              </span>
-            ))}
-            <button
-              className="entry-edit-tag-add"
-              onClick={() => setShowTagSelector(true)}
-            >
-              + 添加标签
-            </button>
-          </div>
-        </div>
-
-        {/* 组 */}
-        <div className="entry-edit-field">
-          <label className="entry-edit-label">
-            所属组
-            {/* b.8: 智能组按钮 */}
-            <button
-              className="smart-suggest-btn"
-              onClick={handleSmartGroupSuggest}
-              disabled={isSmartGroupLoading}
-              title="AI 智能组"
-            >
-              {isSmartGroupLoading ? 'AI...' : '智能组'}
-            </button>
-          </label>
-          <button
-            className="entry-edit-group-display glass"
-            onClick={() => setShowGroupSelector(true)}
-          >
-            <span className="entry-edit-group-icon">{groupId ? <IconFolder /> : <IconFileText />}</span>
-            <span className="entry-edit-group-name">{getGroupName()}</span>
-            <span className="entry-edit-group-arrow"><IconChevronRight /></span>
-          </button>
-        </div>
-
-        {/* 星标 */}
-        <div className="entry-edit-field">
-          <label className="entry-edit-label">星标</label>
-          <button
-            className={`entry-edit-star-toggle ${isStarred ? 'active' : ''}`}
-            onClick={() => setIsStarred(!isStarred)}
-          >
-            <span className="entry-edit-star-icon">{isStarred ? <IconStar /> : <IconStarOutline />}</span>
-            <span className="entry-edit-star-text">
-              {isStarred ? '已星标' : '未星标'}
+          <button className="entry-edit-props" onClick={() => setPropsOpen(true)}>
+            <span className={`entry-edit-props-text${propsSummary ? '' : ' is-empty'}`}>
+              {propsSummary || '标签 · 分组 · 来源 · 图片'}
             </span>
+            <span className="entry-edit-props-arrow"><IconChevronRight /></span>
           </button>
         </div>
-
-        {/* 图片附件（仅编辑已有条目时显示，新建模式等保存后再加） */}
-        {id && id !== 'new' && (
-          <div className="entry-edit-field">
-            <label className="entry-edit-label">
-              图片附件
-              {attachments.length > 0 && (
-                <span className="entry-edit-att-count">（{attachments.length}）</span>
-              )}
-            </label>
-            <div className="entry-edit-attachments">
-              {attachments.map((att, idx) => (
-                <div key={att.id} className="entry-edit-att-item">
-                  <img
-                    src={thumbSrcs[att.id] || ''}
-                    alt="附件"
-                    className="entry-edit-att-thumb"
-                    onClick={() => setViewerStart(idx)}
-                    title="点击查看大图"
-                  />
-                  <button
-                    className="entry-edit-att-delete"
-                    onClick={() => handleDeleteImage(att)}
-                    title="删除"
-                  >
-                    <IconTrash />
-                  </button>
-                </div>
-              ))}
-              <button
-                className="entry-edit-att-add"
-                onClick={handleAddImage}
-                disabled={isPickingImage}
-                title="添加图片"
-              >
-                <IconImage />
-                <span>{isPickingImage ? '选图中...' : '添加'}</span>
-              </button>
-            </div>
-          </div>
-        )}
       </div>
 
-      {/* 底部保存按钮 */}
-      <footer className="entry-edit-footer">
-        {id && id !== 'new' && (
-          <button
-            className="entry-edit-delete-btn"
-            onClick={handleDelete}
-            disabled={saving}
-            title="删除此条数据"
-          >
-            <IconTrash />
-            <span>删除</span>
-          </button>
-        )}
+      {/* 底部：字数 + 保存（唯一主色） */}
+      <footer className="entry-edit-dock">
+        <span className="entry-edit-count">{content.trim().length} 字</span>
         <button
           className="entry-edit-save"
           onClick={handleSave}
-          disabled={saving || !content.trim()}
+          disabled={saving || !content.trim() || !dirty}
         >
-          {saving ? '保存中...' : (id === 'new' ? '提交' : '保存')}
+          {saving ? '保存中…' : '保存'}
         </button>
       </footer>
+
+      {/* 属性抽屉：原来屏幕上的所有字段，一件都没少 */}
+      {propsOpen && (
+        <>
+          <div className="entry-edit-sheet-scrim" onClick={() => setPropsOpen(false)} />
+          <div className="entry-edit-sheet" role="dialog" aria-label="属性">
+            <span className="entry-edit-sheet-grip" aria-hidden="true" />
+            <div className="entry-edit-sheet-head">
+              <span>属性</span>
+              <button onClick={() => setPropsOpen(false)}>完成</button>
+            </div>
+
+            <div className="entry-edit-sheet-body">
+              {/* 标签 */}
+              <div className="entry-edit-field">
+                <div className="entry-edit-label">
+                  <span>标签</span>
+                  <button
+                    className="smart-suggest-btn"
+                    onClick={handleSmartTagSuggest}
+                    disabled={isSmartTagLoading}
+                    title="AI 智能标签"
+                  >
+                    {isSmartTagLoading ? 'AI…' : '智能标签'}
+                  </button>
+                </div>
+                <div className="entry-edit-tags">
+                  {selectedTagIds.map(tagId => (
+                    <span key={tagId} className="entry-edit-tag-chip">
+                      <span className="entry-edit-tag-name">#{getTagName(tagId)}</span>
+                      <button
+                        className="entry-edit-tag-remove"
+                        onClick={() => handleRemoveTag(tagId)}
+                        aria-label="移除标签"
+                      >
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M18 6 6 18" /><path d="m6 6 12 12" />
+                        </svg>
+                      </button>
+                    </span>
+                  ))}
+                  <button
+                    className="entry-edit-tag-add"
+                    onClick={() => setShowTagSelector(true)}
+                  >
+                    + 添加标签
+                  </button>
+                </div>
+              </div>
+
+              {/* 组 */}
+              <div className="entry-edit-field">
+                <div className="entry-edit-label">
+                  <span>所属组</span>
+                  <button
+                    className="smart-suggest-btn"
+                    onClick={handleSmartGroupSuggest}
+                    disabled={isSmartGroupLoading}
+                    title="AI 智能组"
+                  >
+                    {isSmartGroupLoading ? 'AI…' : '智能组'}
+                  </button>
+                </div>
+                <button
+                  className="entry-edit-group-display"
+                  onClick={() => setShowGroupSelector(true)}
+                >
+                  <span className="entry-edit-group-icon">{groupId ? <IconFolder /> : <IconFileText />}</span>
+                  <span className="entry-edit-group-name">{getGroupName()}</span>
+                  <span className="entry-edit-group-arrow"><IconChevronRight /></span>
+                </button>
+              </div>
+
+              {/* 星标 */}
+              <div className="entry-edit-field">
+                <div className="entry-edit-label"><span>收藏</span></div>
+                <button
+                  className={`entry-edit-star-toggle ${isStarred ? 'active' : ''}`}
+                  onClick={() => setIsStarred(!isStarred)}
+                >
+                  <span className="entry-edit-star-icon">{isStarred ? <IconStar /> : <IconStarOutline />}</span>
+                  <span className="entry-edit-star-text">
+                    {isStarred ? '已收藏' : '未收藏'}
+                  </span>
+                </button>
+              </div>
+
+              {/* 来源 */}
+              <div className="entry-edit-field">
+                <div className="entry-edit-label"><span>来源</span></div>
+                <input
+                  type="text"
+                  className="entry-edit-input"
+                  value={source}
+                  onChange={e => setSource(e.target.value)}
+                  placeholder="从哪里记下的？"
+                />
+              </div>
+
+              {/* 补充信息 */}
+              <div className="entry-edit-field">
+                <div className="entry-edit-label"><span>补充</span></div>
+                <textarea
+                  className="entry-edit-textarea"
+                  value={supplement}
+                  onChange={e => setSupplement(e.target.value)}
+                  placeholder="再补一句…"
+                  rows={3}
+                />
+              </div>
+
+              {/* 图片附件（仅编辑已有条目时显示，新建模式等保存后再加） */}
+              {id && id !== 'new' && (
+                <div className="entry-edit-field">
+                  <div className="entry-edit-label">
+                    <span>图片附件</span>
+                    {attachments.length > 0 && (
+                      <span className="entry-edit-att-count">{attachments.length}</span>
+                    )}
+                  </div>
+                  <div className="entry-edit-attachments">
+                    {attachments.map((att, idx) => (
+                      <div key={att.id} className="entry-edit-att-item">
+                        <img
+                          src={thumbSrcs[att.id] || ''}
+                          alt="附件"
+                          className="entry-edit-att-thumb"
+                          onClick={() => setViewerStart(idx)}
+                          title="点击查看大图"
+                        />
+                        <button
+                          className="entry-edit-att-delete"
+                          onClick={() => handleDeleteImage(att)}
+                          title="删除"
+                        >
+                          <IconTrash />
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      className="entry-edit-att-add"
+                      onClick={handleAddImage}
+                      disabled={isPickingImage}
+                      title="添加图片"
+                    >
+                      <IconImage />
+                      <span>{isPickingImage ? '选图中…' : '添加'}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
 
       {/* 标签选择器弹层 */}
       {showTagSelector && (

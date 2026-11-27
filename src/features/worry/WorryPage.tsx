@@ -1,8 +1,10 @@
 /**
- * 「怕了么」主页面
+ * 「怕了么」主页面（v5）
  *
- * Tab「开始」：介绍 + 开始/继续一次调和
- * Tab「回顾」：趋势曲线 + 统计 + 历史列表 + 详情弹层
+ * 结构：44px 返回条 → 一张脸（38px 未处理条数 + 一行小字 + 发丝进度）→ 清单 → 底部拇指区
+ * - 「清单 / 趋势」是一枚分段小开关，不再占一整条 Tab
+ * - 每条担忧：左侧 22px 圆点是「这次真的轻了没有」的记号，右侧内容 + 时间
+ * - 模型 / 深度思考 / soul 记忆收进右上 ⋯ 的抽屉，首屏不再是一张表单
  *
  * 数据：localStorage（worryDatabase），不进任何备份
  */
@@ -20,7 +22,6 @@ import {
 import type { WorryThinkingConfig, WorryThinkingEffort } from '@/services/worryAI';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { applySoulChanges } from '@/services/soulFacts';
-import { BottomNav } from '@/components/BottomNav';
 import { TrendChart } from './components/TrendChart';
 import { RecordDetail } from './components/RecordDetail';
 import { ModelPicker } from './components/ModelPicker';
@@ -54,6 +55,8 @@ export function WorryPage() {
   const [records, setRecords] = useState<WorryRecord[]>([]);
   const [detail, setDetail] = useState<WorryRecord | null>(null);
   const [confirmNew, setConfirmNew] = useState(false);
+  /** 右上 ⋯：把模型 / 深度思考 / soul 收进抽屉 */
+  const [showSettings, setShowSettings] = useState(false);
   // 模型选择（在「开始」页设置；流程中不可改）
   const [modelValue, setModelValue] = useState(() => getWorryModelValue());
   const modelOptions = useMemo(() => buildWorryModelOptions(aiConfig), [aiConfig]);
@@ -127,25 +130,149 @@ export function WorryPage() {
     ? records.reduce((acc, r) => acc + (r.scoreBefore - (r.scoreAfter ?? r.scoreBefore)), 0) / records.length
     : 0;
 
+  /** 还压在清单里的：一次进行中的调和 + 已经聊过的 */
+  const pendingCount = records.length + (hasDraft ? 1 : 0);
+
   return (
     <div className="worry-page">
-      <header className="worry-header">
-        <h1 className="worry-title">怕了么</h1>
-        <p className="worry-slogan">把担心交出来，和它聊两句</p>
+      {/* 44px 返回条 */}
+      <header className="worry-bar">
+        <button className="worry-bar-btn" onClick={() => navigate(-1)} aria-label="返回">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="m15 18-6-6 6-6" />
+          </svg>
+        </button>
+        <span className="worry-bar-title">怕了么</span>
+        <button
+          className="worry-bar-btn"
+          onClick={() => setShowSettings(true)}
+          aria-label="调和设置"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6 1.7 1.7 0 0 0 10 3.05V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15 4.6a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9v.09a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1z" />
+          </svg>
+        </button>
       </header>
 
-      {/* 顶部 Tab */}
-      <div className="worry-tabs">
-        <button className={`worry-tab ${tab === 'use' ? 'active' : ''}`} onClick={() => setTab('use')}>
-          开始
-        </button>
-        <button className={`worry-tab ${tab === 'review' ? 'active' : ''}`} onClick={() => setTab('review')}>
-          回顾
-        </button>
-      </div>
+      {/* 设置抽屉 */}
+      {showSettings && (
+        <>
+          <div className="worry-sheet-mask" onClick={() => setShowSettings(false)} />
+          <div className="worry-sheet">
+            <span className="worry-sheet-grip" />
+            <div className="worry-sheet-head">
+              <span className="worry-sheet-title">这一次怎么聊</span>
+              <button className="worry-sheet-done" onClick={() => setShowSettings(false)}>好了</button>
+            </div>
+            <div className="worry-sheet-body">
+              {/* 模型选择（在此设置好，流程中不可改） */}
+              <div className="worry-model-row">
+                <span className="worry-model-row-label">使用模型</span>
+                <ModelPicker
+                  options={modelOptions}
+                  currentValue={modelValue}
+                  onSelect={v => {
+                    setModelValue(v);
+                    setWorryModelValue(v);
+                  }}
+                />
+              </div>
+
+              {/* v3.3.0: 深度思考开关 + 思考强度（生成时生效，流程中不可改） */}
+              <div className="worry-model-row">
+                <span className="worry-model-row-label">深度思考</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={thinking.enabled}
+                  className={`worry-switch ${thinking.enabled ? 'on' : ''}`}
+                  onClick={handleToggleThinking}
+                  title="深度思考模式（更慢但更细致）"
+                >
+                  <span className="worry-switch-knob" />
+                </button>
+              </div>
+              {thinking.enabled && (
+                <div className="worry-model-row">
+                  <span className="worry-model-row-label">思考强度</span>
+                  <div className="worry-effort-seg">
+                    {(['high', 'max'] as const).map(e => (
+                      <button
+                        key={e}
+                        type="button"
+                        className={`worry-effort-btn ${thinking.effort === e ? 'active' : ''}`}
+                        onClick={() => handleSetEffort(e)}
+                      >
+                        {e === 'max' ? 'MAX' : 'High'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* v3.3.0: 启用 soul 记忆（注入人格档案；反转牌时 AI 可提议更新） */}
+              <div className="worry-model-row">
+                <span className="worry-model-row-label">引用 soul 记忆</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={soulEnabled}
+                  className={`worry-switch ${soulEnabled ? 'on' : ''}`}
+                  onClick={handleToggleSoul}
+                  title="生成时参考你的人格档案"
+                >
+                  <span className="worry-switch-knob" />
+                </button>
+              </div>
+              {soulEnabled && (
+                <p className="worry-soul-toggle-hint">
+                  生成时会参考你的人格档案（在「设置 → AI 配置」里编辑）；反转牌时 AI 可提议更新档案，建议会先挂到本页等你确认。
+                </p>
+              )}
+            </div>
+          </div>
+        </>
+      )}
 
       <main className="worry-main">
-        {/* ===== 开始 ===== */}
+        {/* 一张脸：38px 未处理条数 + 一行小字 + 发丝进度 */}
+        <section className="worry-face">
+          <div className="worry-face-top">
+            <span className="worry-face-num">{pendingCount}</span>
+            <span className="worry-face-meta">件还在心里</span>
+          </div>
+          <p className="worry-face-sub">
+            {records.length > 0
+              ? `聊过 ${records.length} 次${lastRecord ? ` · 最近 ${lastRecord.scoreBefore} → ${lastRecord.scoreAfter ?? '—'}` : ''}`
+              : '还没聊过。担心的时候，来这儿把它摊开看看。'}
+          </p>
+          <span className="worry-face-line">
+            <i style={{ width: `${Math.min(100, Math.round((avgDrop / 10) * 100))}%` }} />
+          </span>
+        </section>
+
+        {/* 清单 / 趋势 分段开关 */}
+        <div className="worry-seg" role="tablist">
+          <button
+            role="tab"
+            aria-selected={tab === 'use'}
+            className={`worry-seg-btn ${tab === 'use' ? 'on' : ''}`}
+            onClick={() => setTab('use')}
+          >
+            清单
+          </button>
+          <button
+            role="tab"
+            aria-selected={tab === 'review'}
+            className={`worry-seg-btn ${tab === 'review' ? 'on' : ''}`}
+            onClick={() => setTab('review')}
+          >
+            趋势
+          </button>
+        </div>
+
+        {/* ===== 清单 ===== */}
         {tab === 'use' && (
           <div className="worry-use-section">
             {/* v3.3.0: AI 提议的 Soul 档案更新（挂在这里等待确认；确认后才写入） */}
@@ -169,129 +296,76 @@ export function WorryPage() {
                   ))}
                 </div>
                 <div className="worry-two-buttons">
-                  <button className="worry-btn-secondary" onClick={handleDeclineSoul}>
+                  <button className="worry-btn-ghost" onClick={handleDeclineSoul}>
                     保持不变
                   </button>
-                  <button className="worry-btn-primary" onClick={handleAcceptSoul}>
+                  <button className="worry-btn-primary worry-btn-inline" onClick={handleAcceptSoul}>
                     同意更新
                   </button>
                 </div>
               </div>
             )}
 
-            <div className="worry-intro-card">
-              <p className="worry-intro-line">担心的时候，脑子里的画面往往比现实可怕。</p>
-              <p className="worry-intro-line">用两个小步骤，帮自己看个清楚——大约只要两分钟。</p>
-            </div>
-
-            {/* 模型选择（在此设置好，流程中不可改） */}
-            <div className="worry-model-row">
-              <span className="worry-model-row-label">使用模型</span>
-              <ModelPicker
-                options={modelOptions}
-                currentValue={modelValue}
-                onSelect={v => {
-                  setModelValue(v);
-                  setWorryModelValue(v);
-                }}
-              />
-            </div>
-
-            {/* v3.3.0: 深度思考开关 + 思考强度（生成时生效，流程中不可改） */}
-            <div className="worry-model-row">
-              <span className="worry-model-row-label">深度思考</span>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={thinking.enabled}
-                className={`worry-switch ${thinking.enabled ? 'on' : ''}`}
-                onClick={handleToggleThinking}
-                title="深度思考模式（更慢但更细致）"
-              >
-                <span className="worry-switch-knob" />
-              </button>
-            </div>
-            {thinking.enabled && (
-              <div className="worry-model-row">
-                <span className="worry-model-row-label">思考强度</span>
-                <div className="worry-effort-seg">
-                  {(['high', 'max'] as const).map(e => (
-                    <button
-                      key={e}
-                      type="button"
-                      className={`worry-effort-btn ${thinking.effort === e ? 'active' : ''}`}
-                      onClick={() => handleSetEffort(e)}
-                    >
-                      {e === 'max' ? 'MAX' : 'High'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* v3.3.0: 启用 soul 记忆（注入人格档案；反转牌时 AI 可提议更新） */}
-            <div className="worry-model-row">
-              <span className="worry-model-row-label">启用 soul 记忆</span>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={soulEnabled}
-                className={`worry-switch ${soulEnabled ? 'on' : ''}`}
-                onClick={handleToggleSoul}
-                title="生成时参考你的人格档案"
-              >
-                <span className="worry-switch-knob" />
-              </button>
-            </div>
-            {soulEnabled && (
-              <p className="worry-soul-toggle-hint">
-                生成时会参考你的人格档案（在「设置 → AI 配置」里编辑）；反转牌时 AI 可提议更新档案，建议会先挂到本页等你确认。
-              </p>
-            )}
-
-            {hasDraft ? (
-              <>
-                <button className="worry-btn-primary worry-btn-big" onClick={() => navigate('/worries/flow')}>
-                  继续上次的调和
+            <div className="worry-list">
+              {hasDraft && (
+                <button
+                  className="worry-row is-live s-item"
+                  onClick={() => navigate('/worries/flow')}
+                >
+                  <span className="worry-row-mark is-live" aria-hidden>
+                    <i />
+                  </span>
+                  <span className="worry-row-body">
+                    <span className="worry-row-text">
+                      {draft.content.trim() || '还没写下担心的那件事'}
+                    </span>
+                    <span className="worry-row-meta">进行到第 {draft.step} 步 · 点一下接着聊</span>
+                  </span>
                 </button>
-                <p className="worry-draft-hint">
-                  {draft.content ? `「${draft.content.slice(0, 20)}${draft.content.length > 20 ? '…' : ''}」` : ''}
-                  进行到第 {draft.step} 步
-                </p>
-                {confirmNew ? (
-                  <div className="worry-confirm-row">
-                    <span className="worry-confirm-text">放弃上一次，重新开始？</span>
-                    <button className="worry-btn-danger" onClick={() => void startFresh()}>确认</button>
-                    <button className="worry-btn-ghost" onClick={() => setConfirmNew(false)}>取消</button>
-                  </div>
-                ) : (
-                  <button className="worry-btn-ghost" onClick={() => setConfirmNew(true)}>
-                    重新开始
-                  </button>
-                )}
-              </>
-            ) : (
-              <button className="worry-btn-primary worry-btn-big" onClick={() => void startFresh()}>
-                开始一次调和
-              </button>
-            )}
+              )}
 
-            {records.length > 0 && (
-              <p className="worry-use-stats">
-                已完成 {records.length} 次
-                {lastRecord && ` · 最近一次 ${lastRecord.scoreBefore} → ${lastRecord.scoreAfter ?? '—'}`}
-              </p>
-            )}
+              {records.map(r => {
+                const eased = r.scoreAfter !== null && r.scoreAfter < r.scoreBefore;
+                return (
+                  <button
+                    key={r.id}
+                    className="worry-row s-item"
+                    onClick={() => setDetail(r)}
+                  >
+                    <span className={`worry-row-mark ${eased ? 'is-done' : ''}`} aria-hidden>
+                      {eased && (
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.4" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="m5 13 4 4L19 7" />
+                        </svg>
+                      )}
+                    </span>
+                    <span className="worry-row-body">
+                      <span className="worry-row-text">{r.content}</span>
+                      <span className="worry-row-meta">
+                        {formatListDate(r.updatedAt)} · {r.scoreBefore} → {r.scoreAfter ?? '—'}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+
+              {!hasDraft && records.length === 0 && (
+                <div className="s-empty">
+                  <b>心里是空的</b>
+                  <span>真有事压着的时候，再来也不迟。</span>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
-        {/* ===== 回顾 ===== */}
+        {/* ===== 趋势 ===== */}
         {tab === 'review' && (
           <div className="worry-review-section">
             {records.length === 0 ? (
-              <div className="worry-empty">
-                <p>完成第一次调和后，</p>
-                <p>这里会长出一条温柔的趋势。</p>
+              <div className="s-empty">
+                <b>还没有一条线</b>
+                <span>完成第一次调和后，这里会长出一条趋势。</span>
               </div>
             ) : (
               <>
@@ -306,16 +380,16 @@ export function WorryPage() {
 
                 <div className="worry-list">
                   {records.map(r => (
-                    <button key={r.id} className="worry-list-item" onClick={() => setDetail(r)}>
-                      <div className="worry-list-top">
-                        <span className="worry-list-date">{formatListDate(r.updatedAt)}</span>
-                        <span className="worry-list-score">
-                          <i className="before">{r.scoreBefore}</i>
-                          <span className="worry-list-arrow">→</span>
-                          <i className="after">{r.scoreAfter ?? '—'}</i>
+                    <button key={r.id} className="worry-row s-item" onClick={() => setDetail(r)}>
+                      <span className="worry-row-mark is-score" aria-hidden>
+                        {r.scoreAfter ?? '—'}
+                      </span>
+                      <span className="worry-row-body">
+                        <span className="worry-row-text">{r.content}</span>
+                        <span className="worry-row-meta">
+                          {formatListDate(r.updatedAt)} · {r.scoreBefore} → {r.scoreAfter ?? '—'}
                         </span>
-                      </div>
-                      <p className="worry-list-content">{r.content}</p>
+                      </span>
                     </button>
                   ))}
                 </div>
@@ -325,7 +399,39 @@ export function WorryPage() {
         )}
       </main>
 
-      <BottomNav />
+      {/* 底部拇指区：一处主按钮，一处文字按钮 */}
+      <div className="worry-dock">
+        {confirmNew ? (
+          <div className="worry-confirm-row">
+            <span className="worry-confirm-text">放弃上一次，重新开始？</span>
+            <button className="worry-btn-danger" onClick={() => void startFresh()}>确认</button>
+            <button className="worry-btn-ghost worry-btn-inline" onClick={() => setConfirmNew(false)}>取消</button>
+          </div>
+        ) : (
+          <>
+            {hasDraft ? (
+              <button
+                className="worry-btn-primary worry-btn-big"
+                onClick={() => navigate('/worries/flow')}
+              >
+                继续上次的调和
+              </button>
+            ) : (
+              <button
+                className="worry-btn-primary worry-btn-big"
+                onClick={() => void startFresh()}
+              >
+                开始一次调和
+              </button>
+            )}
+            {hasDraft && (
+              <button className="worry-dock-text" onClick={() => setConfirmNew(true)}>
+                重新开始一次
+              </button>
+            )}
+          </>
+        )}
+      </div>
 
       {/* 详情弹层 */}
       <RecordDetail

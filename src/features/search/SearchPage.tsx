@@ -1,6 +1,10 @@
 /**
  * 搜索页面
- * 全文搜索 + 结果列表 + 一键复制
+ *
+ * 结构：探照灯。
+ * 顶部没有「框」，只有一条 40px 的输入线：字号 22、底部一根 1px 的线，
+ * 聚焦时线变成珊瑚色，其余元素（模式、推荐词、筛选）淡到 0.35，只剩这条线是焦点。
+ * 结果是按时间分组的竖线时间轴：今天 / 本周 / 更早，每条一个点（命中关键词实心）。
  */
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -8,7 +12,6 @@ import { useEntryStore } from '@/stores/entryStore';
 import { useTagStore } from '@/stores/tagStore';
 import { useTodoStore } from '@/stores/todoStore';
 import { getDatabase } from '@/services/database';
-import { BottomNav } from '@/components/BottomNav';
 import { QuickMenu } from '@/features/random/QuickMenu';
 import { TagSelector } from '@/components/TagSelector';
 import { TIME_RANGE_PRESETS, resolveTimeRange, timeRangeLabel, sanitizeTimeRangeState } from '@/utils/timeRangeFilter';
@@ -18,8 +21,14 @@ import './SearchPage.css';
 
 /** SVG icons (stroke-based, viewBox="0 0 24 24", strokeWidth="1.5") */
 const SearchIcon = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+  </svg>
+);
+
+const ChevronLeftIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="m15 18-6-6 6-6"/>
   </svg>
 );
 
@@ -36,28 +45,21 @@ const StarOutlineIcon = () => (
 );
 
 const CloseIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
     <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
   </svg>
 );
 
 const PaperclipIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
     <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 17.93 8.83l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
   </svg>
 );
 
 const PaperclipOffIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
     <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 17.93 8.83l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
     <path d="m2 2 20 20"/>
-  </svg>
-);
-
-const LightbulbIcon = () => (
-  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/>
-    <path d="M9 18h6"/><path d="M10 22h4"/>
   </svg>
 );
 
@@ -101,6 +103,32 @@ function persistTimeFilter(state: TimeRangeState): void {
   }
 }
 
+/* === 结果按时间分堆（今天 / 本周 / 更早），堆内保持原顺序 === */
+interface TimeGroup {
+  key: string;
+  label: string;
+  items: Entry[];
+}
+
+function groupEntriesByTime(list: Entry[]): TimeGroup[] {
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const startOfWeek = startOfToday - 6 * 24 * 60 * 60 * 1000;
+  const today: Entry[] = [];
+  const week: Entry[] = [];
+  const older: Entry[] = [];
+  for (const e of list) {
+    if (e.createdAt >= startOfToday) today.push(e);
+    else if (e.createdAt >= startOfWeek) week.push(e);
+    else older.push(e);
+  }
+  return [
+    { key: 'today', label: '今天', items: today },
+    { key: 'week', label: '本周', items: week },
+    { key: 'older', label: '更早', items: older },
+  ].filter(g => g.items.length > 0);
+}
+
 export function SearchPage() {
   const [keyword, setKeyword] = useState('');
   const [results, setResults] = useState<Entry[]>([]);
@@ -134,6 +162,9 @@ export function SearchPage() {
   const [matchedTags, setMatchedTags] = useState<Tag[]>([]); // 关键字匹配的标签
   const [activeTagId, setActiveTagId] = useState<string | null>(null); // 当前激活的标签
   const [linkedTags, setLinkedTags] = useState<{ tag: Tag; count: number }[]>([]); // 关联标签推荐
+
+  // 输入行是否聚焦 —— 聚焦时页面其它东西退到 0.35
+  const [inputFocused, setInputFocused] = useState(false);
 
   const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -350,38 +381,88 @@ export function SearchPage() {
     showToastMessage('已保存为智能标签');
   }, [smartTagName, keyword, selectedTagIds, filterStarred, filterHasAttachment]);
 
+  // 有可保存的搜索条件时，右上角才出现「存为标签」
+  const canSaveSmartTag = !todoMode
+    && (!!keyword || selectedTagIds.length > 0 || filterStarred !== undefined || filterHasAttachment !== undefined);
+
+  const hasAnyCondition = !!keyword
+    || selectedTagIds.length > 0
+    || filterStarred !== undefined
+    || filterHasAttachment !== undefined
+    || !!timeFilter.preset;
+
+  const keywordLower = keyword.trim().toLowerCase();
+  const groups = groupEntriesByTime(results);
+
   return (
-    <div className="search-page">
-      <main className="page-content">
-        {/* 搜索框 */}
-        <div className="search-input-wrapper glass">
-          <span className="search-icon"><SearchIcon /></span>
-          <input
-            ref={inputRef}
-            type="text"
-            className="search-input"
-            placeholder={todoMode ? "搜索待办..." : "搜索内容或标签..."}
-            value={keyword}
-            onChange={e => {
-              setKeyword(e.target.value);
-              if (!todoMode) handleTagSearch(e.target.value);
-            }}
-          />
-          {keyword && (
-            <button className="clear-btn" onClick={() => { setKeyword(''); setMatchedTags([]); setTagSearchMode(false); }}><CloseIcon /></button>
-          )}
+    <div className={`sp-page${inputFocused ? ' is-focus' : ''}`}>
+      {/* 44px 顶条：返回 / 标题 / 一个动作位 */}
+      <header className="sp-bar">
+        <button className="sp-bar-btn" onClick={() => navigate(-1)} aria-label="返回">
+          <ChevronLeftIcon />
+        </button>
+        <span className="sp-bar-title">搜索</span>
+        {canSaveSmartTag ? (
+          <button className="sp-bar-action" onClick={() => setShowSaveSmartTag(true)}>存为标签</button>
+        ) : (
+          <span className="sp-bar-slot" aria-hidden />
+        )}
+      </header>
+
+      {/* 一条线，不是一只框 */}
+      <div className="sp-searchrow">
+        <span className="sp-searchrow-icon"><SearchIcon /></span>
+        <input
+          ref={inputRef}
+          type="text"
+          className="sp-input"
+          placeholder={todoMode ? '搜待办' : '搜记忆正文，也可以搜标签'}
+          value={keyword}
+          onChange={e => {
+            setKeyword(e.target.value);
+            if (!todoMode) handleTagSearch(e.target.value);
+          }}
+          onFocus={() => setInputFocused(true)}
+          onBlur={() => setInputFocused(false)}
+        />
+        {keyword && (
+          <button
+            className="sp-clear"
+            aria-label="清空"
+            onClick={() => { setKeyword(''); setMatchedTags([]); setTagSearchMode(false); }}
+          >
+            <CloseIcon />
+          </button>
+        )}
+      </div>
+
+      <div className="sp-body">
+        {/* 模式：两个词，选中的那条带一根短线 */}
+        <div className="sp-modes sp-dim">
+          <button
+            className={`sp-mode${!todoMode ? ' is-on' : ''}`}
+            onClick={() => { setTodoMode(false); setTodoResults([]); }}
+          >
+            笔记
+          </button>
+          <button
+            className={`sp-mode${todoMode ? ' is-on' : ''}`}
+            onClick={() => { setTodoMode(true); setResults([]); }}
+          >
+            待办
+          </button>
         </div>
 
-        {/* 修复7：标签搜索匹配结果 */}
+        {/* 修复7：标签搜索匹配结果 —— 一行可滑的胶囊 */}
         {!todoMode && tagSearchMode && matchedTags.length > 0 && (
-          <div className="tag-search-results">
-            <div className="tag-search-label">匹配的标签：</div>
-            <div className="tag-search-list">
+          <div className="sp-suggest sp-dim">
+            <span className="sp-suggest-label">标签</span>
+            <div className="sp-pillrow">
               {matchedTags.map(tag => (
                 <button
                   key={tag.id}
-                  className={`tag-search-chip ${activeTagId === tag.id ? 'active' : ''}`}
-                  style={tag.color ? { borderColor: tag.color, color: tag.color } : undefined}
+                  className={`sp-pill${activeTagId === tag.id ? ' is-on' : ''}`}
+                  style={tag.color ? { color: tag.color } : undefined}
                   onClick={() => handleTagClick(tag.id)}
                 >
                   #{tag.name}
@@ -393,93 +474,76 @@ export function SearchPage() {
 
         {/* 修复7：关联标签推荐栏 */}
         {!todoMode && activeTagId && linkedTags.length > 0 && (
-          <div className="linked-tags-bar">
-            <div className="linked-tags-label">拥有这个标签的数据还链接了：</div>
-            <div className="linked-tags-list">
+          <div className="sp-suggest sp-dim">
+            <span className="sp-suggest-label">常一起出现</span>
+            <div className="sp-pillrow">
               {linkedTags.map(({ tag, count }) => (
                 <button
                   key={tag.id}
-                  className={`linked-tag-chip ${activeTagId === tag.id ? 'active' : ''}`}
-                  style={tag.color ? { borderColor: tag.color } : undefined}
+                  className={`sp-pill${activeTagId === tag.id ? ' is-on' : ''}`}
+                  style={tag.color ? { color: tag.color } : undefined}
                   onClick={() => handleSwitchTag(tag.id)}
                 >
-                  #{tag.name} ({count})
+                  #{tag.name} <i>{count}</i>
                 </button>
               ))}
             </div>
           </div>
         )}
 
-        {/* 模式切换 */}
-        <div className="search-mode-tabs">
-          <button
-            className={`search-mode-tab ${!todoMode ? 'active' : ''}`}
-            onClick={() => { setTodoMode(false); setTodoResults([]); }}
-          >
-            笔记搜索
-          </button>
-          <button
-            className={`search-mode-tab ${todoMode ? 'active' : ''}`}
-            onClick={() => { setTodoMode(true); setResults([]); }}
-          >
-            待办搜索
-          </button>
-        </div>
-
-        {/* 待办搜索筛选 */}
+        {/* 筛选：一排安静的胶囊，输入时退场 */}
         {todoMode ? (
-          <div className="filter-bar">
+          <div className="sp-chips sp-dim">
             <button
-              className={`filter-chip ${todoTimeFilter === 'future' ? 'active' : ''}`}
+              className={`sp-chip${todoTimeFilter === 'future' ? ' is-on' : ''}`}
               onClick={() => setTodoTimeFilter('future')}
             >
-              <span>未来待办</span>
+              未来待办
             </button>
             <button
-              className={`filter-chip ${todoTimeFilter === 'expired' ? 'active' : ''}`}
+              className={`sp-chip${todoTimeFilter === 'expired' ? ' is-on' : ''}`}
               onClick={() => setTodoTimeFilter('expired')}
             >
-              <span>已过期</span>
+              已过期
             </button>
             <button
-              className={`filter-chip ${todoTimeFilter === 'expiredOverMonth' ? 'active' : ''}`}
+              className={`sp-chip${todoTimeFilter === 'expiredOverMonth' ? ' is-on' : ''}`}
               onClick={() => setTodoTimeFilter('expiredOverMonth')}
             >
-              <span>回收站(30天+)</span>
+              回收站 30 天+
             </button>
           </div>
         ) : (
-          /* 笔记筛选栏 */
-          <div className="filter-bar">
+          <div className="sp-chips sp-dim">
             <button
-              className={`filter-chip ${filterStarred !== undefined ? 'active' : ''}`}
+              className={`sp-chip${filterStarred !== undefined ? ' is-on' : ''}`}
               onClick={toggleStarFilter}
             >
-              <span>{filterStarred === false ? <StarOutlineIcon /> : <StarFilledIcon />}</span>
+              <span className="sp-chip-icon">{filterStarred === false ? <StarOutlineIcon /> : <StarFilledIcon />}</span>
               <span>{filterStarred === false ? '未星标' : filterStarred ? '已星标' : '全部'}</span>
             </button>
 
             <button
-              className={`filter-chip ${filterHasAttachment !== undefined ? 'active' : ''}`}
+              className={`sp-chip${filterHasAttachment !== undefined ? ' is-on' : ''}`}
               onClick={toggleAttachmentFilter}
             >
-              <span>{filterHasAttachment === false ? <PaperclipOffIcon /> : <PaperclipIcon />}</span>
+              <span className="sp-chip-icon">{filterHasAttachment === false ? <PaperclipOffIcon /> : <PaperclipIcon />}</span>
               <span>{filterHasAttachment === false ? '无附件' : filterHasAttachment ? '有附件' : '附件'}</span>
             </button>
 
             {/* v2.10.0: 时间范围筛选（点击展开） */}
             <button
-              className={`filter-chip ${timeFilter.preset ? 'active' : ''}`}
+              className={`sp-chip${timeFilter.preset ? ' is-on' : ''}`}
               onClick={() => setShowTimePanel(v => !v)}
             >
-              <span><ClockIcon /></span>
+              <span className="sp-chip-icon"><ClockIcon /></span>
               <span>{timeRangeLabel(timeFilter)}</span>
             </button>
 
             {tags.map(tag => (
               <button
                 key={tag.id}
-                className={`filter-chip ${selectedTagIds.includes(tag.id) ? 'active' : ''}`}
+                className={`sp-chip${selectedTagIds.includes(tag.id) ? ' is-on' : ''}`}
                 onClick={() => toggleTagFilter(tag.id)}
               >
                 #{tag.name}
@@ -490,160 +554,156 @@ export function SearchPage() {
 
         {/* v2.10.0: 时间范围筛选面板（近1/3/7天 / 自定义日期；选择会被缓存） */}
         {!todoMode && showTimePanel && (
-          <div className="time-filter-panel glass">
-            <div className="time-filter-presets">
+          <div className="sp-timepanel">
+            <div className="sp-pillrow">
               {TIME_RANGE_PRESETS.map(p => (
                 <button
                   key={p.key}
-                  className={`time-filter-chip ${timeFilter.preset === p.key ? 'active' : ''}`}
+                  className={`sp-pill${timeFilter.preset === p.key ? ' is-on' : ''}`}
                   onClick={() => handleTimePresetClick(p.key)}
                 >
                   {p.label}
                 </button>
               ))}
               <button
-                className={`time-filter-chip ${timeFilter.preset === 'custom' ? 'active' : ''}`}
+                className={`sp-pill${timeFilter.preset === 'custom' ? ' is-on' : ''}`}
                 onClick={() => applyTimeFilter({ ...timeFilter, preset: 'custom' })}
               >
                 自由选择
               </button>
               {timeFilter.preset && (
-                <button className="time-filter-clear" onClick={() => applyTimeFilter({})}>
+                <button className="sp-pill-clear" onClick={() => applyTimeFilter({})}>
                   清除
                 </button>
               )}
             </div>
             {timeFilter.preset === 'custom' && (
-              <div className="time-filter-custom">
+              <div className="sp-daterow">
                 <input
                   type="date"
-                  className="time-filter-date"
+                  className="sp-date"
                   value={timeFilter.from || ''}
                   onChange={e => handleCustomDateChange('from', e.target.value)}
                 />
-                <span className="time-filter-sep">至</span>
+                <span className="sp-date-sep">至</span>
                 <input
                   type="date"
-                  className="time-filter-date"
+                  className="sp-date"
                   value={timeFilter.to || ''}
                   onChange={e => handleCustomDateChange('to', e.target.value)}
                 />
               </div>
             )}
-            <div className="time-filter-hint">按「修改时间」筛选（编辑 / 星标 / 复制过的都算）</div>
+            <div className="sp-timehint">按「修改时间」筛选（编辑 / 星标 / 复制过的都算）</div>
           </div>
         )}
 
-        {/* 保存为智能标签 */}
-        {!todoMode && (keyword || selectedTagIds.length > 0 || filterStarred !== undefined || filterHasAttachment !== undefined) && (
-          <button
-            className="save-smart-tag-btn"
-            onClick={() => setShowSaveSmartTag(true)}
-          >
-            保存为智能标签
-          </button>
-        )}
-
-        {/* 搜索结果 */}
-        <div className="search-results">
+        {/* 结果：竖线时间轴 */}
+        <div className="sp-results">
           {isSearching ? (
-            <div className="search-loading">
-              <div className="loading-spinner small" />
-            </div>
+            <div className="sp-loading"><div className="sp-spinner" /></div>
           ) : todoMode ? (
-            /* 待办搜索结果 */
             todoResults.length > 0 ? (
-              todoResults.map(todo => (
-                <div
-                  key={todo.id}
-                  className="result-item glass todo-search-result"
-                >
-                  <div className="result-content">
-                    <span className={`todo-status-badge ${todo.status}`}>●</span>
-                    {todo.title}
+              <div className="sp-timeline">
+                {todoResults.map(todo => (
+                  <div key={todo.id} className="sp-row sp-row--todo">
+                    <span className={`sp-dot${todo.status === 'done' ? ' is-done' : ''}`} />
+                    <div className="sp-row-main">
+                      <div className="sp-row-title">{todo.title}</div>
+                      <div className="sp-row-meta">
+                        {todo.folderDate && <span className="sp-row-time">{todo.folderDate}</span>}
+                        {todo.deletedAt && <span className="sp-deleted">已删除</span>}
+                      </div>
+                    </div>
                   </div>
-                  <div className="result-meta">
-                    {todo.folderDate && (
-                      <span className="meta-time">{todo.folderDate}</span>
-                    )}
-                    {todo.deletedAt && (
-                      <span className="meta-deleted">已删除</span>
-                    )}
-                  </div>
-                </div>
-              ))
+                ))}
+              </div>
             ) : keyword ? (
-              <div className="empty-results">
-                <span className="empty-icon"><SearchIcon /></span>
-                <p className="empty-text">没有找到相关待办</p>
+              <div className="s-empty">
+                <b>没找到「{keyword}」</b>
+                <span>换个词，或者切到「笔记」看看。</span>
               </div>
             ) : (
-              <div className="search-hint">
-                <span className="hint-icon"><LightbulbIcon /></span>
-                <p>输入关键词搜索待办</p>
-                <p className="hint-sub">可筛选未来/已过期/回收站</p>
+              <div className="sp-hint">
+                <b>输入关键词，找一条待办</b>
+                <span>可按未来 / 过期 / 回收站筛。</span>
               </div>
             )
           ) : results.length > 0 ? (
-            results.map(entry => (
-              <div
-                key={entry.id}
-                className="result-item glass"
-                onClick={() => handleCopy(entry)}
-                onMouseDown={() => handlePressStart(entry)}
-                onMouseUp={() => handlePressEnd(entry.id)}
-                onMouseLeave={() => handlePressEnd(entry.id)}
-                onTouchStart={() => handlePressStart(entry)}
-                onTouchEnd={() => handlePressEnd(entry.id)}
-              >
-                <div className="result-content">
-                  {entry.content}
-                </div>
-                <div className="result-meta">
-                  {entry.isStarred && <span className="meta-icon"><StarFilledIcon /></span>}
-                  {entry.tags && entry.tags.length > 0 && (
-                    <span className="meta-tags-count">{entry.tags.length} 标签</span>
-                  )}
-                  <span className="meta-time">
-                    {new Date(entry.createdAt).toLocaleDateString('zh-CN')}
-                  </span>
-                  {/* v2.12.0: 直达卡片浏览页（不触发复制/长按） */}
-                  <button
-                    className="result-view-btn"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      navigate(`/entry/${entry.id}`);
-                    }}
-                    onMouseDown={(e) => e.stopPropagation()}
-                    onMouseUp={(e) => e.stopPropagation()}
-                    onTouchStart={(e) => e.stopPropagation()}
-                    onTouchEnd={(e) => e.stopPropagation()}
-                    title="浏览卡片"
-                    aria-label="浏览卡片"
-                  >
-                    <ChevronRightIcon />
-                  </button>
-                </div>
-              </div>
-            ))
-          ) : keyword || selectedTagIds.length > 0 || filterStarred !== undefined || filterHasAttachment !== undefined || timeFilter.preset ? (
-            <div className="empty-results">
-              <span className="empty-icon"><SearchIcon /></span>
-              <p className="empty-text">没有找到相关内容</p>
+            <div className="sp-timeline">
+              {groups.map(group => (
+                <section key={group.key} className="sp-group">
+                  <h2 className="sp-group-title">{group.label}</h2>
+                  {group.items.map((entry, i) => {
+                    const nl = entry.content.indexOf('\n');
+                    const title = nl === -1 ? entry.content : entry.content.slice(0, nl);
+                    const summary = nl === -1 ? '' : entry.content.slice(nl + 1).trim();
+                    const hit = keywordLower.length > 0 && entry.content.toLowerCase().includes(keywordLower);
+                    return (
+                      <div
+                        key={entry.id}
+                        className="sp-row sp-item"
+                        style={{ animationDelay: `${Math.min(i, 6) * 35}ms` }}
+                        onClick={() => handleCopy(entry)}
+                        onMouseDown={() => handlePressStart(entry)}
+                        onMouseUp={() => handlePressEnd(entry.id)}
+                        onMouseLeave={() => handlePressEnd(entry.id)}
+                        onTouchStart={() => handlePressStart(entry)}
+                        onTouchEnd={() => handlePressEnd(entry.id)}
+                      >
+                        <span className={`sp-dot${hit ? ' is-hit' : ''}`} />
+                        <div className="sp-row-main">
+                          <div className="sp-row-title">{title}</div>
+                          {summary && <p className="sp-row-sum">{summary}</p>}
+                          <div className="sp-row-meta">
+                            {entry.isStarred && <span className="sp-row-star"><StarFilledIcon /></span>}
+                            {entry.tags && entry.tags.length > 0 && (
+                              <span className="sp-row-tagcount">{entry.tags.length} 标签</span>
+                            )}
+                            <span className="sp-row-time">
+                              {new Date(entry.createdAt).toLocaleDateString('zh-CN')}
+                            </span>
+                          </div>
+                        </div>
+                        {/* v2.12.0: 直达卡片浏览页（不触发复制/长按） */}
+                        <button
+                          className="sp-open"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigate(`/entry/${entry.id}`);
+                          }}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          onMouseUp={(e) => e.stopPropagation()}
+                          onTouchStart={(e) => e.stopPropagation()}
+                          onTouchEnd={(e) => e.stopPropagation()}
+                          title="浏览卡片"
+                          aria-label="浏览卡片"
+                        >
+                          <ChevronRightIcon />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </section>
+              ))}
+            </div>
+          ) : hasAnyCondition ? (
+            <div className="s-empty">
+              <b>{keyword ? `没找到「${keyword}」` : '这些条件下一片空白'}</b>
+              <span>换个词，或者把筛选放宽一点。</span>
             </div>
           ) : (
-            <div className="search-hint">
-              <span className="hint-icon"><LightbulbIcon /></span>
-              <p>输入关键词开始搜索</p>
-              <p className="hint-sub">点击结果即可复制</p>
+            <div className="sp-hint">
+              <b>搜记忆正文，也可以搜标签</b>
+              <span>点一条结果，内容就复制了；长按有更多动作。</span>
             </div>
           )}
         </div>
-      </main>
+      </div>
 
       {/* 轻提示 */}
       {toastMsg && (
-        <div className="toast glass">
+        <div className="sp-toast">
           <span>{toastMsg}</span>
         </div>
       )}
@@ -734,22 +794,22 @@ export function SearchPage() {
 
       {/* 保存为智能标签弹窗 */}
       {showSaveSmartTag && (
-        <div className="confirm-overlay" onClick={() => setShowSaveSmartTag(false)}>
-          <div className="confirm-dialog glass" onClick={e => e.stopPropagation()}>
-            <h3>保存为智能标签</h3>
-            <p>当前搜索条件将被保存为一个智能标签</p>
+        <div className="sp-dialog-overlay" onClick={() => setShowSaveSmartTag(false)}>
+          <div className="sp-dialog" onClick={e => e.stopPropagation()}>
+            <h3>存为智能标签</h3>
+            <p>当前的搜索条件会变成一个标签，以后点一下就回到这里。</p>
             <input
               type="text"
-              className="smart-tag-input"
-              placeholder="智能标签名称..."
+              className="sp-dialog-input"
+              placeholder="给它起个名字"
               value={smartTagName}
               onChange={e => setSmartTagName(e.target.value)}
               autoFocus
             />
-            <div className="confirm-actions">
-              <button onClick={() => setShowSaveSmartTag(false)}>取消</button>
+            <div className="sp-dialog-actions">
+              <button className="sp-dialog-btn" onClick={() => setShowSaveSmartTag(false)}>取消</button>
               <button
-                className="primary"
+                className="sp-dialog-btn sp-dialog-btn--primary"
                 onClick={handleSaveSmartTag}
                 disabled={!smartTagName.trim()}
               >
@@ -759,8 +819,6 @@ export function SearchPage() {
           </div>
         </div>
       )}
-
-      <BottomNav />
     </div>
   );
 }

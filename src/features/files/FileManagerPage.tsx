@@ -43,7 +43,7 @@ import { extractWorkCover } from '@/utils/workCover';
 import { bytesToBase64 } from '@/services/traeImage';
 import { describeBundleResult, importBundle, looksLikeZip } from '@/services/workBundle';
 import { localDateKey } from '@/utils/localDate';
-import { IconBack, IconFile, IconPlus, IconTrash, IconCopy, IconEdit, IconCheck } from '@/components/icons';
+import { IconBack, IconPlus, IconTrash, IconCopy, IconEdit, IconCheck, IconMore } from '@/components/icons';
 import { goBack } from '@/utils/navBack';
 import './Files.css';
 
@@ -51,9 +51,9 @@ type Filter = 'all' | 'html' | 'text' | 'other';
 
 const FILTERS: Array<{ key: Filter; label: string }> = [
   { key: 'all', label: '全部' },
-  { key: 'html', label: 'HTML' },
+  { key: 'html', label: '网页' },
   { key: 'text', label: '文本' },
-  { key: 'other', label: '其他' },
+  { key: 'other', label: '其它' },
 ];
 
 const IMPORT_ACCEPT = '.html,.htm,.txt,.md,.markdown,.css,.js,.json,.csv,.svg,.xml,.yml,.yaml,.png,.jpg,.jpeg,.gif,.webp,.zip';
@@ -125,6 +125,9 @@ export function FileManagerPage({ embedded = false }: FileManagerPageProps) {
   const [menuFor, setMenuFor] = useState<WorkInfo | null>(null);
   const [toast, setToast] = useState('');
   const [importing, setImporting] = useState('');
+  const [barMenu, setBarMenu] = useState(false);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const pressTimerRef = useRef<number | null>(null);
 
@@ -222,6 +225,39 @@ export function FileManagerPage({ embedded = false }: FileManagerPageProps) {
     if (pressTimerRef.current) {
       window.clearTimeout(pressTimerRef.current);
       pressTimerRef.current = null;
+    }
+  };
+
+  // ===== 选择模式（格子右上角小标记进入，只复用已有的删除/置顶动作） =====
+  const exitSelect = () => {
+    setSelectMode(false);
+    setSelected(new Set());
+  };
+
+  const toggleSelect = (name: string) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    setSelected(prev => (prev.size >= items.length ? new Set<string>() : new Set(items.map(i => i.work.name))));
+  };
+
+  const handleDeleteSelected = async () => {
+    const names = Array.from(selected);
+    if (names.length === 0) return;
+    if (!window.confirm(`删除选中的 ${names.length} 个作品？全部文件、快照与应用数据都会没。`)) return;
+    try {
+      for (const name of names) await deleteWork(name);
+      exitSelect();
+      await refresh();
+      flash(`已删除 ${names.length} 个作品`);
+    } catch {
+      window.alert('删除失败，请重试');
     }
   };
 
@@ -357,68 +393,139 @@ export function FileManagerPage({ embedded = false }: FileManagerPageProps) {
   const renderCard = (item: CardItem, marks?: { pin?: boolean; daily?: boolean }) => {
     const { work, meta, cover } = item;
     const usedAt = meta?.lastOpenedAt || work.mtime || 0;
+    const picked = selected.has(work.name);
     return (
-      <div key={work.name} className="files-cover-card">
+      <div key={work.name} className={`files-tile s-item ${picked ? 'picked' : ''}`}>
         <button
           type="button"
-          className="files-cover-main"
-          onClick={() => openWork(work.name)}
-          onPointerDown={() => startPress(work)}
+          className="files-tile-main"
+          onClick={() => (selectMode ? toggleSelect(work.name) : openWork(work.name))}
+          onPointerDown={() => { if (!selectMode) startPress(work); }}
           onPointerUp={cancelPress}
           onPointerMove={cancelPress}
           onPointerCancel={cancelPress}
           onContextMenu={e => { e.preventDefault(); setMenuFor(work); }}
-          title={`打开 ${work.name}`}
+          title={selectMode ? '选中' : `打开 ${work.name}`}
         >
-          <span className="files-cover-thumb">
+          <span className="files-tile-thumb">
             {cover ? (
-              <img src={cover} alt="" loading="lazy" />
+              <img className="files-tile-img" src={cover} alt="" loading="lazy" />
             ) : (
-              <span className={`files-cover-fallback ${isHtmlPath(work.name) ? 'html' : ''}`}>{fileBadge(work.name)}</span>
+              <span className={`files-tile-fallback ${isHtmlPath(work.name) ? 'html' : ''}`}>{fileBadge(work.name)}</span>
             )}
-            {marks?.pin && <span className="files-mark pin">置顶</span>}
-            {marks?.daily && <span className="files-mark daily">今日一亮</span>}
-          </span>
-          <span className="files-cover-name">{work.name}</span>
-          <span className="files-cover-meta">
-            {work.fileCount > 1 ? `${work.fileCount} 文件 · ` : ''}{formatFileSize(work.size)}
-            {usedAt ? ` · ${formatRelativeTime(usedAt)}` : ''}
+            <span className="files-tile-shade" aria-hidden="true" />
+            <span className="files-tile-cap">
+              <span className="files-tile-name">{work.name}</span>
+              <span className="files-tile-meta">
+                {work.fileCount > 1 ? `${work.fileCount} 文件 · ` : ''}{formatFileSize(work.size)}
+                {usedAt ? ` · ${formatRelativeTime(usedAt)}` : ''}
+              </span>
+            </span>
+            {(marks?.pin || marks?.daily) && (
+              <span className="files-badges">
+                {marks?.pin && <span className="files-mark">置顶</span>}
+                {marks?.daily && <span className="files-mark daily">今日</span>}
+              </span>
+            )}
+            {selectMode && (
+              <span className={`files-tile-check ${picked ? 'on' : ''}`} aria-hidden="true">
+                {picked ? <IconCheck size={11} /> : null}
+              </span>
+            )}
           </span>
         </button>
+
+        {!selectMode && (
+          <button
+            type="button"
+            className="files-tile-pick"
+            onClick={() => { setSelectMode(true); setSelected(new Set([work.name])); }}
+            title="选择"
+            aria-label="选择"
+          />
+        )}
       </div>
     );
   };
 
   return (
-    <div className={`files-page ${embedded ? 'embedded' : ''}`}>
-      <header className="files-head">
-        {!embedded && (
-          <button type="button" className="files-back" onClick={() => goBack(navigate, '/')} title="返回上一页">
-            <IconBack />
-          </button>
-        )}
-        <div className="files-title">
-          <h1>文件与作品</h1>
-          <span className="files-sub">
-            {works.length} 个作品 · {formatFileSize(totalSize)}{counts.html > 0 ? ` · ${counts.html} 个网页作品` : ''}
-          </span>
-        </div>
-        <div className="files-head-actions">
+    <div className={`files-page ${embedded ? 'embedded' : ''} ${selectMode ? 'selecting' : ''}`}>
+      {!embedded && (
+        <header className="files-bar">
           <button
             type="button"
-            className="files-new ghost"
-            onClick={() => importInputRef.current?.click()}
-            disabled={importing !== ''}
-            title="导入 html/文本/图片，或 .mod.zip 作品包"
+            className="files-bar-btn"
+            onClick={() => goBack(navigate, '/')}
+            title="返回上一页"
           >
-            {importing || '导入'}
+            <IconBack />
           </button>
-          <button type="button" className="files-new" onClick={() => setCreating(true)}>
-            <IconPlus size={16} />
-            <span>新建</span>
-          </button>
+          <h1 className="files-bar-title">文件</h1>
+          <div className="files-bar-right">
+            <button
+              type="button"
+              className={`files-bar-btn ${barMenu ? 'on' : ''}`}
+              onClick={() => setBarMenu(v => !v)}
+              title="更多"
+            >
+              <IconMore size={18} />
+            </button>
+            {barMenu && (
+              <>
+                <div className="files-bar-scrim" onClick={() => setBarMenu(false)} />
+                <div className="files-menu" role="menu">
+                  <span className="files-menu-head">
+                    {works.length} 个作品 · {formatFileSize(totalSize)}
+                  </span>
+                  <button
+                    type="button"
+                    className="files-menu-row"
+                    disabled={importing !== ''}
+                    onClick={() => { setBarMenu(false); importInputRef.current?.click(); }}
+                  >
+                    {importing || '导入文件 / 作品包'}
+                  </button>
+                  <button
+                    type="button"
+                    className="files-menu-row"
+                    onClick={() => { setBarMenu(false); setCreating(true); }}
+                  >
+                    新建作品
+                  </button>
+                  <button
+                    type="button"
+                    className="files-menu-row"
+                    onClick={() => { setBarMenu(false); setSelectMode(true); }}
+                  >
+                    批量选择
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </header>
+      )}
+
+      {embedded && (
+        <div className="files-embedded-head">
+          <span className="files-embedded-meta">
+            {works.length} 个作品 · {formatFileSize(totalSize)}
+          </span>
+          <div className="files-embedded-acts">
+            <button
+              type="button"
+              className="files-mini-btn"
+              disabled={importing !== ''}
+              onClick={() => importInputRef.current?.click()}
+            >
+              {importing || '导入'}
+            </button>
+            <button type="button" className="files-mini-btn on" onClick={() => setCreating(true)}>
+              <IconPlus size={13} /> 新建
+            </button>
+          </div>
         </div>
-      </header>
+      )}
 
       <input
         ref={importInputRef}
@@ -432,50 +539,50 @@ export function FileManagerPage({ embedded = false }: FileManagerPageProps) {
         }}
       />
 
-      <div className="files-tools">
-        <input
-          className="files-search"
-          value={keyword}
-          onChange={e => setKeyword(e.target.value)}
-          placeholder="搜索作品名…"
-        />
-        <div className="files-filters">
+      <div className="files-controls">
+        <div className="files-seg" role="tablist" aria-label="按类型筛选">
           {FILTERS.map(item => (
             <button
               key={item.key}
               type="button"
-              className={`files-filter ${filter === item.key ? 'active' : ''}`}
+              className={`files-seg-btn ${filter === item.key ? 'on' : ''}`}
               onClick={() => setFilter(item.key)}
             >
               {item.label}
-              <span className="files-filter-count">{counts[item.key]}</span>
+              <span className="files-seg-count">{counts[item.key]}</span>
             </button>
           ))}
         </div>
+        <input
+          className="files-search"
+          value={keyword}
+          onChange={e => setKeyword(e.target.value)}
+          placeholder="搜索作品名"
+        />
       </div>
 
       <div className="files-body">
-        {loading && <div className="files-empty">读取中…</div>}
+        {loading && <div className="files-loading"><i />正在读取文件…</div>}
 
         {!loading && works.length === 0 && (
           <div className="files-empty">
-            <IconFile size={30} />
-            <p>还没有作品喵。</p>
-            <p className="files-empty-hint">
-              从文件管理器「导入」一个 html，或者把整个网页文件夹打成 .mod.zip 一次导进来；
+            <b>这里还没有作品</b>
+            <span>
+              导入一个 html，或把整个网页文件夹打成 .mod.zip 一次放进；
               也可以去 Chat 让 AI 直接写 —— 记得在 MCP 面板勾上「文件与作品」。
-            </p>
+            </span>
             <div className="files-empty-actions">
               <button type="button" className="files-create-btn" onClick={() => importInputRef.current?.click()}>导入文件</button>
-              <button type="button" className="files-create-btn ghost" onClick={() => setCreating(true)}>新建空白作品</button>
-              <button type="button" className="files-create-btn ghost" onClick={() => navigate('/chat')}>去 Chat 让 AI 写</button>
+              <button type="button" className="files-create-btn ghost" onClick={() => setCreating(true)}>新建空白</button>
+              <button type="button" className="files-create-btn ghost" onClick={() => navigate('/chat')}>去 Chat 写</button>
             </div>
           </div>
         )}
 
         {!loading && works.length > 0 && items.length === 0 && (
           <div className="files-empty">
-            <p>没有匹配「{keyword || FILTERS.find(f => f.key === filter)?.label}」的作品喵</p>
+            <b>没有匹配「{keyword || FILTERS.find(f => f.key === filter)?.label}」的作品</b>
+            <span>换个关键词，或者把上面的筛选切回「全部」。</span>
           </div>
         )}
 
@@ -506,11 +613,36 @@ export function FileManagerPage({ embedded = false }: FileManagerPageProps) {
         )}
       </div>
 
+      {/* 选择模式：底部一条计数 + 动作 */}
+      {selectMode && (
+        <div className="files-select-bar">
+          <button type="button" className="files-select-ghost" onClick={toggleSelectAll}>
+            {selected.size >= items.length ? '取消全选' : '全选'}
+          </button>
+          <span className="files-select-count">{selected.size} 项</span>
+          <button
+            type="button"
+            className="files-select-del"
+            disabled={selected.size === 0}
+            onClick={() => void handleDeleteSelected()}
+          >
+            <IconTrash size={14} /> 删除
+          </button>
+          <button type="button" className="files-select-ghost" onClick={exitSelect}>完成</button>
+        </div>
+      )}
+
       {/* 长按 / 右键操作菜单 */}
       {menuFor && (
-        <div className="files-modal-mask" onClick={() => setMenuFor(null)}>
-          <div className="files-modal" onClick={e => e.stopPropagation()}>
-            <h3 className="files-menu-title">{menuFor.name}</h3>
+        <div className="files-sheet-mask" onClick={() => setMenuFor(null)}>
+          <div className="files-sheet" onClick={e => e.stopPropagation()}>
+            <span className="sheet-grabber" aria-hidden="true" />
+            <div className="sheet-head">
+              <h3>{menuFor.name}</h3>
+              <span className="sheet-sub">
+                {formatFileSize(menuFor.size)}{menuFor.fileCount > 1 ? ` · ${menuFor.fileCount} 文件` : ''}
+              </span>
+            </div>
             <div className="files-menu-list">
               <button type="button" className="files-menu-item" onClick={() => void handleTogglePin(menuFor.name)}>
                 {metaMap[menuFor.name]?.pinned ? '取消置顶' : '置顶'}
@@ -526,17 +658,14 @@ export function FileManagerPage({ embedded = false }: FileManagerPageProps) {
                 className="files-menu-item"
                 onClick={() => { setRenaming(menuFor); setRenameValue(menuFor.name); setMenuFor(null); }}
               >
-                重命名
+                <IconEdit size={14} /> 重命名
               </button>
               <button type="button" className="files-menu-item" onClick={() => { void handleDuplicate(menuFor.name); setMenuFor(null); }}>
-                复制一份
+                <IconCopy size={14} /> 复制一份
               </button>
               <button type="button" className="files-menu-item danger" onClick={() => { void handleDelete(menuFor.name); setMenuFor(null); }}>
-                删除
+                <IconTrash size={14} /> 删除
               </button>
-            </div>
-            <div className="files-modal-actions">
-              <button type="button" className="files-create-btn ghost" onClick={() => setMenuFor(null)}>取消</button>
             </div>
           </div>
         </div>

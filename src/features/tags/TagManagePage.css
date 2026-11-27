@@ -331,3 +331,282 @@
   border-color: var(--color-success);
   background: rgba(34, 197, 94, 0.1);
 }
+
+
+/* ============ v2 · 色块阵列 ============
+   结构决策：标签不再是一行一行的名单，而是两列方块。
+   每块左侧一道标签色竖条，名字是主角，日期退到角落。 */
+
+.tag-manage-page {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg-primary);
+}
+
+.tag-manage-page .page-header {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) 44px;
+  align-items: center;
+  height: 46px;
+  padding: 0 8px;
+  flex-shrink: 0;
+}
+
+.tag-manage-page .page-title {
+  margin: 0;
+  text-align: center;
+  font-size: 15px;
+  font-weight: 550;
+  letter-spacing: -0.01em;
+}
+
+.tag-manage-page .back-btn {
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: var(--color-text-secondary);
+}
+
+.tag-manage-page .back-btn:active {
+  background: rgba(255, 255, 255, 0.05);
+  transform: scale(0.92);
+}
+
+.tag-manage-page .page-content {
+  flex: 1;
+  padding: 6px 18px calc(28px + var(--safe-bottom));
+}
+
+/* 搜索：没有框，一条底线 */
+.tag-manage-page .search-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 42px;
+  padding: 0 2px;
+  margin-bottom: 14px;
+  background: transparent !important;
+  box-shadow: none !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 0;
+}
+
+.tag-manage-page .search-input {
+  flex: 1;
+  font-size: 17px;
+  color: var(--color-text-primary);
+  background: transparent;
+  border: 0;
+  outline: none;
+}
+
+.tag-manage-page .search-input::placeholder {
+  color: var(--color-text-disabled);
+  font-size: 15px;
+}
+
+/* 合并开关：一枚胶囊 */
+.tag-manage-page .merge-toggle-btn {
+  height: 34px;
+  padding: 0 15px;
+  margin-bottom: 12px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+  box-shadow: var(--edge-top);
+}
+
+.tag-manage-page .merge-toggle-btn.active {
+  color: var(--color-accent-ink);
+  background: var(--color-accent-primary);
+}
+
+.tag-manage-page .merge-hint {
+  margin-bottom: 14px;
+  padding: 13px 15px;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-tertiary) !important;
+  box-shadow: var(--edge-top) !important;
+  font-size: 12px;
+  line-height: 1.85;
+  color: var(--color-text-secondary);
+}
+
+.tag-manage-page .merge-preview {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 12px;
+}
+
+.tag-manage-page .merge-confirm-btn {
+  height: 32px;
+  padding: 0 15px;
+  border-radius: 999px;
+  background: var(--color-accent-primary);
+  color: var(--color-accent-ink);
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* ===== 阵列 ===== */
+.tag-manage-page .tags-container {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.tag-manage-page .tag-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 7px;
+  min-height: 96px;
+  padding: 13px 13px 11px 15px;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-tertiary) !important;
+  box-shadow: var(--edge-top) !important;
+  border-left: 3px solid rgba(255, 255, 255, 0.12);
+  cursor: pointer;
+  transition:
+    transform var(--duration-fast) var(--ease-spring),
+    background var(--duration-fast) var(--ease-out);
+}
+
+.tag-manage-page .tag-row:active {
+  transform: scale(0.975);
+  background: var(--color-bg-elevated) !important;
+}
+
+.tag-manage-page .tag-row.merge-source {
+  border-left-color: var(--color-error);
+  box-shadow: inset 0 0 0 1px rgba(255, 90, 110, 0.45) !important;
+}
+
+.tag-manage-page .tag-row.merge-target {
+  border-left-color: var(--color-success);
+  box-shadow: inset 0 0 0 1px rgba(70, 224, 165, 0.45) !important;
+}
+
+.tag-manage-page .tag-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  width: 100%;
+}
+
+.tag-manage-page .tag-name {
+  font-size: 15px;
+  font-weight: 550;
+  letter-spacing: -0.012em;
+  color: var(--color-text-primary);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-manage-page .tag-date {
+  font-size: 10.5px;
+  color: var(--color-text-disabled);
+  letter-spacing: 0.01em;
+}
+
+.tag-manage-page .tag-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: auto;
+}
+
+.tag-manage-page .tag-actions .action-btn {
+  height: 27px;
+  padding: 0 11px;
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.tag-manage-page .tag-actions .action-btn.danger {
+  color: var(--color-error);
+  background: rgba(255, 90, 110, 0.11);
+}
+
+/* 行内改名 */
+.tag-manage-page .edit-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: 100%;
+}
+
+.tag-manage-page .edit-input {
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--color-text-primary);
+  font-size: 13.5px;
+  outline: none;
+}
+
+.tag-manage-page .edit-confirm,
+.tag-manage-page .edit-cancel {
+  height: 27px;
+  padding: 0 11px;
+  border-radius: 999px;
+  font-size: 11px;
+}
+
+.tag-manage-page .edit-confirm {
+  background: var(--color-accent-primary);
+  color: var(--color-accent-ink);
+}
+
+.tag-manage-page .edit-cancel {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--color-text-secondary);
+}
+
+.tag-manage-page .empty-state {
+  grid-column: 1 / -1;
+  margin: 48px 0 0;
+  text-align: center;
+}
+
+.tag-manage-page .empty-text {
+  margin-top: 10px;
+  font-size: 13.5px;
+  color: var(--color-text-tertiary);
+}
+
+/* 顶条收尾：返回键不要圆形底，胶囊不要被拉满 */
+.tag-manage-page .back-btn,
+.link-page .back-btn,
+.link-page .add-link-btn,
+.export-page .back-btn {
+  background: transparent !important;
+  box-shadow: none !important;
+  border: 0;
+  color: var(--color-text-secondary);
+}
+
+.tag-manage-page .merge-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: flex-start;
+  width: auto;
+}

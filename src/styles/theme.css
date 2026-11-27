@@ -4,7 +4,7 @@
  * 设计前提（2026-11-27 定）：
  * - 这个 App 只给一个人用，不需要"专业感/商务感"
  * - 个性不靠"氛围色"，靠三件事：响应的速度、动作的弹性、排版的胆量
- * - 底色中性到近乎无色，唯一的强调色是荧光黄绿，只出现在"动作/完成/进度"上
+ * - 底色是深蓝黑（有温度的黑），唯一的强调色是珊瑚橙，只出现在"动作/完成/进度"上
  * - 暗色层级靠明度差，不靠边框和阴影
  *
  * 兼容：保留 v4 的全部变量名，只换值，老页面自动跟随。
@@ -62,19 +62,15 @@
   --color-star-glow: rgba(255, 193, 77, 0.22);
   --color-star-primary: #ffc14d;
 
-  /* === 纸片：暗底上唯一"亮"的东西。
-     不是白色，是带一点米/黄/粉的纸，眼睛在上面写字不刺 === */
-  --paper-cream: #f6f1e6;
-  --paper-yellow: #ffe9a3;
-  --paper-pink: #ffd9cf;
-  --paper-blue: #d3e6ff;
-  --paper-green: #d9f0cf;
-  --paper-ink: #1d1a16;
-  --paper-ink-soft: #6f6a60;
-
   /* === 兼容 === */
   --color-accent: #ff7a55;
   --color-bg-base: #0f0f14;
+  /* 老样式里的别名：给它们一个正确的去处，避免 var() 失效后整块塌掉 */
+  --color-primary: var(--color-accent-primary);
+  --color-danger: var(--color-error);
+  --color-text-on-accent: var(--color-accent-ink);
+  --color-bg-hover: rgba(255, 255, 255, 0.04);
+  --color-border-strong: rgba(255, 255, 255, 0.12);
 
   /* === 阴影：暗色里只做边缘定义，不做漂浮感 === */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.55);
@@ -271,7 +267,7 @@ a {
 }
 
 .text-gradient {
-  background: linear-gradient(120deg, #ebffab, #c9f24d);
+  background: linear-gradient(120deg, var(--color-accent-tertiary), var(--color-accent-primary));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;

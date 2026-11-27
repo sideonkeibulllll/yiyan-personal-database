@@ -1,11 +1,11 @@
 /**
  * 备忘录页（v2.4.0 · Obsidian 式实时预览）
  *
- * 布局：
- * 1. 顶部栏：返回 / 文档名 / 标题大纲 / 菜单（换篇・新建・删除）
- * 2. 快捷字符栏（横向滚动）
- * 3. 单一编辑区（CodeMirror 6 实时预览，无需切换模式）
- * 4. 标题大纲抽屉
+ * 结构（v5 · 双层：墙 ⇄ 纸）
+ * 1. 便签墙（首层）：2 列瀑布，每张便签一道分类色竖条，点一张进入文档
+ * 2. 文档层（全屏）：44px 顶条 + 24px 标题 + 实时预览编辑区 + 底部状态条
+ *    · 顶条左键回便签墙；⋯ 里收着「换篇 / 新建 / 删除」
+ * 3. 标题大纲抽屉（右侧）
  *
  * 核心亮点：
  * - **实时预览**：光标所在行显示 Markdown 源码，其余行已渲染（对齐 Obsidian Live Preview）
@@ -83,6 +83,29 @@ const MemoEditor = lazy(() =>
 
 const SAVE_DEBOUNCE = 800;
 
+/** 便签墙上的一句摘要：去掉标题行与常见 Markdown 记号 */
+function excerptOf(content: string): string {
+  return content
+    .split('\n')
+    .map(l => l.trim())
+    .filter(l => l && !/^#{1,6}\s/.test(l) && !/^```/.test(l))
+    .join(' ')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '［图］')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/[*_`>~-]/g, '')
+    .slice(0, 160);
+}
+
+/** 便签墙上的小日期：今天 / 昨天 / M月D日 */
+function wallDate(ts: number): string {
+  const d = new Date(ts);
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  if (ts >= startOfToday) return '今天';
+  if (ts >= startOfToday - 86400000) return '昨天';
+  return `${d.getMonth() + 1}月${d.getDate()}日`;
+}
+
 export function MemoPage() {
   const navigate = useNavigate();
   const [memo, setMemo] = useState<MemoDoc | null>(null);
@@ -92,6 +115,8 @@ export function MemoPage() {
   const [showOutline, setShowOutline] = useState(false);
   const [allMemos, setAllMemos] = useState<MemoDoc[]>([]);
   const [activeAnchor, setActiveAnchor] = useState<string | null>(null);
+  /** 首层是否停在「便签墙」（true）还是已经展开成一张文档（false） */
+  const [wallOpen, setWallOpen] = useState(true);
 
   const editorRef = useRef<MemoEditorHandle>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout>>();
@@ -419,70 +444,92 @@ export function MemoPage() {
 
   const charCount = content.length;
   const saveLabel = savedAt
-    ? `已保存 ${new Date(savedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
-    : '未保存';
+    ? `保存于 ${new Date(savedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`
+    : '尚未写入';
+
+  /** 打开一张便签：载入文档 → 墙退下 */
+  const openMemo = useCallback((targetId: string) => {
+    if (targetId === memo?.id) { setWallOpen(false); return; }
+    void handleSwitch(targetId).then(() => setWallOpen(false));
+  }, [handleSwitch, memo?.id]);
 
   return (
     <div className="memo-page">
-      {/* 1. 顶部栏 */}
-      <header className="memo-header">
-        <button className="memo-icon-btn" onClick={() => navigate(-1)} title="返回">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      {/* ============ 文档层（常驻挂载，保证实时保存与定位不丢） ============ */}
+      <header className="memo-bar">
+        <button
+          className="memo-bar-btn"
+          onClick={() => setWallOpen(true)}
+          aria-label="回到便签墙"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
             <path d="m15 18-6-6 6-6" />
           </svg>
         </button>
-        <div className="memo-header-title">
-          <span className="memo-title-text">{memo?.title || '备忘录'}</span>
-          <span className="memo-save-state">{saveLabel}</span>
+        <span className="memo-bar-title">备忘</span>
+        <div className="memo-bar-right">
+          <button
+            className="memo-bar-btn"
+            onClick={() => setShowOutline(v => !v)}
+            aria-label="标题大纲"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+              <line x1="4" y1="6" x2="20" y2="6" /><line x1="8" y1="12" x2="20" y2="12" /><line x1="12" y1="18" x2="20" y2="18" />
+            </svg>
+          </button>
+          <button
+            className="memo-bar-btn"
+            onClick={() => setShowMenu(v => !v)}
+            aria-label="更多"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+              <circle cx="12" cy="5" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="12" cy="19" r="1" />
+            </svg>
+          </button>
         </div>
-        <button
-          className="memo-icon-btn"
-          onClick={() => setShowOutline(v => !v)}
-          title="标题大纲"
-        >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-            <line x1="4" y1="6" x2="20" y2="6" /><line x1="8" y1="12" x2="20" y2="12" /><line x1="12" y1="18" x2="20" y2="18" />
-          </svg>
-        </button>
-        <button className="memo-icon-btn" onClick={() => setShowMenu(v => !v)} title="更多">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-            <circle cx="12" cy="5" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="12" cy="19" r="1" />
-          </svg>
-        </button>
       </header>
 
-      {/* 菜单 */}
+      {/* ⋯ 菜单：换篇 / 新建 / 删除 */}
       {showMenu && (
         <div className="memo-menu-mask" onClick={() => setShowMenu(false)}>
           <div className="memo-menu" onClick={e => e.stopPropagation()}>
-            <div className="memo-menu-label">切换备忘录</div>
+            <div className="memo-menu-label">换一篇</div>
             <div className="memo-menu-scroll">
               {allMemos.map(m => (
                 <button
                   key={m.id}
                   className={`memo-menu-item ${m.id === memo?.id ? 'active' : ''}`}
-                  onClick={() => handleSwitch(m.id)}
+                  onClick={() => void handleSwitch(m.id)}
                 >
-                  {m.title}
+                  <span className="memo-menu-item-title">{m.title}</span>
+                  <span className="memo-menu-item-date">{wallDate(m.updatedAt)}</span>
                 </button>
               ))}
             </div>
             <div className="memo-menu-sep" />
-            <button className="memo-menu-item" onClick={handleNewMemo}>+ 新建备忘录</button>
-            <button className="memo-menu-item danger" onClick={handleDeleteMemo}>删除当前备忘录</button>
+            <button className="memo-menu-item" onClick={() => void handleNewMemo()}>新建一张</button>
+            <button className="memo-menu-item danger" onClick={() => void handleDeleteMemo()}>删掉这张</button>
           </div>
         </div>
       )}
 
-      {/* 2. 快捷字符栏 */}
+      {/* 快捷字符栏 */}
       <MemoFormatBar
         onBeforeInsert={() => editorRef.current?.snapshotSelection()}
         onInsert={handleInsert}
       />
 
-      {/* 3. 实时预览编辑区（单文档、无模式切换） */}
-      {/* CodeMirror 为懒加载 chunk，首次进入此页时才下载，用 Suspense 兜住加载瞬间 */}
+      {/* 正文：24px 标题 + 17px/1.9 阅读面（实时预览编辑区） */}
       <div className="memo-body">
+        <div className="memo-doc-head">
+          <h1 className="memo-doc-title">{memo?.title || '未命名'}</h1>
+          <div className="memo-doc-meta">
+            <span>{charCount} 字</span>
+            <span className="memo-doc-dot" />
+            <span>{saveLabel}</span>
+          </div>
+        </div>
+        {/* CodeMirror 为懒加载 chunk，首次进入此页时才下载，用 Suspense 兜住加载瞬间 */}
         <Suspense fallback={<div className="memo-editor-loading">编辑器加载中…</div>}>
           <MemoEditor
             ref={editorRef}
@@ -502,13 +549,13 @@ export function MemoPage() {
         </div>
       )}
 
-      {/* 4. 底部状态栏 */}
-      <footer className="memo-footer">
-        <span>{charCount} 字</span>
-        <span className="memo-footer-anchor">
+      {/* 底部状态条 */}
+      <footer className="memo-foot">
+        <span className="memo-foot-count">{charCount} 字</span>
+        <span className="memo-foot-anchor">
           {/* 撤销 / 恢复（Ctrl+Z / Ctrl+Y 的按钮版），与标题跳转箭头同款防失焦处理 */}
           <button
-            className="memo-footer-nav"
+            className="memo-foot-nav"
             onPointerDown={e => e.preventDefault()}
             onClick={() => editorRef.current?.undo()}
             type="button"
@@ -521,7 +568,7 @@ export function MemoPage() {
             </svg>
           </button>
           <button
-            className="memo-footer-nav"
+            className="memo-foot-nav"
             onPointerDown={e => e.preventDefault()}
             onClick={() => editorRef.current?.redo()}
             type="button"
@@ -534,7 +581,7 @@ export function MemoPage() {
             </svg>
           </button>
           <button
-            className="memo-footer-nav"
+            className="memo-foot-nav"
             onPointerDown={e => e.preventDefault()}
             onClick={() => jumpToHeading(-1)}
             type="button"
@@ -546,7 +593,7 @@ export function MemoPage() {
             </svg>
           </button>
           <button
-            className="memo-footer-nav"
+            className="memo-foot-nav"
             onPointerDown={e => e.preventDefault()}
             onClick={() => jumpToHeading(1)}
             type="button"
@@ -557,11 +604,62 @@ export function MemoPage() {
               <path d="m6 9 6 6 6-6" />
             </svg>
           </button>
-          <span className="memo-footer-anchor-text">
-            {activeAnchor ? `定位：${activeAnchor}` : '定位：无（光标移到 # 标题下即可记住）'}
+          <span className="memo-foot-anchor-text">
+            {activeAnchor ? `定位在「${activeAnchor}」` : '光标停在 # 标题下，下次进来还回这儿'}
           </span>
         </span>
       </footer>
+
+      {/* ============ 首层：便签墙 ============ */}
+      <section className={`memo-wall ${wallOpen ? '' : 'is-down'}`} aria-hidden={!wallOpen}>
+        <header className="memo-bar">
+          <button className="memo-bar-btn" onClick={() => navigate(-1)} aria-label="返回">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m15 18-6-6 6-6" />
+            </svg>
+          </button>
+          <span className="memo-bar-title">备忘</span>
+          <div className="memo-bar-right">
+            <button
+              className="memo-bar-btn"
+              onClick={() => void handleNewMemo().then(() => setWallOpen(false))}
+              aria-label="新建"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+            </button>
+          </div>
+        </header>
+
+        <div className="memo-wall-body">
+          {!memo ? null : allMemos.length === 0 ? (
+            <div className="s-empty">
+              <b>墙上还空着</b>
+              <span>右上角点一下，写下第一张。</span>
+            </div>
+          ) : (
+            <div className="memo-wall-grid">
+              {allMemos.map(m => {
+                // 当前这张用内存里的最新正文（刚改完字，墙上不该还是旧的）
+                const doc = m.id === memo.id ? memo : m;
+                const text = excerptOf(doc.content);
+                return (
+                  <button
+                    key={m.id}
+                    className={`memo-card ${m.id === memo.id ? 'is-current' : ''}`}
+                    onClick={() => openMemo(m.id)}
+                  >
+                    <span className="memo-card-title">{doc.title || '未命名'}</span>
+                    <span className="memo-card-text">{text || '（空白）'}</span>
+                    <span className="memo-card-meta">{wallDate(doc.updatedAt)}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </section>
     </div>
   );
 }

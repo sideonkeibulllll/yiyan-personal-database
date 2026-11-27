@@ -18,7 +18,7 @@
  * - chatTypes / chatUtils / chatStream / chatExport：类型、工具函数、流式请求、图片导出
  */
 
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo, Fragment } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useSettingsStore } from '@/stores/settingsStore';
 import {
@@ -43,7 +43,7 @@ import { supportsVision } from '@/utils/modelCapability';
 import { getDatabase } from '@/services/database';
 import { getTodoDatabase } from '@/services/todoDatabase';
 import { EntryPickerPanel } from '@/components/EntryPickerPanel';
-import { IconBack } from '@/components/icons';
+import { IconBack, IconMore, IconPlus, IconTrash, IconShare, IconCheck, IconClose, IconChevronDown, IconTool, IconClipboard, IconMessage, IconBrain } from '@/components/icons';
 import type { Entry, Todo, AIProviderId } from '@/types';
 import {
   loadChatSessions,
@@ -77,7 +77,6 @@ import { getActiveChatStream, setActiveChatStream, subscribeChatStream } from '.
 /** 上次打开的会话 id（v3.6.9：从文件页/全文页返回时用来恢复对话） */
 const LAST_CHAT_SESSION_KEY = 'yiyan_chat_last_session_v1';
 import { ChatSidebar } from './components/ChatSidebar';
-import { ChatHeader } from './components/ChatHeader';
 import { ChatMessageList } from './components/ChatMessageList';
 import { ChatInputArea } from './components/ChatInputArea';
 import './ChatPage.css';
@@ -139,6 +138,12 @@ export function ChatPage() {
 
   // 模型选择
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  /** 顶条 ⋯ 菜单 */
+  const [opsMenuOpen, setOpsMenuOpen] = useState(false);
+  /** 顶条底色：滚过开头才浮现 */
+  const [barScrolled, setBarScrolled] = useState(false);
+  /** 是否已经离开底部（决定要不要出「回到底部」小钮） */
+  const [atBottom, setAtBottom] = useState(true);
 
   // 余额查询
   const [balanceInfo, setBalanceInfo] = useState<{
@@ -303,6 +308,11 @@ export function ChatPage() {
 
   // v2.5.1: 模型选项按 provider 分组（跨提供商可选）
   const modelOptions = useMemo(() => buildModelOptions(settings.ai), [settings.ai]);
+
+  /** 顶条/模型抽屉上显示的模型名：会话钉着一个已下架的模型时也要有话说 */
+  const missingSessionModel = !!currentModel && !modelOptions.some(m => m.value === currentModel);
+  const currentModelLabel = modelOptions.find(m => m.value === currentModel)?.label
+    || (missingSessionModel ? currentModel.split('::').pop() || currentModel : effectiveModel);
 
   /* === 图片输入（v3.5.3，v3.6.4 去掉能力拦截）===
    * 模型能力靠猜必然出错（硅基 V4-Flash 纯文本、V4.1-Flash 支持视觉），
@@ -627,7 +637,11 @@ export function ChatPage() {
     const onScroll = () => {
       const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
       stickToBottomRef.current = distance <= 80;
+      // 视觉层：顶条发丝线下方是否已滚出内容、是否离开底部（都只在翻转时重渲染）
+      setBarScrolled(el.scrollTop > 6);
+      setAtBottom(distance <= 80);
     };
+    onScroll();
     el.addEventListener('scroll', onScroll, { passive: true });
     return () => el.removeEventListener('scroll', onScroll);
   }, []);
@@ -635,6 +649,7 @@ export function ChatPage() {
   // 切换会话先归底：新会话从最新一条看起（不等 scroll 事件）
   useEffect(() => {
     stickToBottomRef.current = true;
+    setAtBottom(true);
   }, [currentSessionId]);
 
   const scrollMessagesToBottom = useCallback((smooth: boolean) => {
@@ -825,8 +840,9 @@ export function ChatPage() {
 
   const handleSelectSession = useCallback((id: string) => {
     setCurrentSessionId(id);
-    if (isMobile) setSidebarOpen(false);
-  }, [isMobile]);
+    // 侧栏现在是抽屉（桌面/手机同一套），选完就收起
+    setSidebarOpen(false);
+  }, []);
 
   const handleDeleteSession = useCallback((id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -1960,6 +1976,35 @@ export function ChatPage() {
   const handleCloseSidebar = useCallback(() => setSidebarOpen(false), []);
   const handleToggleModelPicker = useCallback(() => setModelPickerOpen(prev => !prev), []);
   const handleCloseMcpPicker = useCallback(() => setMcpPickerOpen(false), []);
+  const handleCloseModelSheet = useCallback(() => setModelPickerOpen(false), []);
+
+  /* === 顶条 ⋯ 菜单：把原来散在头部按钮里的入口收进来 === */
+  const handleToggleOpsMenu = useCallback(() => setOpsMenuOpen(prev => !prev), []);
+  const handleCloseOpsMenu = useCallback(() => setOpsMenuOpen(false), []);
+  const handleOpsSessionList = useCallback(() => {
+    setOpsMenuOpen(false);
+    setSidebarOpen(true);
+  }, []);
+  const handleOpsNewChat = useCallback(() => {
+    setOpsMenuOpen(false);
+    handleNewChat();
+  }, [handleNewChat]);
+  const handleOpsModel = useCallback(() => {
+    setOpsMenuOpen(false);
+    setModelPickerOpen(true);
+  }, []);
+  const handleOpsPrompt = useCallback(() => {
+    setOpsMenuOpen(false);
+    setPromptPickerOpen(true);
+  }, []);
+  const handleOpsExport = useCallback(() => {
+    setOpsMenuOpen(false);
+    handleEnterSelectMode();
+  }, [handleEnterSelectMode]);
+  const handleOpsClear = useCallback(() => {
+    setOpsMenuOpen(false);
+    handleClearMessages();
+  }, [handleClearMessages]);
 
   // 切换思考模式开关（v2.11.0: 对话级持久化）
   const handleToggleThinking = useCallback(() => {
@@ -1997,47 +2042,98 @@ export function ChatPage() {
         onCloseSidebar={handleCloseSidebar}
       />
 
-      {isMobile && sidebarOpen && (
+      {sidebarOpen && (
         <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} />
       )}
 
       {/* === 右侧对话区 === */}
       <main className="chat-main">
-        {/* 特殊状态栏：从其他页面跳入时显示返回按钮 */}
-        {returnTarget && (
-          <div className="chat-special-bar">
-            <button className="special-back-btn" onClick={handleReturnBack}>
-              <IconBack />
-              <span>返回数据选择</span>
-            </button>
-          </div>
-        )}
+        {/* === 顶条 46px：左返回 / 中标题 / 右 ⋯ === */}
+        <header className={`chat5-bar ${barScrolled ? 'is-scrolled' : ''}`}>
+          {selectMode ? (
+            <>
+              <button className="chat5-icon-btn" onClick={handleExitSelectMode} aria-label="退出选择">
+                <IconClose size={16} strokeWidth={2} />
+              </button>
+              <span className="chat5-bar-title">已选 {selectedMsgIds.size} 条</span>
+              <button
+                className="chat5-export-btn"
+                onClick={handleExportSelected}
+                disabled={selectedMsgIds.size === 0 || isExporting}
+              >
+                {isExporting ? '导出中…' : '导出图片'}
+              </button>
+            </>
+          ) : (
+            <>
+              <button className="chat5-icon-btn" onClick={handleReturnBack} aria-label="返回">
+                <IconBack size={18} />
+              </button>
+              <h1 className="chat5-bar-title">{currentSession?.title || '新对话'}</h1>
+              <div className="chat5-bar-right">
+                {(currentSession?.mcpSearchResults?.length ?? 0) > 0 && (
+                  <button className="chat5-mcp-chip" onClick={handleOpenMcpResults} title="查看已选上下文">
+                    <IconTool size={13} />
+                    <span>{currentSession?.mcpSearchResults?.length}</span>
+                  </button>
+                )}
+                <button
+                  className={`chat5-icon-btn ${opsMenuOpen ? 'on' : ''}`}
+                  onClick={handleToggleOpsMenu}
+                  aria-label="更多操作"
+                  aria-expanded={opsMenuOpen}
+                >
+                  <IconMore size={18} />
+                </button>
 
-        <ChatHeader
-          isMobile={isMobile}
-          onOpenSidebar={handleOpenSidebar}
-          title={currentSession?.title || 'Chat'}
-          currentSessionModel={currentSession?.model || ''}
-          currentModel={currentModel}
-          modelOptions={modelOptions}
-          modelPickerOpen={modelPickerOpen}
-          onToggleModelPicker={handleToggleModelPicker}
-          onSelectModel={handleSelectModel}
-          balanceInfo={balanceInfo}
-          onQueryBalance={handleQueryBalance}
-          messagesCount={messages.length}
-          mcpResultsCount={currentSession?.mcpSearchResults?.length ?? 0}
-          onOpenMcpResults={handleOpenMcpResults}
-          selectMode={selectMode}
-          selectedCount={selectedMsgIds.size}
-          isExporting={isExporting}
-          onEnterSelectMode={handleEnterSelectMode}
-          onExitSelectMode={handleExitSelectMode}
-          onClearMessages={handleClearMessages}
-          onExportSelected={handleExportSelected}
-        />
+                {opsMenuOpen && (
+                  <>
+                    <div className="chat5-menu-scrim" onClick={handleCloseOpsMenu} />
+                    <div className="s-menu chat5-menu" role="menu">
+                      <button className="chat5-menu-row" role="menuitem" onClick={handleOpsSessionList}>
+                        <span className="chat5-menu-ico"><IconMessage size={15} /></span>
+                        <span className="chat5-menu-label">会话列表</span>
+                      </button>
+                      <button className="chat5-menu-row" role="menuitem" onClick={handleOpsNewChat}>
+                        <span className="chat5-menu-ico"><IconPlus size={15} /></span>
+                        <span className="chat5-menu-label">新对话</span>
+                      </button>
+                      <button className="chat5-menu-row" role="menuitem" onClick={handleOpsModel}>
+                        <span className="chat5-menu-ico"><IconBrain size={15} /></span>
+                        <span className="chat5-menu-label">模型</span>
+                        <span className="chat5-menu-value">{currentModelLabel}</span>
+                      </button>
+                      <button className="chat5-menu-row" role="menuitem" onClick={handleOpsPrompt}>
+                        <span className="chat5-menu-ico"><IconClipboard size={15} /></span>
+                        <span className="chat5-menu-label">提示词库</span>
+                      </button>
+                      <button
+                        className="chat5-menu-row"
+                        role="menuitem"
+                        onClick={handleOpsExport}
+                        disabled={messages.length === 0}
+                      >
+                        <span className="chat5-menu-ico"><IconShare size={15} /></span>
+                        <span className="chat5-menu-label">选择消息导出</span>
+                      </button>
+                      <button
+                        className="chat5-menu-row danger"
+                        role="menuitem"
+                        onClick={handleOpsClear}
+                        disabled={messages.length === 0}
+                      >
+                        <span className="chat5-menu-ico"><IconTrash size={14} /></span>
+                        <span className="chat5-menu-label">清空对话</span>
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </>
+          )}
+        </header>
 
-        {/* 消息列表 */}
+        {/* 消息流 */}
         <ChatMessageList
           messages={messages}
           sessionId={currentSessionId}
@@ -2051,6 +2147,18 @@ export function ChatPage() {
           onConfirmAction={resolveConfirm}
           onDeleteTurn={handleDeleteTurn}
         />
+
+        {/* 翻上去看历史时，右下角给一个回底部小钮 */}
+        {!atBottom && messages.length > 0 && (
+          <button
+            className="chat5-scroll-btn"
+            onClick={() => scrollMessagesToBottom(true)}
+            aria-label="回到底部"
+            title="回到底部"
+          >
+            <IconChevronDown size={16} />
+          </button>
+        )}
 
         {/* === MCP 搜索面板（半页，支持数据/待办切换）=== */}
         {mcpSearchOpen && (
@@ -2109,6 +2217,67 @@ export function ChatPage() {
           onRemovePendingFile={handleRemovePendingFile}
         />
       </main>
+
+      {/* === 模型抽屉（原头部的下拉，搬到底部升起的面板里）=== */}
+      {modelPickerOpen && (
+        <div className="chat5-sheet-wrap">
+          <div className="chat5-scrim" onClick={handleCloseModelSheet} />
+          <section className="s-sheet chat5-sheet" role="dialog" aria-label="选择模型">
+            <span className="s-sheet-grip" />
+            <div className="chat5-sheet-head">
+              <div className="chat5-sheet-titles">
+                <b>模型</b>
+                <span>这个对话用哪个模型回答</span>
+              </div>
+              <button className="chat5-icon-btn" onClick={handleCloseModelSheet} aria-label="关闭">
+                <IconClose size={14} />
+              </button>
+            </div>
+            <div className="chat5-sheet-scroll">
+              {missingSessionModel && (
+                <button className="chat5-model-row on" onClick={() => handleSelectModel(currentModel)}>
+                  <span className="chat5-model-name">{currentModel.split('::').pop()}</span>
+                  <IconCheck size={13} />
+                </button>
+              )}
+              {modelOptions.map((opt, i) => {
+                const showGroup = !!opt.group && opt.group !== modelOptions[i - 1]?.group;
+                return (
+                  <Fragment key={opt.value || 'default'}>
+                    {showGroup && <div className="chat5-sheet-label">{opt.group}</div>}
+                    <button
+                      className={`chat5-model-row ${currentModel === opt.value ? 'on' : ''}`}
+                      onClick={() => handleSelectModel(opt.value)}
+                    >
+                      <span className="chat5-model-name">{opt.label}</span>
+                      {currentModel === opt.value && <IconCheck size={13} />}
+                    </button>
+                  </Fragment>
+                );
+              })}
+              <div className="chat5-sheet-sep" />
+              <button
+                className="chat5-model-row balance"
+                onClick={handleQueryBalance}
+                disabled={balanceInfo.isQuerying}
+              >
+                <span className="chat5-model-name">
+                  {balanceInfo.isQuerying
+                    ? '正在查询余额…'
+                    : balanceInfo.currentBalance !== null
+                      ? `余额 ${balanceInfo.currentBalance.toFixed(2)} 元`
+                      : '查询余额'}
+                </span>
+                {balanceInfo.currentBalance !== null && balanceInfo.lastBalance !== null && (
+                  <span className="chat5-balance-used">
+                    上次到这次用了 {(balanceInfo.lastBalance - balanceInfo.currentBalance).toFixed(2)} 元
+                  </span>
+                )}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
 
       {/* === 条目选择器面板 === */}
       {entryPickerOpen && (

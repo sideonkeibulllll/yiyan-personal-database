@@ -12,7 +12,30 @@ import { SideMenu } from './SideMenu';
 import { FileManagerWindow } from './FileManagerWindow';
 import type { ManagerMode, WindowState, PathSegment, SortBy, ImportResult } from './types';
 import { createInitialWindowState } from './types';
+import {
+  IconBack,
+  IconMore,
+  IconPlus,
+  IconDownload,
+  IconCopy,
+  IconShuffle,
+} from '@/components/icons';
 import './DataManagerPage.css';
+
+const MODE_LABEL: Record<ManagerMode, string> = {
+  tags: '标签',
+  groups: '组',
+  data: '数据',
+};
+
+/** 统计数字用的紧凑体积：34px 一行放得下 */
+function shortBytes(bytes: number): string {
+  if (!bytes || bytes <= 0) return '0';
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10240 ? 1 : 0)}K`;
+  return `${(bytes / 1024 / 1024).toFixed(1)}M`;
+}
+
 
 export function DataManagerPage() {
   const navigate = useNavigate();
@@ -38,6 +61,34 @@ export function DataManagerPage() {
   const [showRenameDialog, setShowRenameDialog] = useState(false);
   const [renameValue, setRenameValue] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // 仪表数字：条目 / 标签 / 正文体积（只读统计，和两个窗口的刷新同频）
+  const [stats, setStats] = useState({ entries: 0, tags: 0, groups: 0, bytes: 0 });
+  const refreshTick = leftWindow.refreshKey + rightWindow.refreshKey;
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const db = await getDatabase();
+        const [entries, tags, groups] = await Promise.all([
+          db.getAllEntries(),
+          db.getAllTags(),
+          db.getAllGroups(),
+        ]);
+        if (cancelled) return;
+        const bytes = entries.reduce(
+          (sum, entry) => sum + (entry.content ? new Blob([entry.content]).size : 0),
+          0,
+        );
+        setStats({ entries: entries.length, tags: tags.length, groups: groups.length, bytes });
+      } catch {
+        /* 统计失败不影响浏览 */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [refreshTick]);
+
 
   const loadEntries = useEntryStore(state => state.loadEntries);
   const loadTags = useTagStore(state => state.loadTags);
@@ -716,153 +767,158 @@ export function DataManagerPage() {
         onChange={handleFileChange}
       />
 
-      {/* 顶部栏 */}
-      <header className="dm-header">
-        <button className="dm-header-btn" onClick={() => setSideMenuOpen(true)}>
-          ☰
+      {/* 顶部栏：返回 / 数据 / ⋯ */}
+      <header className="dm-bar">
+        <button className="dm-bar-btn" onClick={() => navigate('/')} title="返回首页">
+          <IconBack />
         </button>
-        <div className="dm-breadcrumb">
-          {currentWindow.path.map((seg, i) => (
-            <span key={i} className="dm-crumb">
-              {i > 0 && <span className="dm-crumb-sep">/</span>}
-              <span className="dm-crumb-label">{seg.label}</span>
-            </span>
-          ))}
+        <h1 className="dm-bar-title">数据</h1>
+        <div className="dm-bar-right">
+          <button
+            className={`dm-bar-btn ${showMoreMenu ? 'on' : ''}`}
+            onClick={() => setShowMoreMenu(!showMoreMenu)}
+            title="更多"
+          >
+            <IconMore size={18} />
+          </button>
+          {showMoreMenu && (
+            <>
+              <div className="dm-scrim" onClick={() => setShowMoreMenu(false)} />
+              <div className="dm-menu">
+                <button className="dm-menu-row" onClick={handleRefresh}>刷新两个窗口</button>
+                <button className="dm-menu-row" onClick={handleSearch}>全库搜索</button>
+                <button className="dm-menu-row" onClick={handleSelectAll}>全选当前窗口</button>
+                <button className="dm-menu-row" onClick={() => setShowSortMenu(!showSortMenu)}>
+                  排序方式
+                  <span className="dm-menu-note">
+                    {{ time: '时间', name: '名称', usage: '使用次数' }[currentWindow.sortBy]}
+                  </span>
+                </button>
+                {currentWindow.mode === 'data' && (
+                  <button className="dm-menu-row" onClick={handleImport}>导入数据</button>
+                )}
+              </div>
+            </>
+          )}
+          {showSortMenu && (
+            <div className="dm-sort-menu">
+              {([
+                ['time', '按时间'],
+                ['name', '按名称'],
+                ['usage', '按使用次数'],
+              ] as Array<[SortBy, string]>).map(([key, label]) => (
+                <button
+                  key={key}
+                  className={`dm-sort-item ${currentWindow.sortBy === key ? 'active' : ''}`}
+                  onClick={() => { handleSortChange(key); setShowMoreMenu(false); }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
-        <button className="dm-header-btn" onClick={() => setShowMoreMenu(!showMoreMenu)}>
-          ⋮
-        </button>
       </header>
 
-      {/* 三点菜单 */}
-      {showMoreMenu && (
-        <>
-          <div className="dm-overlay" onClick={() => setShowMoreMenu(false)} />
-          <div className="dm-more-menu glass">
-            <button className="dm-more-item" onClick={handleRefresh}>
-              <span>🔄</span> 刷新
+      <div className="dm-scroll">
+        {/* 仪表：三个并排数字 */}
+        <section className="dm-hero">
+          <div className="dm-hero-top">
+            <span className="dm-hero-label">本地记忆</span>
+            <button className="dm-mode-pill" onClick={() => setSideMenuOpen(true)}>
+              {MODE_LABEL[currentWindow.mode]}模式
+              <span className="dm-mode-caret" aria-hidden="true">⌄</span>
             </button>
-            <button className="dm-more-item" onClick={handleSearch}>
-              <span>🔍</span> 搜索
-            </button>
-            <button className="dm-more-item" onClick={handleSelectAll}>
-              <span>☑️</span> 全选
-            </button>
-            <button className="dm-more-item" onClick={() => { setShowSortMenu(!showSortMenu); }}>
-              <span>📊</span> 排序方式
-            </button>
-            {currentWindow.mode === 'data' && (
-              <button className="dm-more-item" onClick={handleImport}>
-                <span>📥</span> 导入数据
-              </button>
-            )}
           </div>
-        </>
-      )}
+          <div className="dm-stats">
+            <div className="dm-stat">
+              <span className="dm-stat-num">{stats.entries}</span>
+              <span className="dm-stat-label">条目</span>
+            </div>
+            <span className="dm-stat-div" aria-hidden="true" />
+            <div className="dm-stat">
+              <span className="dm-stat-num">{stats.tags}</span>
+              <span className="dm-stat-label">标签</span>
+            </div>
+            <span className="dm-stat-div" aria-hidden="true" />
+            <div className="dm-stat">
+              <span className="dm-stat-num">{shortBytes(stats.bytes)}</span>
+              <span className="dm-stat-label">体积</span>
+            </div>
+          </div>
+        </section>
 
-      {/* 排序子菜单 */}
-      {showSortMenu && (
-        <div className="dm-sort-menu glass">
+        {/* 2×2 动作砖：只有图标是彩色的 */}
+        <div className="dm-bricks">
           <button
-            className={`dm-sort-item ${currentWindow.sortBy === 'time' ? 'active' : ''}`}
-            onClick={() => handleSortChange('time')}
+            className="dm-brick info"
+            onClick={handleImport}
+            disabled={currentWindow.mode !== 'data'}
           >
-            按时间
+            <span className="dm-brick-ico"><IconDownload size={20} /></span>
+            <span className="dm-brick-title">导入</span>
+            <span className="dm-brick-desc">
+              {currentWindow.mode === 'data' ? '合并 JSON 备份' : '仅数据模式可用'}
+            </span>
           </button>
-          <button
-            className={`dm-sort-item ${currentWindow.sortBy === 'name' ? 'active' : ''}`}
-            onClick={() => handleSortChange('name')}
-          >
-            按名称
+          <button className={`dm-brick accent ${canCreate ? '' : 'muted'}`} onClick={handleNew}>
+            <span className="dm-brick-ico"><IconPlus size={20} /></span>
+            <span className="dm-brick-title">新建</span>
+            <span className="dm-brick-desc">
+              {canCreate ? `新${MODE_LABEL[currentWindow.mode]}文件夹` : '回到根路径才能建'}
+            </span>
           </button>
-          <button
-            className={`dm-sort-item ${currentWindow.sortBy === 'usage' ? 'active' : ''}`}
-            onClick={() => handleSortChange('usage')}
-          >
-            按使用次数
+          <button className="dm-brick success" onClick={handleCopyToOtherWindow}>
+            <span className="dm-brick-ico"><IconCopy size={20} /></span>
+            <span className="dm-brick-title">复制过去</span>
+            <span className="dm-brick-desc">选中条目送另一窗</span>
+          </button>
+          <button className="dm-brick warning" onClick={handleMoveToOtherWindow}>
+            <span className="dm-brick-ico"><IconShuffle size={20} /></span>
+            <span className="dm-brick-title">移动过去</span>
+            <span className="dm-brick-desc">换归属，原处移除</span>
           </button>
         </div>
-      )}
 
-      {/* 双栏窗口 */}
-      <div className="dm-windows">
-        <div className="dm-window-wrapper" onClick={() => setActiveWindow('left')}>
-          <FileManagerWindow
-            side="left"
-            state={leftWindow}
-            isActive={activeWindow === 'left'}
-            onSelect={handleSelect}
-            onMultiSelectToggle={handleMultiSelectToggle}
-            onLongPress={handleLongPress}
-          />
+        <div className="dm-winhead">
+          <span className="dm-winhead-title">双窗浏览</span>
+          <span className="dm-winhead-sub">
+            {currentWindow.selectedIds.size > 0 ? `已选 ${currentWindow.selectedIds.size} 项` : '点一下窗口即切换焦点'}
+          </span>
         </div>
-        <div className="dm-window-wrapper" onClick={() => setActiveWindow('right')}>
-          <FileManagerWindow
-            side="right"
-            state={rightWindow}
-            isActive={activeWindow === 'right'}
-            onSelect={handleSelect}
-            onMultiSelectToggle={handleMultiSelectToggle}
-            onLongPress={handleLongPress}
-          />
+
+        {/* 双栏窗口 */}
+        <div className="dm-windows">
+          <div className="dm-window-wrapper" onClick={() => setActiveWindow('left')}>
+            <FileManagerWindow
+              side="left"
+              state={leftWindow}
+              isActive={activeWindow === 'left'}
+              onSelect={handleSelect}
+              onMultiSelectToggle={handleMultiSelectToggle}
+              onLongPress={handleLongPress}
+            />
+          </div>
+          <div className="dm-window-wrapper" onClick={() => setActiveWindow('right')}>
+            <FileManagerWindow
+              side="right"
+              state={rightWindow}
+              isActive={activeWindow === 'right'}
+              onSelect={handleSelect}
+              onMultiSelectToggle={handleMultiSelectToggle}
+              onLongPress={handleLongPress}
+            />
+          </div>
         </div>
       </div>
 
-      {/* 底部操作栏 */}
-      <footer className="dm-footer">
-        <button
-          className="dm-footer-btn"
-          disabled={!canGoBack}
-          onClick={handleBack}
-          title="后退"
-        >
-          ←
-        </button>
-        <button
-          className="dm-footer-btn"
-          disabled={!canGoForward}
-          onClick={handleForward}
-          title="前进"
-        >
-          →
-        </button>
-        <button
-          className="dm-footer-btn"
-          disabled={!canCreate}
-          onClick={handleNew}
-          title="新建"
-        >
-          +
-        </button>
-        <button
-          className="dm-footer-btn"
-          onClick={handleSwap}
-          title="复制路径到另一窗口"
-        >
-          ⇄
-        </button>
-        <button
-          className="dm-footer-btn"
-          onClick={handleCopyToOtherWindow}
-          title="复制条目到另一窗口"
-        >
-          ⧉
-        </button>
-        <button
-          className="dm-footer-btn"
-          onClick={handleMoveToOtherWindow}
-          title="移动条目到另一窗口"
-        >
-          ✂
-        </button>
-        <button
-          className="dm-footer-btn"
-          disabled={!canGoUp}
-          onClick={handleUp}
-          title="返回上级"
-        >
-          ↑
-        </button>
+      {/* 底部导航胶囊：只放位置移动 */}
+      <footer className="dm-dock">
+        <button className="dm-dock-btn" disabled={!canGoBack} onClick={handleBack} title="后退">←</button>
+        <button className="dm-dock-btn" disabled={!canGoForward} onClick={handleForward} title="前进">→</button>
+        <button className="dm-dock-btn" disabled={!canGoUp} onClick={handleUp} title="返回上级">↑</button>
+        <span className="dm-dock-div" aria-hidden="true" />
+        <button className="dm-dock-btn" onClick={handleSwap} title="复制路径到另一窗口">⇄</button>
       </footer>
 
       {/* 侧边栏 */}

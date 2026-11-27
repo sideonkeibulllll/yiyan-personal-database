@@ -5,7 +5,6 @@
 import { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTagStore } from '@/stores/tagStore';
-import { BottomNav } from '@/components/BottomNav';
 import './TagManagePage.css';
 
 /* SVG Icon Components */
@@ -255,8 +254,6 @@ export function TagManagePage() {
           </div>
         </div>
       )}
-
-      <BottomNav />
     </div>
   );
 }

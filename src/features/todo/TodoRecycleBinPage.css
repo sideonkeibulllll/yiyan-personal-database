@@ -1,194 +1,333 @@
+/**
+ * 回收站 —— 每条都能救回来
+ *
+ * 结构决策：
+ * 1. 一条待办 = 64px 的一行，左边是"它是什么 / 什么时候删的"，右边只有两个动作。
+ * 2. 恢复是描边胶囊，彻底删除是一枚红色垃圾桶 —— 手感和后果都摆在明面上。
+ * 3. 清空回收站收进顶栏右侧，红色文字，不在页面上常驻一个大按钮。
+ */
+
 .recycle-bin-page {
   display: flex;
   flex-direction: column;
-  min-height: 100dvh;
-  padding-bottom: calc(80px + var(--safe-bottom));
+  width: 100%;
+  height: 100dvh;
+  overflow: hidden;
 }
 
-.page-header {
-  display: flex;
+/* ══════════ 顶部返回条 ══════════ */
+
+.rb-bar {
+  flex: 0 0 auto;
+  height: calc(44px + var(--safe-top));
+  display: grid;
+  grid-template-columns: 44px 1fr 64px;
   align-items: center;
-  justify-content: space-between;
-  padding: var(--space-4) var(--space-5);
+  padding: 0 8px;
+  padding-top: var(--safe-top);
 }
 
-.page-header h1 {
-  font-size: var(--text-xl);
-  font-weight: 600;
-}
-
-.back-btn {
-  width: 40px;
-  height: 40px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: var(--text-xl);
+.rb-bar-icon {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
   color: var(--color-text-secondary);
-  background: none;
-  border: none;
   cursor: pointer;
+  transition: color var(--duration-fast), transform var(--duration-fast) var(--ease-spring);
 }
 
-.empty-btn {
-  padding: var(--space-1) var(--space-3);
-  border-radius: var(--radius-sm);
-  font-size: var(--text-sm);
+.rb-bar-icon:active {
+  transform: scale(0.9);
+  color: var(--color-text-primary);
+}
+
+.rb-bar-title {
+  text-align: center;
+  font-size: 14px;
+  font-weight: 550;
+  letter-spacing: 0.02em;
+  color: var(--color-text-primary);
+}
+
+.rb-bar-clear {
+  height: 44px;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  font-size: 14px;
+  font-weight: 600;
   color: var(--color-error);
-  background: none;
-  border: 1px solid var(--color-error);
   cursor: pointer;
+  transition: transform var(--duration-fast) var(--ease-spring);
 }
 
-.page-content {
+.rb-bar-clear:active {
+  transform: scale(0.94);
+}
+
+.rb-bar-space {
+  display: block;
+}
+
+/* 规则说明：一行小字，不解释太多 */
+.rb-note {
+  flex: 0 0 auto;
+  padding: 2px 20px 10px;
+  max-width: 560px;
+  width: 100%;
+  margin: 0 auto;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--color-text-disabled);
+}
+
+/* ══════════ 列表 ══════════ */
+
+.rb-body {
   flex: 1;
-  padding: 0 var(--space-5);
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  padding: 0 18px calc(32px + var(--safe-bottom));
+  max-width: 560px;
+  width: 100%;
+  margin: 0 auto;
+  scrollbar-width: none;
 }
 
-.recycle-hint {
-  font-size: var(--text-sm);
-  color: var(--color-text-tertiary);
-  padding: var(--space-2) 0;
+.rb-body::-webkit-scrollbar {
+  display: none;
 }
 
-.recycle-list {
+.rb-loading {
+  margin-top: 28vh;
+  text-align: center;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--color-text-disabled);
+  animation: rbPulse 1.6s ease-in-out infinite;
+}
+
+@keyframes rbPulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+.rb-list {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
 }
 
-.recycle-item {
-  padding: var(--space-3);
-  border-radius: var(--radius-md);
+.rb-item {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-3);
+  align-items: center;
+  gap: 12px;
+  min-height: 64px;
+  padding: 10px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.045);
+  animation: riseIn 300ms var(--ease-out) both;
 }
 
-.item-body {
+.rb-item:first-child {
+  border-top: none;
+}
+
+.rb-item:nth-child(1) { animation-delay: 0ms; }
+.rb-item:nth-child(2) { animation-delay: 35ms; }
+.rb-item:nth-child(3) { animation-delay: 70ms; }
+.rb-item:nth-child(4) { animation-delay: 105ms; }
+.rb-item:nth-child(5) { animation-delay: 140ms; }
+.rb-item:nth-child(6) { animation-delay: 175ms; }
+
+.rb-item-main {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
 }
 
-.item-title {
-  font-size: var(--text-base);
+.rb-item-title {
+  font-size: 14px;
+  line-height: 1.45;
+  letter-spacing: 0.005em;
   color: var(--color-text-primary);
-  font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.item-date {
-  font-size: var(--text-xs);
+.rb-item-meta {
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
   color: var(--color-text-tertiary);
-  margin-top: 2px;
 }
 
-.item-deleted-at {
-  font-size: var(--text-xs);
-  color: var(--color-error);
-  margin-top: 2px;
-}
-
-.item-actions {
+.rb-item-actions {
+  flex: 0 0 auto;
   display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
 }
 
-.action-restore,
-.action-delete {
-  padding: var(--space-1) var(--space-2);
-  border-radius: var(--radius-xs);
-  font-size: var(--text-xs);
+/* 恢复：珊瑚色描边胶囊 */
+.rb-restore {
+  height: 27px;
+  padding: 0 13px;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px rgba(255, 122, 85, 0.38);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  color: var(--color-accent-primary);
+  white-space: nowrap;
   cursor: pointer;
-  background: var(--color-bg-elevated);
-  border: 1px solid var(--color-border-primary);
+  transition: background var(--duration-fast), transform var(--duration-fast) var(--ease-spring);
+}
+
+.rb-restore:active {
+  transform: scale(0.94);
+  background: var(--color-accent-subtle);
+}
+
+/* 彻底删除：一枚红色垃圾桶，不写字 */
+.rb-purge {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--color-error);
+  cursor: pointer;
+  transition: background var(--duration-fast), transform var(--duration-fast) var(--ease-spring);
+}
+
+.rb-purge:active {
+  transform: scale(0.9);
+  background: rgba(255, 90, 110, 0.12);
+}
+
+/* ══════════ 空态 ══════════ */
+
+.rb-empty {
+  margin: auto;
+  padding: 0 24px 8vh;
+  text-align: center;
+}
+
+.rb-empty b {
+  display: block;
+  font-size: 17px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
   color: var(--color-text-secondary);
 }
 
-.action-restore {
-  color: var(--color-success);
-  border-color: var(--color-success);
-}
-
-.action-delete {
-  color: var(--color-error);
-  border-color: var(--color-error);
-}
-
-.empty-state {
-  padding: var(--space-12) var(--space-4);
-  text-align: center;
-  color: var(--color-text-tertiary);
-}
-
-.empty-hint {
-  font-size: var(--text-xs);
-  margin-top: var(--space-2);
+.rb-empty span {
+  display: block;
+  margin-top: 9px;
+  font-size: 12.5px;
+  line-height: 1.75;
   color: var(--color-text-disabled);
 }
 
-.loading-state {
-  padding: var(--space-12);
-  text-align: center;
+.rb-empty-cta {
+  margin-top: 20px;
+  height: 38px;
+  padding: 0 18px;
+  border-radius: 999px;
+  background: var(--color-accent-subtle);
+  box-shadow: inset 0 0 0 1px rgba(255, 122, 85, 0.24);
+  font-size: 12.5px;
+  color: var(--color-accent-primary);
+  cursor: pointer;
+  transition: transform var(--duration-fast) var(--ease-spring);
 }
 
-.confirm-overlay {
+.rb-empty-cta:active {
+  transform: scale(0.95);
+}
+
+/* ══════════ 确认弹窗 ══════════ */
+
+.rb-confirm-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.4);
+  z-index: 120;
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
-  padding: var(--space-5);
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  animation: fadeIn 160ms var(--ease-out);
 }
 
-.confirm-dialog {
-  padding: var(--space-5);
-  border-radius: var(--radius-lg);
+.rb-confirm-dialog {
   width: 100%;
   max-width: 320px;
-  animation: slideUp var(--duration-normal) var(--ease-out);
+  padding: 20px;
+  border-radius: var(--radius-xl);
+  background: #1c1c25;
+  box-shadow: 0 30px 70px -20px rgba(0, 0, 0, 0.9), var(--edge-top);
+  animation: popIn 220ms var(--ease-out) both;
 }
 
-.confirm-dialog h3 {
-  font-size: var(--text-lg);
+.rb-confirm-dialog h3 {
+  font-size: 15px;
   font-weight: 600;
-  margin-bottom: var(--space-2);
+  letter-spacing: 0.01em;
+  color: var(--color-text-primary);
+  margin-bottom: 8px;
 }
 
-.confirm-dialog p {
-  font-size: var(--text-sm);
+.rb-confirm-dialog p {
+  font-size: 12.5px;
+  line-height: 1.7;
   color: var(--color-text-secondary);
-  margin-bottom: var(--space-4);
+  margin-bottom: 18px;
 }
 
-.confirm-actions {
+.rb-confirm-actions {
   display: flex;
-  gap: var(--space-3);
-  justify-content: flex-end;
+  gap: 8px;
 }
 
-.confirm-actions button {
-  padding: var(--space-2) var(--space-4);
-  border-radius: var(--radius-sm);
-  font-size: var(--text-sm);
-  cursor: pointer;
-  background: var(--color-bg-elevated);
-  border: 1px solid var(--color-border-primary);
+.rb-confirm-actions button {
+  flex: 1;
+  height: 42px;
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 13.5px;
   color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: transform var(--duration-fast) var(--ease-spring);
 }
 
-.confirm-actions button.danger {
+.rb-confirm-actions button:active {
+  transform: scale(0.97);
+}
+
+.rb-confirm-actions button.danger {
   background: var(--color-error);
-  color: white;
-  border-color: var(--color-error);
+  color: #fff;
+  font-weight: 500;
+}
+
+/* ══════════ 窄屏 ══════════ */
+
+@media (max-width: 360px) {
+  .rb-note {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+  .rb-body {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
 }

@@ -9,7 +9,6 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { getDatabase } from '@/services/database';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { ai } from '@/services/ai';
-import { BottomNav } from '@/components/BottomNav';
 import { hasAIAccess } from '@/utils/aiAccess';
 import type { Entry, Link } from '@/types';
 import './LinkPage.css';
@@ -255,7 +254,6 @@ export function LinkPage() {
         <div className="loading-container">
           <div className="loading-spinner" />
         </div>
-        <BottomNav />
       </div>
     );
   }
@@ -353,8 +351,6 @@ export function LinkPage() {
           )}
         </div>
       </main>
-
-      <BottomNav />
 
       {/* 添加连线弹层 */}
       {showAddLink && (

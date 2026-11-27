@@ -224,3 +224,237 @@
   animation: fadeIn 0.3s var(--ease-out);
   z-index: 200;
 }
+
+
+/* ============ v2 · 打包台 ============
+   结构决策：从"读一篇文章"改成三步 —— 选格式、选范围、按下打包。
+   一屏只有最后那个按钮是珊瑚色。 */
+
+.export-page {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg-primary);
+}
+
+.export-page .page-header {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) 44px;
+  align-items: center;
+  height: 46px;
+  padding: 0 8px;
+  flex-shrink: 0;
+}
+
+.export-page .page-title {
+  margin: 0;
+  text-align: center;
+  font-size: 15px;
+  font-weight: 550;
+  letter-spacing: -0.01em;
+}
+
+.export-page .back-btn {
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: var(--color-text-secondary);
+}
+
+.export-page .back-btn:active {
+  background: rgba(255, 255, 255, 0.05);
+  transform: scale(0.92);
+}
+
+.export-page .page-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 6px 18px calc(96px + var(--safe-bottom));
+}
+
+.export-page .export-section {
+  padding: 0;
+}
+
+.export-page .section-title {
+  margin: 20px 0 10px;
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-text-tertiary);
+}
+
+.export-page .section-title:first-child {
+  margin-top: 12px;
+}
+
+/* 格式：两张可选的卡 */
+.export-page .format-btns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.export-page .format-btn {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-height: 84px;
+  padding: 13px;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-tertiary);
+  box-shadow: var(--edge-top);
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out);
+}
+
+.export-page .format-btn.selected {
+  box-shadow: inset 0 0 0 1.5px rgba(255, 122, 85, 0.55), var(--edge-top);
+}
+
+.export-page .format-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--color-text-secondary);
+}
+
+.export-page .format-btn.selected .format-icon {
+  color: var(--color-accent-primary);
+  background: var(--color-accent-subtle);
+}
+
+.export-page .format-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.export-page .format-name {
+  font-size: 13.5px;
+  font-weight: 550;
+  color: var(--color-text-primary);
+}
+
+.export-page .format-desc {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--color-text-tertiary);
+}
+
+/* 范围：一行行可点 */
+.export-page .scope-options {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.export-page .scope-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 52px;
+  padding: 0 13px;
+  border-radius: var(--radius-md);
+  border-top: 1px solid rgba(255, 255, 255, 0.045);
+  background: transparent;
+  font-size: 13.5px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition:
+    color var(--duration-fast) var(--ease-out),
+    background var(--duration-fast) var(--ease-out);
+}
+
+.export-page .scope-btn.selected {
+  color: var(--color-text-primary);
+  background: rgba(255, 122, 85, 0.08);
+}
+
+.export-page .scope-btn-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 标签多选 */
+.export-page .tag-select {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-tertiary) !important;
+  box-shadow: var(--edge-top) !important;
+}
+
+.export-page .tag-select-input {
+  width: 100%;
+  height: 36px;
+  background: transparent;
+  border: 0;
+  outline: none;
+  font-size: 13px;
+  color: var(--color-text-primary);
+}
+
+/* 主按钮：贴在拇指区，一屏只有一个 */
+.export-page .export-btn {
+  position: fixed;
+  left: 18px;
+  right: 18px;
+  bottom: calc(18px + var(--safe-bottom));
+  height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: var(--radius-lg);
+  background: var(--color-accent-primary);
+  color: var(--color-accent-ink);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  box-shadow: 0 12px 30px -12px rgba(255, 122, 85, 0.6);
+  transition: transform var(--duration-fast) var(--ease-spring);
+}
+
+.export-page .export-btn:active {
+  transform: scale(0.985);
+}
+
+.export-page .export-btn:disabled {
+  background: transparent;
+  color: rgba(255, 255, 255, 0.22);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.09);
+}
+
+/* 顶条收尾：返回键不要圆形底，胶囊不要被拉满 */
+.tag-manage-page .back-btn,
+.link-page .back-btn,
+.link-page .add-link-btn,
+.export-page .back-btn {
+  background: transparent !important;
+  box-shadow: none !important;
+  border: 0;
+  color: var(--color-text-secondary);
+}
+
+.tag-manage-page .merge-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: flex-start;
+  width: auto;
+}

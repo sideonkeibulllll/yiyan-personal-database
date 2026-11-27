@@ -8,7 +8,6 @@ import { useEntryStore } from '@/stores/entryStore';
 import { useTagStore } from '@/stores/tagStore';
 import { exportAndDownload, type ExportOptions } from '@/utils/export';
 import { getDatabase } from '@/services/database';
-import { BottomNav } from '@/components/BottomNav';
 import './ExportPage.css';
 
 /* SVG Icon Components */
@@ -214,8 +213,6 @@ export function ExportPage() {
           <span>导出成功</span>
         </div>
       )}
-
-      <BottomNav />
     </div>
   );
 }

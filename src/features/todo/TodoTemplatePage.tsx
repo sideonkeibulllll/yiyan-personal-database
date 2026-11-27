@@ -1,7 +1,7 @@
 /**
- * 待办模板系统（v3.5.0 翻新）
+ * 待办模板系统（v3.5.0 翻新 · 结构重排）
  *
- * - 列表视图：模板卡片（名称 + 项数 + 自动应用摘要）
+ * - 列表视图：一叠可"套用一次"的卡片（名称 / 项数 / 前三条摘要 / 右下角套用胶囊）
  * - 详情视图：
  *   · 自动应用：周1~7 多选 —— 打开 App 时命中当天 → 自动生成到当天待办
  *   · 模板项：标题 / 备注 / 起止时间 / 今日处理 / 待办标签，可拖拽排序
@@ -12,7 +12,6 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getTodoDatabase } from '@/services/todoDatabase';
 import { useTodoTagStore } from '@/stores/todoTagStore';
-import { BottomNav } from '@/components/BottomNav';
 import { parseAutoWeekdays, formatAutoWeekdays, WEEKDAY_LABELS } from '@/utils/todoWeekdays';
 import type { TodoTemplate, TodoTemplateItem } from '@/types';
 import './TodoTemplatePage.css';
@@ -55,11 +54,15 @@ export function TodoTemplatePage() {
   const [templates, setTemplates] = useState<TodoTemplate[]>([]);
   /** 每个模板的项数（列表卡片展示） */
   const [tplItemCount, setTplItemCount] = useState<Map<string, number>>(new Map());
+  /** 每个模板的前几条标题（列表卡片摘要） */
+  const [tplSummaries, setTplSummaries] = useState<Map<string, string[]>>(new Map());
   const [selectedTemplate, setSelectedTemplate] = useState<TodoTemplate | null>(null);
   const [items, setItems] = useState<TodoTemplateItem[]>([]);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [newTemplateName, setNewTemplateName] = useState('');
   const [showApplyDialog, setShowApplyDialog] = useState(false);
+  // 从列表卡片直接"套用"时，记下要应用的是哪一套（详情页应用时为空）
+  const [applyTarget, setApplyTarget] = useState<TodoTemplate | null>(null);
   const [applyDate, setApplyDate] = useState(() => {
     const today = new Date();
     return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
@@ -68,6 +71,8 @@ export function TodoTemplatePage() {
   const [tagPanelItemId, setTagPanelItemId] = useState<string | null>(null);
   /** 正在拖拽的项 id */
   const [draggingItemId, setDraggingItemId] = useState<string | null>(null);
+  /** 列表卡片右上角 ⋯ 菜单（哪一张开着） */
+  const [menuTemplateId, setMenuTemplateId] = useState<string | null>(null);
 
   // 待办标签池
   const tags = useTodoTagStore(state => state.tags);
@@ -113,12 +118,19 @@ export function TodoTemplatePage() {
       const db = await getTodoDatabase();
       const list = await db.getAllTemplates();
       setTemplates(list);
-      // 项数统计（列表卡片展示）
+      // 项数统计 + 摘要（列表卡片展示）
       try {
         const allItems = await db.getAllTemplateItems();
         const counts = new Map<string, number>();
-        for (const it of allItems) counts.set(it.templateId, (counts.get(it.templateId) || 0) + 1);
+        const summaries = new Map<string, string[]>();
+        for (const it of allItems) {
+          counts.set(it.templateId, (counts.get(it.templateId) || 0) + 1);
+          const arr = summaries.get(it.templateId) || [];
+          if (it.title) arr.push(it.title);
+          summaries.set(it.templateId, arr);
+        }
         setTplItemCount(counts);
+        setTplSummaries(summaries);
       } catch { /* 项数展示失败不影响主流程 */ }
     } catch (e) {
       console.error('[TodoTemplatePage] 加载模板失败:', e);
@@ -211,12 +223,25 @@ export function TodoTemplatePage() {
     }
   }, [selectedTemplate, flushPending]);
 
-  const handleApplyTemplate = useCallback(async () => {
-    if (!selectedTemplate || !applyDate) return;
+  /** 列表卡片 ⋯ 菜单里的删除：不进入详情页也能删 */
+  const handleDeleteTemplateFromList = useCallback(async (template: TodoTemplate) => {
+    try {
+      await flushPending();
+      const db = await getTodoDatabase();
+      await db.deleteTemplate(template.id);
+      setTemplates(prev => prev.filter(t => t.id !== template.id));
+    } catch (e) {
+      console.error('[TodoTemplatePage] 删除模板失败:', e);
+    }
+  }, [flushPending]);
+
+  const handleApplyTemplate = useCallback(async (target?: TodoTemplate) => {
+    const tpl = target ?? selectedTemplate;
+    if (!tpl || !applyDate) return;
     try {
       await flushPending(); // 应用前先落盘，确保生成的是最新内容
       const db = await getTodoDatabase();
-      await db.importTemplateToDate(selectedTemplate.id, applyDate);
+      await db.importTemplateToDate(tpl.id, applyDate);
       navigate('/todo');
     } catch (e) {
       console.error('[TodoTemplatePage] 应用模板失败:', e);
@@ -324,77 +349,149 @@ export function TodoTemplatePage() {
         ? '工作日'
         : autoDays.map(d => WEEKDAY_LABELS[d]).join('、');
 
+  /** 卡片上的自动应用文案 */
+  const dayLabelOf = (autoWeekdays?: string) => {
+    const days = parseAutoWeekdays(autoWeekdays);
+    if (days.length === 0) return '';
+    if (days.length === 7) return '每天';
+    if (days.length === 5 && days.join(',') === '1,2,3,4,5') return '工作日';
+    return days.map(d => WEEKDAY_LABELS[d]).join('、');
+  };
+
   return (
     <div className="todo-template-page">
-      <main className="page-content">
-        <div className="template-header">
+      {/* ══ 顶部返回条 ══ */}
+      <header className="tp-bar">
+        <button
+          type="button"
+          className="tp-bar-icon"
+          onClick={() => { if (selectedTemplate) handleBackToList(); else navigate('/todo'); }}
+          aria-label="返回"
+        >
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M11 4 6 9l5 5" />
+          </svg>
+        </button>
+        <span className="tp-bar-title">{selectedTemplate ? selectedTemplate.name : '模板'}</span>
+        {selectedTemplate ? (
           <button
-            className="template-back"
-            onClick={() => { if (selectedTemplate) handleBackToList(); else navigate('/todo'); }}
-            aria-label="返回"
+            type="button"
+            className="tp-bar-text"
+            onClick={() => { setApplyTarget(null); setShowApplyDialog(true); }}
           >
-            ←
+            应用
           </button>
-          <h2>{selectedTemplate ? selectedTemplate.name : '模板管理'}</h2>
-          {selectedTemplate ? (
-            <button className="template-apply-btn" onClick={() => setShowApplyDialog(true)}>应用到日期</button>
-          ) : (
-            <button className="template-add-btn" onClick={() => setShowCreateDialog(true)} aria-label="新建模板">+</button>
-          )}
-        </div>
+        ) : (
+          <button
+            type="button"
+            className="tp-bar-icon tp-bar-plus"
+            onClick={() => setShowCreateDialog(true)}
+            aria-label="新建模板"
+          >
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+              <path d="M9 3.5v11M3.5 9h11" />
+            </svg>
+          </button>
+        )}
+      </header>
 
+      <main className="tp-body">
         {!selectedTemplate ? (
-          /* ===== 模板列表 ===== */
-          <div className="template-list">
+          /* ===== 模板列表：一叠可以"套用一次"的卡片 ===== */
+          <div className="tp-list">
             {templates.length > 0 ? (
               templates.map(tpl => {
-                const days = parseAutoWeekdays(tpl.autoWeekdays);
-                const dayLabel = days.length === 7 ? '每天'
-                  : days.length === 5 && days.join(',') === '1,2,3,4,5' ? '工作日'
-                    : days.map(d => WEEKDAY_LABELS[d]).join('、');
+                const summary = (tplSummaries.get(tpl.id) || []).slice(0, 3);
+                const dayLabel = dayLabelOf(tpl.autoWeekdays);
+                const count = tplItemCount.get(tpl.id) ?? 0;
                 return (
-                  <div
-                    key={tpl.id}
-                    className="template-card glass"
-                    onClick={() => void handleSelectTemplate(tpl)}
-                  >
-                    <div className="template-card-main">
-                      <span className="template-name">{tpl.name}</span>
-                      <span className="template-card-meta">
-                        {tplItemCount.get(tpl.id) ?? 0} 项
-                        {days.length > 0 && <span className="template-card-auto"> · 自动：{dayLabel}</span>}
+                  <article className="tp-card" key={tpl.id}>
+                    <div className="tp-card-hit" onClick={() => void handleSelectTemplate(tpl)}>
+                      <div className="tp-card-head">
+                        <span className="tp-card-name">{tpl.name}</span>
+                        {dayLabel && <span className="tp-card-auto">自动 · {dayLabel}</span>}
+                      </div>
+                      <span className="tp-card-meta">共 {count} 条</span>
+                      <span className="tp-card-summary">
+                        {summary.length > 0 ? summary.join(' · ') : '还没有待办项'}
                       </span>
                     </div>
-                    <span className="template-arrow">›</span>
-                  </div>
+
+                    <div className="tp-card-foot">
+                      <button
+                        type="button"
+                        className="tp-card-apply"
+                        onClick={() => { setApplyTarget(tpl); setShowApplyDialog(true); }}
+                      >
+                        套用
+                      </button>
+                      <button
+                        type="button"
+                        className="tp-card-more"
+                        onClick={() => setMenuTemplateId(prev => (prev === tpl.id ? null : tpl.id))}
+                        aria-label="更多操作"
+                        aria-expanded={menuTemplateId === tpl.id}
+                      >
+                        <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                          <circle cx="3" cy="8" r="1.35" /><circle cx="8" cy="8" r="1.35" /><circle cx="13" cy="8" r="1.35" />
+                        </svg>
+                      </button>
+                    </div>
+
+                    {menuTemplateId === tpl.id && (
+                      <>
+                        <div className="tp-card-scrim" onClick={() => setMenuTemplateId(null)} />
+                        <div className="tp-card-menu" role="menu">
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => { setMenuTemplateId(null); void handleSelectTemplate(tpl); }}
+                          >
+                            打开编辑
+                          </button>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            className="danger"
+                            onClick={() => { setMenuTemplateId(null); void handleDeleteTemplateFromList(tpl); }}
+                          >
+                            删除模板
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </article>
                 );
               })
             ) : (
-              <div className="template-empty">
-                <p>还没有模板</p>
-                <p className="template-empty-hint">点击右上角 + 创建第一个模板</p>
+              <div className="tp-empty">
+                <b>还没有模板</b>
+                <span>把常做的一串事存成模板，<br />之后一键铺到某一天。</span>
+                <button type="button" className="tp-empty-cta" onClick={() => setShowCreateDialog(true)}>
+                  新建第一个模板
+                </button>
               </div>
             )}
           </div>
         ) : (
           /* ===== 模板详情 ===== */
-          <div className="template-detail">
+          <div className="tp-detail">
             {/* 自动应用 */}
-            <div className="template-auto glass">
-              <div className="template-auto-head">
-                <span className="template-auto-title">自动应用</span>
-                <span className="template-auto-hint">
-                  {autoSummary === '每天' ? '每天自动生成'
-                    : autoSummary === '工作日' ? '每个工作日自动生成'
-                      : autoSummary ? `每周 ${autoSummary} 自动生成` : '未开启'}
+            <section className="tp-auto">
+              <div className="tp-auto-head">
+                <span className="tp-auto-title">自动应用</span>
+                <span className="tp-auto-hint">
+                  {autoSummary === '每天' ? '每天生成'
+                    : autoSummary === '工作日' ? '每个工作日生成'
+                      : autoSummary ? `每周 ${autoSummary}` : '未开启'}
                 </span>
               </div>
-              <div className="template-weekdays">
+              <div className="tp-days">
                 {[1, 2, 3, 4, 5, 6, 7].map(d => (
                   <button
                     key={d}
                     type="button"
-                    className={`template-day ${autoDays.includes(d) ? 'on' : ''}`}
+                    className={`tp-day ${autoDays.includes(d) ? 'on' : ''}`}
                     onClick={() => toggleWeekday(d)}
                     title={WEEKDAY_LABELS[d]}
                   >
@@ -402,32 +499,32 @@ export function TodoTemplatePage() {
                   </button>
                 ))}
               </div>
-              <div className="template-auto-presets">
+              <div className="tp-auto-presets">
                 <button type="button" onClick={() => void saveWeekdays([1, 2, 3, 4, 5])}>工作日</button>
                 <button type="button" onClick={() => void saveWeekdays([1, 2, 3, 4, 5, 6, 7])}>每天</button>
                 <button type="button" onClick={() => void saveWeekdays([])}>不自动</button>
               </div>
-              <p className="template-auto-note">选中的星期，打开 App 时会自动把这套待办生成到当天。</p>
-            </div>
+              <p className="tp-auto-note">选中的星期，打开 App 时会自动把这套待办生成到当天。</p>
+            </section>
 
             {/* 模板项 */}
-            <div className="template-items">
+            <div className="tp-items">
               {items.map(item => {
                 const selectedTagIds = parseItemTagIds(item);
                 const selectedTags = tags.filter(t => selectedTagIds.includes(t.id));
                 return (
                   <div
                     key={item.id}
-                    className={`template-item glass ${draggingItemId === item.id ? 'dragging' : ''}`}
+                    className={`template-item tp-item ${draggingItemId === item.id ? 'dragging' : ''}`}
                   >
-                    <div className="template-item-row">
+                    <div className="tp-item-row">
                       {/* 拖拽把手 */}
                       <div
-                        className="template-drag-handle"
+                        className="tp-item-handle"
                         onPointerDown={e => handleItemDragStart(e, item.id)}
                         title="拖拽排序"
                       >
-                        <svg width="12" height="16" viewBox="0 0 12 16" fill="currentColor" opacity="0.55">
+                        <svg width="12" height="16" viewBox="0 0 12 16" fill="currentColor" opacity="0.55" aria-hidden="true">
                           <circle cx="3" cy="3" r="1.3" /><circle cx="9" cy="3" r="1.3" />
                           <circle cx="3" cy="8" r="1.3" /><circle cx="9" cy="8" r="1.3" />
                           <circle cx="3" cy="13" r="1.3" /><circle cx="9" cy="13" r="1.3" />
@@ -435,32 +532,34 @@ export function TodoTemplatePage() {
                       </div>
                       <input
                         type="text"
-                        className="template-item-title"
+                        className="tp-item-title"
                         value={item.title}
                         placeholder="待办标题"
                         onChange={e => queueItemUpdate(item.id, { title: e.target.value })}
                       />
                       <button
                         type="button"
-                        className="template-item-remove"
+                        className="tp-item-remove"
                         onClick={() => void handleDeleteItem(item.id)}
                         aria-label="删除此项"
                       >
-                        ×
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                          <path d="M18 6 6 18M6 6l12 12" />
+                        </svg>
                       </button>
                     </div>
 
                     <input
                       type="text"
-                      className="template-item-note"
+                      className="tp-item-note"
                       value={item.note ?? ''}
                       placeholder="备注（可选）"
                       onChange={e => queueItemUpdate(item.id, { note: e.target.value })}
                     />
 
-                    <div className="template-item-times">
+                    <div className="tp-item-times">
                       <label>
-                        开始
+                        <span>开始</span>
                         <input
                           type="time"
                           value={minutesToInput(item.startTime)}
@@ -468,14 +567,14 @@ export function TodoTemplatePage() {
                         />
                       </label>
                       <label>
-                        结束
+                        <span>结束</span>
                         <input
                           type="time"
                           value={minutesToInput(item.endTime)}
                           onChange={e => queueItemUpdate(item.id, { endTime: inputToMinutes(e.target.value) })}
                         />
                       </label>
-                      <label className="template-item-today">
+                      <label className="tp-item-today">
                         <input
                           type="checkbox"
                           checked={item.isToday}
@@ -486,14 +585,14 @@ export function TodoTemplatePage() {
                     </div>
 
                     {/* 标签 */}
-                    <div className="template-item-tags">
+                    <div className="tp-item-tags">
                       {selectedTags.map(tag => (
-                        <span key={tag.id} className="template-tag-chip on">
-                          <span className="template-tag-dot" style={{ background: tag.color || 'var(--color-accent-primary)' }} />
+                        <span key={tag.id} className="tp-tag on">
+                          <i className="tp-tag-dot" style={{ background: tag.color || 'var(--color-accent-primary)' }} aria-hidden="true" />
                           {tag.name}
                           <button
                             type="button"
-                            className="template-tag-remove"
+                            className="tp-tag-remove"
                             onClick={() => toggleItemTag(item, tag.id)}
                             aria-label={`移除标签 ${tag.name}`}
                           >
@@ -503,16 +602,16 @@ export function TodoTemplatePage() {
                       ))}
                       <button
                         type="button"
-                        className="template-tag-add"
+                        className="tp-tag-add"
                         onClick={() => setTagPanelItemId(prev => (prev === item.id ? null : item.id))}
                       >
                         {selectedTags.length > 0 ? '改标签' : '+ 标签'}
                       </button>
                     </div>
                     {tagPanelItemId === item.id && (
-                      <div className="template-tag-panel">
+                      <div className="tp-tag-panel">
                         {tags.length === 0 ? (
-                          <span className="template-tag-empty">还没有待办标签（可在待办编辑页创建）</span>
+                          <span className="tp-tag-empty">还没有待办标签（可在待办编辑页创建）</span>
                         ) : (
                           tags.map(tag => {
                             const on = selectedTagIds.includes(tag.id);
@@ -520,10 +619,10 @@ export function TodoTemplatePage() {
                               <button
                                 key={tag.id}
                                 type="button"
-                                className={`template-tag-option ${on ? 'on' : ''}`}
+                                className={`tp-tag-option ${on ? 'on' : ''}`}
                                 onClick={() => toggleItemTag(item, tag.id)}
                               >
-                                <span className="template-tag-dot" style={{ background: tag.color || 'var(--color-accent-primary)' }} />
+                                <i className="tp-tag-dot" style={{ background: tag.color || 'var(--color-accent-primary)' }} aria-hidden="true" />
                                 {tag.name}
                               </button>
                             );
@@ -534,12 +633,12 @@ export function TodoTemplatePage() {
                   </div>
                 );
               })}
-              <button className="template-item-add" onClick={() => void handleAddItem()}>
+              <button type="button" className="tp-item-add" onClick={() => void handleAddItem()}>
                 + 添加待办项
               </button>
             </div>
 
-            <button className="template-delete-btn" onClick={() => void handleDeleteTemplate()}>
+            <button type="button" className="tp-delete" onClick={() => void handleDeleteTemplate()}>
               删除模板
             </button>
           </div>
@@ -548,20 +647,22 @@ export function TodoTemplatePage() {
 
       {/* 创建模板对话框 */}
       {showCreateDialog && (
-        <div className="dialog-overlay" onClick={() => setShowCreateDialog(false)}>
-          <div className="dialog-content glass" onClick={e => e.stopPropagation()}>
+        <div className="tp-dialog-overlay" onClick={() => setShowCreateDialog(false)}>
+          <div className="tp-dialog-content" onClick={e => e.stopPropagation()}>
             <h3>创建模板</h3>
             <input
               type="text"
-              className="form-input glass"
+              className="tp-input"
               value={newTemplateName}
               onChange={e => setNewTemplateName(e.target.value)}
-              placeholder="模板名称..."
+              placeholder="模板名称…"
               autoFocus
             />
-            <div className="dialog-actions">
-              <button onClick={() => setShowCreateDialog(false)}>取消</button>
+            <div className="tp-dialog-actions">
+              <button type="button" onClick={() => setShowCreateDialog(false)}>取消</button>
               <button
+                type="button"
+                className="primary"
                 onClick={() => void handleCreateTemplate()}
                 disabled={!newTemplateName.trim()}
               >
@@ -574,24 +675,31 @@ export function TodoTemplatePage() {
 
       {/* 应用模板对话框 */}
       {showApplyDialog && (
-        <div className="dialog-overlay" onClick={() => setShowApplyDialog(false)}>
-          <div className="dialog-content glass" onClick={e => e.stopPropagation()}>
-            <h3>应用到日期</h3>
+        <div className="tp-dialog-overlay" onClick={() => setShowApplyDialog(false)}>
+          <div className="tp-dialog-content" onClick={e => e.stopPropagation()}>
+            <h3>套用到哪一天</h3>
+            <p className="tp-dialog-sub">
+              {applyTarget ? applyTarget.name : selectedTemplate?.name}
+            </p>
             <input
               type="date"
-              className="form-input glass"
+              className="tp-input"
               value={applyDate}
               onChange={e => setApplyDate(e.target.value)}
             />
-            <div className="dialog-actions">
-              <button onClick={() => setShowApplyDialog(false)}>取消</button>
-              <button onClick={() => void handleApplyTemplate()}>应用</button>
+            <div className="tp-dialog-actions">
+              <button type="button" onClick={() => setShowApplyDialog(false)}>取消</button>
+              <button
+                type="button"
+                className="primary"
+                onClick={() => void handleApplyTemplate(applyTarget ?? undefined)}
+              >
+                套用
+              </button>
             </div>
           </div>
         </div>
       )}
-
-      <BottomNav />
     </div>
   );
 }

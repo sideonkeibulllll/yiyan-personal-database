@@ -925,6 +925,14 @@ export function FileViewPage() {
         </>
       )}
 
+      {/* 顶部悬浮返回：一颗胶囊压在最上面，不铺整条黑带 */}
+      {!editing && (
+        <button type="button" className="fv-back" onClick={handleBack} title="返回">
+          <IconBack size={17} />
+          <span>返回</span>
+        </button>
+      )}
+
       {/* 资源自检角标（v4.2.5）：引用了但包里没有的文件，直接在页面上认账 */}
       {!editing && canPreview && assetReport && assetReport.missing.length > 0 && (
         <button
@@ -954,6 +962,22 @@ export function FileViewPage() {
       )}
 
       {dirtyHint && <div className="files-toast">{dirtyHint}</div>}
+
+      {/* 底部极简信息条：文件是谁、多大、以及唯一的动作入口 */}
+      {!editing && loaded && !missing && (
+        <div className="fv-info">
+          <div className="fv-info-text">
+            <span className="fv-info-name">{currentPath}</span>
+            <span className="fv-info-meta">
+              {htmlPages.length > 1 && pageIndex >= 0 ? `第 ${pageIndex + 1}/${htmlPages.length} 页 · ` : ''}
+              {formatFileSize(files.find(item => item.path === currentPath)?.size ?? 0)}
+            </span>
+          </div>
+          <button type="button" className="fv-info-act" onClick={() => setPanel('actions')}>
+            操作
+          </button>
+        </div>
+      )}
 
       <input
         ref={importInputRef}

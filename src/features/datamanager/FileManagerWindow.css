@@ -193,3 +193,46 @@
   font-size: var(--text-base);
   flex-shrink: 0;
 }
+
+/* ============ 32px 拖拽条：给窗口一个「窗口」身份 ============ */
+.fm-window-bar {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 32px;
+  padding: 0 11px;
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  flex-shrink: 0;
+}
+
+.fm-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.fm-dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.fm-dots i:nth-child(1) {
+  background: rgba(255, 122, 85, 0.5);
+}
+.fm-dots i:nth-child(2) {
+  background: rgba(255, 193, 77, 0.4);
+}
+.fm-dots i:nth-child(3) {
+  background: rgba(70, 224, 165, 0.35);
+}
+
+.fm-window-bar .fm-window-path {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}

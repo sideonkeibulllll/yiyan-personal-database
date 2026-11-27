@@ -1,5 +1,5 @@
 /**
- * 侧边栏菜单
+ * 浏览方式：从底部升起的双列动作抽屉（不是侧边栏）
  */
 import type { ManagerMode } from './types';
 import './SideMenu.css';
@@ -35,59 +35,58 @@ const HardDriveIcon = () => (
 
 /** X (close) icon */
 const XIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
     <path d="M18 6L6 18M6 6l12 12" />
   </svg>
 );
 
 /** Log out icon */
 const LogOutIcon = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
     <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="M16 17l5-5-5-5M21 12H9" />
   </svg>
 );
 
 const menuItems: { mode: ManagerMode; icon: React.ReactNode; label: string; desc: string }[] = [
-  { mode: 'tags', icon: <TagIcon />, label: '标签模式', desc: '按标签浏览条目' },
-  { mode: 'groups', icon: <FolderIcon />, label: '组模式', desc: '按组浏览条目' },
-  { mode: 'data', icon: <HardDriveIcon />, label: '数据模式', desc: '浏览所有条目' },
+  { mode: 'tags', icon: <TagIcon />, label: '标签', desc: '按标签浏览条目' },
+  { mode: 'groups', icon: <FolderIcon />, label: '组', desc: '按组浏览条目' },
+  { mode: 'data', icon: <HardDriveIcon />, label: '数据', desc: '浏览所有条目' },
 ];
 
 export function SideMenu({ open, currentMode, onModeChange, onClose, onExit }: SideMenuProps) {
   return (
     <>
-      {open && <div className="dm-overlay" onClick={onClose} />}
-      <aside className={`dm-side-menu ${open ? 'open' : ''}`}>
-        <div className="dm-side-menu-header">
-          <span className="dm-side-menu-title">数据管理器</span>
-          <button className="dm-side-menu-close" onClick={onClose}><XIcon /></button>
+      {open && <div className="dm-sheet-scrim" onClick={onClose} />}
+      <aside className={`dm-sheet ${open ? 'open' : ''}`}>
+        <span className="dm-sheet-grip" aria-hidden="true" />
+        <div className="dm-sheet-head">
+          <h3>浏览方式</h3>
+          <span className="dm-sheet-sub">
+            当前 · {menuItems.find(item => item.mode === currentMode)?.label}
+          </span>
+          <button className="dm-sheet-close" onClick={onClose} title="关闭"><XIcon /></button>
         </div>
-        <nav className="dm-side-menu-nav">
+        <nav className="dm-sheet-grid">
           {menuItems.map(item => (
             <button
               key={item.mode}
-              className={`dm-side-menu-item ${currentMode === item.mode ? 'active' : ''}`}
+              className={`dm-sheet-cell ${currentMode === item.mode ? 'on' : ''}`}
               onClick={() => {
                 onModeChange(item.mode);
                 onClose();
               }}
             >
-              <span className="dm-side-menu-icon">{item.icon}</span>
-              <div className="dm-side-menu-info">
-                <span className="dm-side-menu-label">{item.label}</span>
-                <span className="dm-side-menu-desc">{item.desc}</span>
-              </div>
-              {currentMode === item.mode && <span className="dm-side-menu-dot" />}
+              <span className="dm-sheet-ico">{item.icon}</span>
+              <span className="dm-sheet-label">{item.label}</span>
+              <span className="dm-sheet-desc">{item.desc}</span>
+              {currentMode === item.mode && <span className="dm-sheet-dot" aria-hidden="true" />}
             </button>
           ))}
         </nav>
-        <div className="dm-side-menu-footer">
-          <button className="dm-side-menu-exit" onClick={() => { onExit(); onClose(); }}>
-            <span className="dm-side-menu-exit-icon"><LogOutIcon /></span>
-            <span>退出</span>
-          </button>
-          <span className="dm-side-menu-version">v1.0</span>
-        </div>
+        <button className="dm-sheet-exit" onClick={() => { onExit(); onClose(); }}>
+          <LogOutIcon />
+          <span>退出数据管理</span>
+        </button>
       </aside>
     </>
   );
