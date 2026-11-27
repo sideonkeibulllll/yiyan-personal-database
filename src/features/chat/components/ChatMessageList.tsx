@@ -15,6 +15,7 @@ import { readImageAsSrc } from '@/services/attachmentService';
 import { ImageViewer } from '@/components/ImageViewer';
 import { IconMessage, IconCheck, IconBrain, IconFile, IconChevronRight } from '@/components/icons';
 import { formatTime, splitChatFileBlocks, formatCharCount } from '../chatUtils';
+import { installChatSelectionGuard } from '../chatSelectionGuard';
 import type { ChatMessage, ChatImage } from '../chatTypes';
 
 interface ChatMessageListProps {
@@ -405,6 +406,14 @@ export function ChatMessageList({
   onConfirmAction,
   onDeleteTurn,
 }: ChatMessageListProps) {
+  // v4.2.6：选区守卫 —— 安卓拖手柄时锚点会被吸到容器边界，导致「复制整轮」。
+  // 根因修复在 CSS（容器不再是可选根），这里兜底回滚异常选区。
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    return installChatSelectionGuard(el);
+  }, [containerRef]);
+
   return (
     <div className="chat-messages" ref={containerRef}>
       {messages.length === 0 ? (

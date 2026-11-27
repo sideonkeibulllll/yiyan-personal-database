@@ -350,15 +350,29 @@
   gap: var(--space-4);
 }
 
-/* === 允许右侧对话区文本选中（覆盖全局禁用，左侧栏/底部输入框保持禁用）=== */
-.chat-messages,
-.chat-messages .message-content,
+/* === 允许右侧对话区文本选中（覆盖全局禁用，左侧栏/底部输入框保持禁用）===
+   v4.2.6：可选范围收窄到「正文文字」本身，列表容器与气泡间距一律不可选。
+   安卓 WebView 长按框选时，如果起手位置落在段落/消息之间的空白，会把选区
+   锚点吸附到最近的可选祖先 —— 而 .chat-messages 整块是可选根，锚点就落到
+   容器 offset 0（= 第一条消息之前），再拖一下就变成整轮几千上万字，点「复制」
+   直接把整轮对话复制下来。容器不再是可选根，这条路径就断了。
+
+   注意：.message-content 常与 .markdown-body 是同一个元素（普通消息的正文），
+   所以这里不给 .message-content 设 none —— 让它继承容器的 none，再由正文规则
+   覆盖成 text，否则正文会跟着一起变成不可选。 */
 .chat-messages .markdown-body,
 .chat-messages .markdown-body *,
 .chat-messages .reasoning-content {
   -webkit-user-select: text;
   user-select: text;
   -webkit-touch-callout: default;
+}
+
+.chat-messages,
+.chat-messages .chat-file-segments {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 
 /* 头像/时间/标签等装饰元素不参与选中 */
