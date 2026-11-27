@@ -903,6 +903,41 @@
   margin-left: var(--space-2);
 }
 
+/* v4.2.6：思考行里的「复制」（两段式：点一下变确认，再点才复制正文） */
+.turn-copy-btn {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--color-text-tertiary);
+  font-size: 10px;
+  line-height: 1.4;
+  cursor: pointer;
+  user-select: none;
+  transition: color var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out);
+}
+
+.turn-copy-btn:hover {
+  color: var(--color-accent-primary);
+  border-color: var(--color-border-accent);
+}
+
+.turn-copy-btn.armed {
+  color: #fff;
+  background: var(--color-accent-primary);
+  border-color: var(--color-accent-primary);
+}
+
+.turn-copy-btn.done {
+  color: var(--color-accent-primary);
+  border-color: var(--color-border-accent);
+}
+
+.message-tag .turn-copy-btn {
+  margin-left: var(--space-2);
+}
+
 .reasoning-content {
   padding: var(--space-2) var(--space-3);
   font-size: var(--text-xs);

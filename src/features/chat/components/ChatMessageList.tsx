@@ -60,6 +60,57 @@ function TurnDeleteButton({ onDelete }: { onDelete: () => void }) {
   );
 }
 
+/** v4.2.6：复制本条正文（剪贴板不可用时退化成临时 textarea） */
+async function copyPlainText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0;';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+}
+
+/** v4.2.6：思考行里的「复制」—— 点一下变「确认复制？」，再点才复制这条回复的正文 */
+function TurnCopyButton({ text }: { text: string }) {
+  const [state, setState] = useState<'idle' | 'armed' | 'done'>('idle');
+  useEffect(() => {
+    if (state === 'idle') return;
+    const t = window.setTimeout(() => setState('idle'), state === 'done' ? 1500 : 3000);
+    return () => window.clearTimeout(t);
+  }, [state]);
+
+  return (
+    <button
+      type="button"
+      className={`turn-copy-btn ${state}`}
+      title="复制这条回复的正文"
+      onClick={async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (state === 'armed') {
+          const ok = await copyPlainText(text);
+          setState(ok ? 'done' : 'idle');
+        } else if (state === 'idle') {
+          setState('armed');
+        }
+      }}
+    >
+      {state === 'armed' ? '确认复制？' : state === 'done' ? '已复制' : '复制'}
+    </button>
+  );
+}
+
 /* === 消息内的图片网格（v3.5.3）=== */
 /**
  * 读缩略图先顶上；打开大图后再补读原图并替换（点开不等待）。
@@ -267,6 +318,9 @@ const ChatMessageItem = memo(function ChatMessageItem({
               {msg.role === 'assistant' && !streamingActive && onDeleteTurn && (
                 <TurnDeleteButton onDelete={() => onDeleteTurn(msg.id)} />
               )}
+              {msg.role === 'assistant' && !streamingActive && msg.content && (
+                <TurnCopyButton text={msg.content} />
+              )}
             </summary>
             <div className="reasoning-content">{msg.reasoningContent}</div>
           </details>
@@ -370,6 +424,9 @@ const ChatMessageItem = memo(function ChatMessageItem({
             深度思考 · {msg.thinkingEffort}
             {msg.role === 'assistant' && !streamingActive && onDeleteTurn && (
               <TurnDeleteButton onDelete={() => onDeleteTurn(msg.id)} />
+            )}
+            {msg.role === 'assistant' && !streamingActive && msg.content && (
+              <TurnCopyButton text={msg.content} />
             )}
           </span>
         )}
