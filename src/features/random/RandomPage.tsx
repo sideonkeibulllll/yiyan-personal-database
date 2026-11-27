@@ -13,7 +13,6 @@ import { weightedRandomSelect, filterEntries } from '@/services/random';
 import { resolveTimeRange } from '@/utils/timeRangeFilter';
 import { sanitizeEntryFilter } from '@/utils/entryFilterState';
 import type { EntryFilterState } from '@/utils/entryFilterState';
-import { BottomNav } from '@/components/BottomNav';
 import { QuickMenu } from './QuickMenu';
 import { TagSelector } from '@/components/TagSelector';
 import { EntryFilterPanel } from '@/components/EntryFilterPanel/EntryFilterPanel';
@@ -523,7 +522,6 @@ export function RandomPage() {
         <div className="loading-card glass">
           <div className="loading-spinner" />
         </div>
-        <BottomNav />
       </div>
     );
   }
@@ -779,8 +777,6 @@ export function RandomPage() {
           <span>{toastMsg}</span>
         </div>
       )}
-
-      <BottomNav />
     </div>
   );
 }

@@ -12,7 +12,6 @@ import { useTodoStore } from '@/stores/todoStore';
 import { useTodoTagStore } from '@/stores/todoTagStore';
 import type { Todo } from '@/types';
 import { TagSelector } from '@/components/TagSelector/TagSelector';
-import { BottomNav } from '@/components/BottomNav';
 import { getDatabase } from '@/services/database';
 import { pickImages, takePhoto, type SelectedImage } from '@/services/attachmentService';
 import { isElectron } from '@/services/electronAdapter';
@@ -222,6 +221,10 @@ export function HomePage() {
     () => localStorage.getItem('yiyan_input_pinned_untimed'),
   );
   const [now, setNow] = useState(Date.now());
+  // 今天的事：默认收起，需要时从脊线下拉出来
+  const [todoPeek, setTodoPeek] = useState(false);
+  // 底部工具托盘（粘贴 / 选图 / 拍照）
+  const [trayOpen, setTrayOpen] = useState(false);
 
   // 录入时待保存的图片
   const [pendingImages, setPendingImages] = useState<SelectedImage[]>([]);
@@ -699,291 +702,324 @@ export function HomePage() {
     }
   }, [todoStartTime, todoEndTime]);
 
+  // 今天还剩几件，只给脊线上一个数字
+  const todoCount = (timedCard ? 1 : 0) + (untimedCard ? 1 : 0);
+
+  // 此刻 —— 首页唯一会自己动的东西。
+  // 秒数每秒都在走，提醒你这页记的是「现在」，不是某个待办系统的入口。
+  const clock = useMemo(() => {
+    const d = new Date(now);
+    return {
+      hm: `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`,
+      s: String(d.getSeconds()).padStart(2, '0'),
+      date: `${d.getMonth() + 1}月${d.getDate()}日`,
+      week: '日一二三四五六'[d.getDay()],
+    };
+  }, [now]);
+
+
   return (
     <div className="home-page">
-      <header className="home-page-header">
-        {/* 顶部 2 张待办卡片（纵向）：timed + untimed，替换原标题 */}
-        <div className="home-todo-cards">
-          {/* timed 卡片（有 startTime/endTime，带倒计时） */}
-          {timedCard ? (
-            (() => {
+      {/* ══ 时间脊：一条线，不是一块面板 ══ */}
+      <header className="home-ridge">
+        <span className="ridge-hm">{clock.hm}</span>
+        <span className="ridge-s">{clock.s}</span>
+        <span className="ridge-date">{clock.date} · 周{clock.week}</span>
+        <button
+          type="button"
+          className={`ridge-todo${todoPeek ? ' on' : ''}`}
+          onClick={() => setTodoPeek(v => !v)}
+          aria-expanded={todoPeek}
+        >
+          <span className="ridge-todo-dot" aria-hidden="true" />
+          {todoCount > 0 ? `${todoCount} 件` : '空闲'}
+        </button>
+      </header>
+
+      {/* ══ 今天的事：从脊线下面抽出来的一叠 ══ */}
+      {todoPeek && (
+        <>
+          <div className="peek-scrim" onClick={() => setTodoPeek(false)} />
+          <div className="peek">
+            {timedCard ? (() => {
               const phase = now < (timedCard.startTime ?? 0) ? 'before' : now < (timedCard.endTime ?? Infinity) ? 'ongoing' : 'ended';
-              const cardColor = getTodoCardColor(timedCard);
-              // 进行中：颜色背景从右往左缩短，右侧露出暗色底
-              const progressPct = (phase === 'ongoing' && timedCard.startTime && timedCard.endTime)
+              const color = getTodoCardColor(timedCard);
+              const pct = (phase === 'ongoing' && timedCard.startTime && timedCard.endTime)
                 ? ((timedCard.endTime - now) / (timedCard.endTime - timedCard.startTime)) * 100
                 : null;
               return (
-                <div
-                  className={`home-todo-card timed phase-${phase}`}
-                  style={progressPct !== null ? {
-                    background: `linear-gradient(to right, ${cardColor}88 ${progressPct}%, var(--color-bg-elevated) ${progressPct}%)`,
-                    borderLeftColor: cardColor,
-                  } : phase === 'before' ? {
-                    background: `${cardColor}44`,
-                    borderLeftColor: cardColor,
-                  } : phase === 'ended' ? {
-                    background: `${cardColor}22`,
-                    borderLeftColor: cardColor,
-                    opacity: 0.6,
-                  } : {
-                    background: `${cardColor}44`,
-                    borderLeftColor: cardColor,
-                  }}
-                  onClick={() => navigate(`/todo/${timedCard.id}/edit`)}
+                <button
+                  type="button"
+                  className={`peek-item is-${phase}`}
+                  onClick={() => { setTodoPeek(false); navigate(`/todo/${timedCard.id}/edit`); }}
                 >
-                  {/* 文字遮罩层，确保文字可读 */}
-                  <div className="home-todo-card-overlay" />
-                  <div className="home-todo-card-main">
-                    <span className="home-todo-card-title">{timedCard.title}</span>
-                    <span className="home-todo-card-time">{formatTimeShort(timedCard.startTime)} - {formatTimeShort(timedCard.endTime)}</span>
-                  </div>
-                  <span className="home-todo-card-countdown">
+                  <span className="peek-rail" style={{ background: color }} />
+                  <span className="peek-main">
+                    <span className="peek-name">{timedCard.title}</span>
+                    <span className="peek-time">
+                      {formatTimeShort(timedCard.startTime)} – {formatTimeShort(timedCard.endTime)}
+                    </span>
+                  </span>
+                  <span className="peek-cd">
                     {now < (timedCard.startTime ?? 0)
-                      ? `${formatCountdownCompact((timedCard.startTime ?? 0) - now)} 后开始`
+                      ? `${formatCountdownCompact((timedCard.startTime ?? 0) - now)} 后`
                       : now < (timedCard.endTime ?? Infinity)
-                        ? `${formatCountdownCompact((timedCard.endTime ?? 0) - now)} 后结束`
+                        ? `还剩 ${formatCountdownCompact((timedCard.endTime ?? 0) - now)}`
                         : '已结束'}
                   </span>
-                </div>
+                  {pct !== null && (
+                    <span className="peek-progress" aria-hidden="true">
+                      <i style={{ width: `${Math.max(0, Math.min(100, pct))}%`, background: color }} />
+                    </span>
+                  )}
+                </button>
               );
-            })()
-          ) : (
-            <div className="home-todo-card empty"><span className="home-todo-card-placeholder">暂无定时待办</span></div>
-          )}
+            })() : (
+              <div className="peek-empty">今天没有定时的事</div>
+            )}
 
-          {/* untimed 卡片（无时间，待处理） */}
-          {untimedCard ? (
-            (() => {
-              const cardColor = getTodoCardColor(untimedCard);
-              return (
-                <div
-                  className="home-todo-card untimed"
-                  style={{
-                    background: `${cardColor}44`,
-                    borderLeftColor: cardColor,
-                  }}
-                  onClick={() => navigate(`/todo/${untimedCard.id}/edit`)}
-                >
-                  {/* 文字遮罩层，确保文字可读 */}
-                  <div className="home-todo-card-overlay" />
-                  <div className="home-todo-card-main">
-                    <span className="home-todo-card-title">{untimedCard.title}</span>
-                    <span className="home-todo-card-time">待处理</span>
-                  </div>
-                  <span className="home-todo-card-countdown">无截止</span>
-                </div>
-              );
-            })()
-          ) : (
-            <div className="home-todo-card empty"><span className="home-todo-card-placeholder">暂无待办事项</span></div>
-          )}
-        </div>
-      </header>
-      <main className="page-content">
-        <div className="center-area">
-        {mode === 'input' ? (
-          <div className="input-section">
-            <div className="input-wrapper glass">
-            <textarea
-                ref={textareaRef}
-                className="content-input"
-                value={content}
-                onChange={e => setContent(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder={isTodoMode ? '开始你的规划...' : '记录你的想法...'}
-                rows={4}
-              />
+            {untimedCard ? (
+              <button
+                type="button"
+                className="peek-item is-untimed"
+                onClick={() => { setTodoPeek(false); navigate(`/todo/${untimedCard.id}/edit`); }}
+              >
+                <span className="peek-rail" style={{ background: getTodoCardColor(untimedCard) }} />
+                <span className="peek-main">
+                  <span className="peek-name">{untimedCard.title}</span>
+                  <span className="peek-time">不设时间</span>
+                </span>
+                <span className="peek-cd">待处理</span>
+              </button>
+            ) : (
+              <div className="peek-empty">没有待处理的事</div>
+            )}
+
+            <button type="button" className="peek-more" onClick={() => { setTodoPeek(false); navigate('/todo'); }}>
+              打开待办 <span aria-hidden="true">→</span>
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* ══ 书写面：整块就是输入，没有"框" ══ */}
+      {mode === 'input' ? (
+        <main className="home-sheet">
+          {/* 提示不是 placeholder，是一段排版：它消失时不会带着字号跳一下 */}
+          {content === '' && (
+            <div className="sheet-prompt" aria-hidden="true">
+              <b>{isTodoMode ? '要做什么？' : '此刻在想什么'}</b>
+              <span>{isTodoMode ? '写下来，它会出现在待办里' : '写下来，它会留在你的库里'}</span>
             </div>
+          )}
+          <textarea
+            ref={textareaRef}
+            className="content-input"
+            value={content}
+            onChange={e => setContent(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder=""
+            aria-label={isTodoMode ? '新待办' : '新记录'}
+          />
 
-            {/* 已选图片预览（普通录入模式 + 待办模式） */}
-            {pendingImages.length > 0 && (
-              <div className="pending-images">
-                {pendingImages.map((img, idx) => (
-                  <div key={idx} className="pending-image-item">
-                    <img
-                      src={`data:${img.mimeType};base64,${img.base64}`}
-                      alt={`待上传 ${idx + 1}`}
-                    />
-                    <button
-                      className="pending-image-remove"
-                      onClick={() => removePendingImage(idx)}
-                      title="移除"
-                    >
-                      {CloseSmIcon}
-                    </button>
-                  </div>
+          {pendingImages.length > 0 && (
+            <div className="pending-images">
+              {pendingImages.map((img, idx) => (
+                <div key={idx} className="pending-image-item">
+                  <img src={`data:${img.mimeType};base64,${img.base64}`} alt={`待上传 ${idx + 1}`} />
+                  <button className="pending-image-remove" onClick={() => removePendingImage(idx)} title="移除">
+                    {CloseSmIcon}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </main>
+      ) : (
+        <main className="home-sheet home-sheet-mode">
+          <p className="mode-hint">为上一条补点什么</p>
+          <div className="mode-actions">
+            <button className="mode-btn" onClick={handleAddTag}>
+              <span className="btn-icon">{TagIcon}</span>
+              <span>添加标签</span>
+            </button>
+            <button className="mode-btn" onClick={handleAddInfo}>
+              <span className="btn-icon">{PaperclipIcon}</span>
+              <span>添加信息</span>
+            </button>
+          </div>
+          <p className="mode-timer">3 秒后回到书写</p>
+        </main>
+      )}
+
+      {/* ══ 待办模式：时间从底部升起的一层 ══ */}
+      {isTodoMode && (
+        <section className={`time-sheet${showTodoAdvanced ? ' open' : ''}`}>
+          <div className="time-sheet-head">
+            <span className="time-sheet-title">时间</span>
+            <span className="time-sheet-sub">
+              {todoStartTime && todoEndTime
+                ? `${formatTimeShort(todoStartTime)} – ${formatTimeShort(todoEndTime)}`
+                : '不设也可以'}
+            </span>
+            <button type="button" className="time-sheet-fold" onClick={() => setShowTodoAdvanced(v => !v)}>
+              {showTodoAdvanced ? '收起' : '设置'}
+            </button>
+          </div>
+
+          <div className="time-sheet-body">
+            <div className="time-group">
+              <span className="time-label">开始</span>
+              <div className="time-presets">
+                {QUICK_TIME_PRESETS.map(preset => (
+                  <button
+                    key={preset.label}
+                    className={`time-chip${todoStartTime && preset.label === 'test' ? ' on' : ''}`}
+                    onClick={() => handleQuickTime(preset, 'start')}
+                  >
+                    {preset.label}
+                  </button>
                 ))}
               </div>
-            )}
-
-            {/* 待办模式切换 */}
-            <label className="todo-mode-toggle">
               <input
-                type="checkbox"
-                checked={isTodoMode}
-                onChange={e => {
-                  setIsTodoMode(e.target.checked);
-                  if (e.target.checked) {
-                    setShowTodoAdvanced(true); // 点击待办模式后自动展开高级选项
-                  } else {
-                    setShowTodoAdvanced(false);
-                    setTodoStartTime(undefined);
-                    setTodoEndTime(undefined);
-                  }
-                }}
+                type="datetime-local"
+                className="time-input"
+                value={todoStartTime ? toLocalDatetimeInput(todoStartTime) : ''}
+                onChange={e => setTodoStartTime(e.target.value ? new Date(e.target.value).getTime() : undefined)}
               />
-              <span>待办模式</span>
-            </label>
+            </div>
 
-            {/* 待办高级选项 */}
-            {isTodoMode && (
-              <div className="todo-advanced">
-                <button
-                  className="todo-advanced-toggle"
-                  onClick={() => setShowTodoAdvanced(!showTodoAdvanced)}
-                >
-                  <span>{showTodoAdvanced ? '收起选项' : '高级选项'}</span>
-                </button>
-                {showTodoAdvanced && (
-                  <div className="todo-advanced-body glass">
-                    {/* 开始时间 */}
-                    <div className="todo-time-group">
-                      <label className="todo-time-label">开始时间</label>
-                      <div className="todo-time-presets">
-                        {QUICK_TIME_PRESETS.map(preset => (
-                          <button
-                            key={preset.label}
-                            className={`todo-preset-chip ${todoStartTime && preset.label === 'test' ? 'active' : ''}`}
-                            onClick={() => handleQuickTime(preset, 'start')}
-                          >
-                            {preset.label}
-                          </button>
-                        ))}
-                      </div>
-                      <input
-                        type="datetime-local"
-                        className="todo-time-input glass"
-                        value={todoStartTime ? toLocalDatetimeInput(todoStartTime) : ''}
-                        onChange={e => setTodoStartTime(e.target.value ? new Date(e.target.value).getTime() : undefined)}
-                      />
-                    </div>
-
-                    {/* 结束时间 */}
-                    <div className="todo-time-group">
-                      <label className="todo-time-label">结束时间</label>
-                      <div className="todo-time-presets">
-                        {QUICK_TIME_PRESETS.map(preset => (
-                          <button
-                            key={preset.label}
-                            className="todo-preset-chip"
-                            onClick={() => handleQuickTime(preset, 'end')}
-                          >
-                            {preset.label}
-                          </button>
-                        ))}
-                      </div>
-                      <input
-                        type="datetime-local"
-                        className="todo-time-input glass"
-                        value={todoEndTime ? toLocalDatetimeInput(todoEndTime) : ''}
-                        onChange={e => setTodoEndTime(e.target.value ? new Date(e.target.value).getTime() : undefined)}
-                      />
-                    </div>
-
-                    {/* 今日处理 */}
-                    <label className="todo-mode-toggle">
-                      <input
-                        type="checkbox"
-                        checked={todoIsToday}
-                        onChange={e => setTodoIsToday(e.target.checked)}
-                      />
-                      <span>今日处理</span>
-                    </label>
-                  </div>
-                )}
+            <div className="time-group">
+              <span className="time-label">结束</span>
+              <div className="time-presets">
+                {QUICK_TIME_PRESETS.map(preset => (
+                  <button key={preset.label} className="time-chip" onClick={() => handleQuickTime(preset, 'end')}>
+                    {preset.label}
+                  </button>
+                ))}
               </div>
+              <input
+                type="datetime-local"
+                className="time-input"
+                value={todoEndTime ? toLocalDatetimeInput(todoEndTime) : ''}
+                onChange={e => setTodoEndTime(e.target.value ? new Date(e.target.value).getTime() : undefined)}
+              />
+            </div>
+
+            <label className="time-today">
+              <input type="checkbox" checked={todoIsToday} onChange={e => setTodoIsToday(e.target.checked)} />
+              <span>放进今天</span>
+            </label>
+          </div>
+        </section>
+      )}
+
+      {/* ══ 动作带：停在拇指位置上的一条 ══ */}
+      <div className="home-dock">
+        <div className="dock-chips">
+          <button className="chip" onClick={() => navigate('/wheel')}>
+            <span className="chip-ic ic-wheel">{WheelIcon}</span>
+            <span className="chip-t">转盘</span>
+          </button>
+          <button className="chip" onClick={() => navigate('/memo')}>
+            <span className="chip-ic ic-memo">{MemoIcon}</span>
+            <span className="chip-t">备忘</span>
+          </button>
+          <button className="chip" onClick={() => navigate('/worries')}>
+            <span className="chip-ic ic-heart">{HeartIcon}</span>
+            <span className="chip-t">怕了么</span>
+          </button>
+          <button className="chip" onClick={() => navigate('/search')}>
+            <span className="chip-ic ic-search">{SearchIcon}</span>
+            <span className="chip-t">搜索</span>
+          </button>
+        </div>
+
+        <div className="dock-bar">
+          <div className="dock-tools">
+            <button
+              type="button"
+              className={`tool-plus${trayOpen ? ' on' : ''}`}
+              onClick={() => setTrayOpen(v => !v)}
+              aria-label="更多工具"
+              aria-expanded={trayOpen}
+            >
+              <svg width="17" height="17" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true">
+                <path d="M9 4v10M4 9h10" />
+              </svg>
+            </button>
+
+            {trayOpen && (
+              <>
+                <div className="tray-scrim" onClick={() => setTrayOpen(false)} />
+                <div className="tray">
+                  <button onClick={() => { setTrayOpen(false); readClipboard(); }}>
+                    <span className="btn-icon">{ClipboardIcon}</span>粘贴
+                  </button>
+                  <button
+                    onClick={() => { setTrayOpen(false); handlePickImages(); }}
+                    disabled={isPickingImage || isUploading}
+                  >
+                    <span className="btn-icon">{ImageIcon}</span>选图
+                  </button>
+                  {showCameraButton && (
+                    <button
+                      onClick={() => { setTrayOpen(false); handleTakePhoto(); }}
+                      disabled={isPickingImage || isUploading}
+                    >
+                      <span className="btn-icon">{CameraIcon}</span>拍照
+                    </button>
+                  )}
+                </div>
+              </>
             )}
-
-            <div className="input-actions">
-              <button className="action-btn secondary" onClick={readClipboard}>
-                <span className="btn-icon">{ClipboardIcon}</span>
-                <span>粘贴</span>
-              </button>
-              {/* c: 待办模式也支持选图 */}
-              <button
-                className="action-btn secondary"
-                onClick={handlePickImages}
-                disabled={isPickingImage || isUploading}
-                title="从相册选择图片"
-              >
-                <span className="btn-icon">{ImageIcon}</span>
-                <span>选图</span>
-              </button>
-              {showCameraButton && (
-                <button
-                  className="action-btn secondary"
-                  onClick={handleTakePhoto}
-                  disabled={isPickingImage || isUploading}
-                  title="拍照"
-                >
-                  <span className="btn-icon">{CameraIcon}</span>
-                  <span>拍照</span>
-                </button>
-              )}
-              <button
-                className="action-btn primary"
-                onClick={handleSend}
-                disabled={!content.trim() || isUploading}
-              >
-                <span className="btn-icon">{SendIcon}</span>
-                <span>{isUploading ? '上传中...' : '发送'}</span>
-              </button>
-            </div>
           </div>
-        ) : (
-          <div className="mode-section">
-            <p className="mode-hint">为上一条添加信息？</p>
-            <div className="mode-actions">
-              <button className="mode-btn glass" onClick={handleAddTag}>
-                <span className="btn-icon">{TagIcon}</span>
-                <span>添加标签</span>
-              </button>
-              <button className="mode-btn glass" onClick={handleAddInfo}>
-                <span className="btn-icon">{PaperclipIcon}</span>
-                <span>添加信息</span>
-              </button>
-            </div>
-            <p className="mode-timer">3秒后自动回退...</p>
-          </div>
-        )}
-        </div>
 
-        {/* 快捷入口 */}
-        <div className="quick-actions">
-          <button className="quick-btn glass" onClick={() => navigate('/wheel')}>
-            <span className="btn-icon">{WheelIcon}</span>
-            <span>决定转盘</span>
-          </button>
-          <button className="quick-btn glass" onClick={() => navigate('/memo')}>
-            <span className="btn-icon">{MemoIcon}</span>
-            <span>备忘录</span>
-          </button>
-          <button className="quick-btn glass" onClick={() => navigate('/worries')}>
-            <span className="btn-icon">{HeartIcon}</span>
-            <span>怕了么</span>
-          </button>
-          <button className="quick-btn glass" onClick={() => navigate('/search')}>
-            <span className="btn-icon">{SearchIcon}</span>
-            <span>搜索</span>
+          <div className="mode-seg" data-on={isTodoMode ? 'todo' : 'note'}>
+            <span className="mode-thumb" aria-hidden="true" />
+            <button
+              type="button"
+              className={isTodoMode ? '' : 'on'}
+              onClick={() => {
+                setIsTodoMode(false);
+                setShowTodoAdvanced(false);
+                setTodoStartTime(undefined);
+                setTodoEndTime(undefined);
+              }}
+            >
+              记录
+            </button>
+            <button
+              type="button"
+              className={isTodoMode ? 'on' : ''}
+              onClick={() => { setIsTodoMode(true); setShowTodoAdvanced(true); }}
+            >
+              待办
+            </button>
+          </div>
+
+          <button
+            type="button"
+            className="dock-send"
+            onClick={handleSend}
+            disabled={!content.trim() || isUploading}
+            aria-label={isUploading ? '上传中' : '发送'}
+          >
+            {isUploading ? (
+              <span className="send-spin" aria-hidden="true" />
+            ) : (
+              <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M4 10h11M10.5 5.5 15 10l-4.5 4.5" />
+              </svg>
+            )}
           </button>
         </div>
-      </main>
+      </div>
 
       {/* 标签选择器弹层 */}
       {showTagSelector && (
         <div className="home-tag-overlay" onClick={() => setShowTagSelector(false)}>
-          <div className="home-tag-panel glass" onClick={e => e.stopPropagation()}>
+          <div className="home-tag-panel" onClick={e => e.stopPropagation()}>
             <TagSelector
               selectedTagIds={pendingTagIds}
               onSelectionChange={setPendingTagIds}
@@ -992,18 +1028,8 @@ export function HomePage() {
               entryContent={lastEntryContent ?? undefined}
             />
             <div className="home-tag-actions">
-              <button
-                className="home-tag-btn home-tag-cancel"
-                onClick={() => setShowTagSelector(false)}
-              >
-                取消
-              </button>
-              <button
-                className="home-tag-btn home-tag-confirm"
-                onClick={handleConfirmTags}
-              >
-                确定
-              </button>
+              <button className="home-tag-btn home-tag-cancel" onClick={() => setShowTagSelector(false)}>取消</button>
+              <button className="home-tag-btn home-tag-confirm" onClick={handleConfirmTags}>确定</button>
             </div>
           </div>
         </div>
@@ -1011,12 +1037,10 @@ export function HomePage() {
 
       {/* 轻提示 */}
       {showToast && (
-        <div className="toast glass">
+        <div className="toast">
           <span>{toastMessage}</span>
         </div>
       )}
-
-      <BottomNav />
     </div>
   );
 }

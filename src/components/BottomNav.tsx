@@ -67,17 +67,26 @@ const NAV_ITEMS: NavItem[] = [
   },
 ];
 
-export function BottomNav() {
+type BottomNavProps = {
+  /** 由 TabShell 传入：当前应该高亮的路径 */
+  activePath?: string;
+  /** 由 TabShell 传入：切页由外壳负责（滑动），不用路由硬跳 */
+  onNavigate?: (path: string) => void;
+};
+
+export function BottomNav({ activePath, onNavigate }: BottomNavProps = {}) {
   const location = useLocation();
   const navigate = useNavigate();
+  const current = activePath ?? location.pathname;
+  const go = onNavigate ?? ((path: string) => navigate(path));
 
   return (
     <nav className="bottom-nav glass">
       {NAV_ITEMS.map(item => (
         <button
           key={item.path}
-          className={`nav-item ${location.pathname === item.path ? 'active' : ''}`}
-          onClick={() => navigate(item.path)}
+          className={`nav-item ${current === item.path ? 'active' : ''}`}
+          onClick={() => go(item.path)}
         >
           <span className="nav-icon">{item.icon}</span>
           <span className="nav-label">{item.label}</span>

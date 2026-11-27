@@ -1,347 +1,446 @@
+/**
+ * 随机页 — 一叠记忆纸片
+ *
+ * 原来是"灰色的列表"。现在做成"一叠分开的纸"：
+ * - 每张纸比页面亮一点点，圆角 24，顶边有一道极细的高光
+ * - 纸与纸之间留 16px，不是紧贴，让每一条记忆有独立的呼吸
+ * - 进入时错峰上浮（30ms 一张），像一张一张被放到桌上
+ * - 刷新按钮变成右下角的圆钮，按下去转半圈
+ */
+
 .random-page {
   display: flex;
   flex-direction: column;
   min-height: 100dvh;
-  padding-bottom: calc(80px + var(--safe-bottom));
+  padding-bottom: calc(var(--nav-h) + 34px + var(--safe-bottom));
+  animation: fadeIn var(--duration-normal) var(--ease-out);
 }
 
-.page-content {
+.random-page .page-content {
   flex: 1;
   display: flex;
   flex-direction: column;
-  padding: var(--space-4) var(--space-5) 0;
-  gap: var(--space-3);
+  padding: 14px 18px 0;
+  gap: 10px;
   overflow: hidden;
   min-height: 0;
 }
 
-/* === 卡片堆叠区域 === */
+/* ============ 卡片叠 ============ */
+
 .cards-stack {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
   overflow-y: auto;
   overflow-x: hidden;
   position: relative;
-  /* 底部留出空间，避免最后一张卡片被固定的刷新按钮遮挡 */
-  padding-bottom: 72px;
+  padding: 4px 0 84px;
   scrollbar-width: none;
   -ms-overflow-style: none;
+  scroll-behavior: smooth;
 }
 
 .cards-stack::-webkit-scrollbar {
   display: none;
 }
 
-/* 单张卡片容器 */
 .card-item {
   width: 100%;
   cursor: pointer;
-  transition: transform var(--duration-fast) var(--ease-out);
   flex-shrink: 0;
+  transition: transform var(--duration-fast) var(--ease-spring);
+  animation: riseIn var(--duration-slow) var(--ease-out) both;
 }
+
+/* 错峰：一张一张放上桌 */
+.card-item:nth-child(1) { animation-delay: 0ms; }
+.card-item:nth-child(2) { animation-delay: 34ms; }
+.card-item:nth-child(3) { animation-delay: 68ms; }
+.card-item:nth-child(4) { animation-delay: 102ms; }
+.card-item:nth-child(5) { animation-delay: 136ms; }
+.card-item:nth-child(n + 6) { animation-delay: 170ms; }
 
 .card-item.pressed {
-  transform: scale(0.98);
+  transform: scale(0.982);
 }
 
-/* 测量阶段隐藏超出部分 */
+.card-item.pressed .entry-card {
+  background: var(--color-bg-elevated);
+}
+
 .card-hidden {
   display: none;
 }
 
+/* 纸张本体 */
 .entry-card {
-  width: 100%;
-  padding: var(--space-5) var(--space-5);
-  border-radius: var(--radius-lg);
   position: relative;
+  width: 100%;
+  padding: 20px 20px 14px;
+  border-radius: var(--radius-xl);
+  background: #171720;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.055),
+    0 1px 2px rgba(0, 0, 0, 0.4);
   overflow: hidden;
+  transition:
+    background var(--duration-normal) var(--ease-out),
+    box-shadow var(--duration-normal) var(--ease-out),
+    transform var(--duration-normal) var(--ease-out);
 }
 
+.card-item:hover .entry-card {
+  background: #1c1c26;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.075),
+    0 6px 24px rgba(0, 0, 0, 0.45);
+}
+
+/* 你写的那句话，是这页唯一的主角 */
 .card-content {
-  font-size: var(--text-base);
-  line-height: 1.7;
+  font-size: 17px;
+  line-height: 1.74;
+  letter-spacing: 0.004em;
   color: var(--color-text-primary);
   white-space: pre-wrap;
   word-break: break-word;
-  margin-bottom: var(--space-3);
   font-family: inherit;
 }
 
-/* === 卡片图片附件（inline 模式） === */
+.card-expand-btn {
+  display: inline-block;
+  margin-top: 10px;
+  padding: 4px 11px;
+  border-radius: var(--radius-full);
+  background: var(--color-bg-elevated);
+  color: var(--color-text-secondary);
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition:
+    background var(--duration-fast),
+    color var(--duration-fast),
+    transform var(--duration-fast) var(--ease-spring);
+}
+
+.card-expand-btn:active {
+  transform: scale(0.94);
+  background: var(--color-bg-float);
+}
+
+/* ============ 附件 ============ */
+
 .card-attachments {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-bottom: var(--space-3);
-}
-
-.card-attachment-img {
-  width: 100%;
-  max-height: 360px;
-  object-fit: contain;
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  background: var(--color-bg-secondary, #f5f5f5);
-  transition: opacity var(--duration-fast) var(--ease-out);
-}
-
-.card-attachment-img:hover {
-  opacity: 0.85;
+  gap: 6px;
+  margin-top: 14px;
 }
 
 .card-attachments:empty {
   display: none;
 }
 
+.card-attachment-img {
+  width: 100%;
+  max-height: 380px;
+  object-fit: contain;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  background: #0a0a0c;
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+
+.card-attachment-img:hover {
+  opacity: 0.9;
+}
+
+/* ============ 元信息 ============ */
+
 .card-meta {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: 8px;
   flex-wrap: wrap;
+  margin-top: 14px;
+  padding-top: 11px;
+  border-top: 1px solid rgba(255, 255, 255, 0.045);
 }
 
 .meta-star {
   display: flex;
   align-items: center;
-  color: var(--color-star-primary);
+  color: var(--color-accent-primary);
+  filter: drop-shadow(0 0 6px rgba(255, 122, 85, 0.4));
+}
+
+.meta-star svg {
+  width: 13px;
+  height: 13px;
 }
 
 .meta-tags {
   display: flex;
-  gap: var(--space-2);
+  gap: 6px;
   flex-wrap: wrap;
 }
 
 .meta-tag {
-  font-size: var(--text-xs);
-  color: var(--color-accent-primary);
-  background: var(--color-accent-subtle);
-  padding: 2px 8px;
+  font-size: 11px;
+  line-height: 1;
+  padding: 4px 8px;
   border-radius: var(--radius-full);
+  color: var(--color-text-secondary);
+  background: rgba(255, 255, 255, 0.045);
+  letter-spacing: 0.01em;
 }
 
-/* 附件徽标（badge 模式） */
 .meta-attachment-badge {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  font-size: var(--text-xs);
-  color: var(--color-accent-primary, #f76707);
-  background: var(--color-accent-subtle, rgba(247, 103, 7, 0.08));
-  padding: 2px 8px;
-  border-radius: var(--radius-full);
+  gap: 3px;
+  font-size: 11px;
+  color: var(--color-text-tertiary);
   cursor: pointer;
-  user-select: none;
+  transition: color var(--duration-fast);
 }
 
-.meta-attachment-badge:active {
-  transform: scale(0.95);
+.meta-attachment-badge svg {
+  width: 12px;
+  height: 12px;
 }
 
 .meta-time {
-  font-size: var(--text-xs);
-  color: var(--color-text-disabled);
   margin-left: auto;
+  font-size: 11px;
+  color: var(--color-text-disabled);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
 }
 
-/* === 操作按钮（固定在底部导航栏上方） === */
+/* 打开卡片 */
+.card-view-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    background var(--duration-fast),
+    color var(--duration-fast),
+    transform var(--duration-fast) var(--ease-spring);
+}
+
+.card-view-btn:active {
+  transform: scale(0.88);
+  background: var(--color-accent-primary);
+  color: var(--color-accent-ink);
+}
+
+.card-view-btn svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* 从别处跳进来时的定位高亮 */
+.card-item.focus-highlight .entry-card {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 0 0 1px rgba(255, 122, 85, 0.5),
+    0 0 32px rgba(255, 122, 85, 0.14);
+  animation: focusPulse 1.2s var(--ease-out) 2;
+}
+
+@keyframes focusPulse {
+  0%, 100% { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 0 0 1px rgba(255, 122, 85, 0.5), 0 0 32px rgba(255, 122, 85, 0.14); }
+  50% { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 0 0 1px rgba(255, 122, 85, 0.16), 0 0 10px rgba(255, 122, 85, 0.04); }
+}
+
+/* ============ 再来一屏：右下角圆钮 ============ */
+
 .card-actions {
   position: fixed;
-  left: var(--space-5);
-  right: var(--space-5);
-  bottom: calc(80px + var(--safe-bottom) + var(--space-2));
-  z-index: 90;
-  display: flex;
-  gap: var(--space-3);
+  right: 18px;
+  bottom: calc(var(--nav-h) + 26px + var(--safe-bottom));
+  z-index: 40;
 }
 
 .nav-btn {
-  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: var(--space-2);
-  padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius-sm);
-  font-size: var(--text-sm);
-  color: var(--color-text-secondary);
+  width: 54px;
+  height: 54px;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--color-accent-primary);
+  color: var(--color-accent-ink);
   cursor: pointer;
-  transition: all var(--duration-fast) var(--ease-out);
+  box-shadow:
+    0 8px 26px rgba(255, 122, 85, 0.24),
+    0 2px 8px rgba(0, 0, 0, 0.5);
+  transition:
+    transform var(--duration-normal) var(--ease-spring),
+    box-shadow var(--duration-normal) var(--ease-out);
+}
+
+/* 文字视觉隐藏，但屏幕阅读器仍能读到"刷新下一屏" */
+.nav-btn span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.nav-btn svg {
+  width: 22px;
+  height: 22px;
+  stroke-width: 2;
+  transition: transform var(--duration-slow) var(--ease-spring);
+}
+
+.nav-btn:hover {
+  box-shadow:
+    0 10px 32px rgba(255, 122, 85, 0.32),
+    0 2px 8px rgba(0, 0, 0, 0.5);
 }
 
 .nav-btn:active {
-  transform: scale(0.98);
+  transform: scale(0.9);
 }
 
-/* === 长文本展开/收起按钮 === */
-.card-expand-btn {
-  display: inline-flex;
-  align-items: center;
-  padding: var(--space-1) var(--space-3);
-  margin-bottom: var(--space-3);
-  border-radius: var(--radius-full);
-  font-size: var(--text-xs);
-  color: var(--color-accent-primary);
-  background: var(--color-accent-subtle);
-  border: 1px solid var(--color-border-accent);
-  cursor: pointer;
-  user-select: none;
-  transition: all var(--duration-fast) var(--ease-out);
+.nav-btn:active svg {
+  transform: rotate(180deg);
 }
 
-.card-expand-btn:active {
-  transform: scale(0.95);
-}
+/* ============ 筛选 ============ */
 
-/* === 空状态 === */
-.empty-state {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-3);
-}
-
-.empty-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0.5;
-  color: var(--color-text-tertiary);
-}
-
-.empty-text {
-  font-size: var(--text-lg);
-  color: var(--color-text-secondary);
-}
-
-.empty-hint {
-  font-size: var(--text-sm);
-  color: var(--color-text-tertiary);
-}
-
-/* === Loading === */
-.loading-card {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-xl);
-  min-height: 300px;
-}
-
-.loading-spinner {
-  width: 32px;
-  height: 32px;
-  border: 2px solid var(--color-border-primary);
-  border-top-color: var(--color-copper-primary);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-/* === 筛选按钮 - 右上角浮动 === */
 .filter-btn {
   position: fixed;
-  right: var(--space-5);
-  top: calc(var(--space-4) + var(--safe-top, 0px));
-  width: 36px;
-  height: 36px;
+  top: calc(14px + var(--safe-top));
+  right: 18px;
+  z-index: 45;
+  width: 40px;
+  height: 40px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-elevated);
+  border-radius: 50%;
+  background: rgba(20, 20, 26, 0.82);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
   color: var(--color-text-secondary);
   cursor: pointer;
-  transition: all var(--duration-fast) var(--ease-out);
-  z-index: 100;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--edge-top), 0 4px 16px rgba(0, 0, 0, 0.4);
+  transition:
+    color var(--duration-fast),
+    background var(--duration-fast),
+    transform var(--duration-fast) var(--ease-spring);
+}
+
+.filter-btn svg {
+  width: 17px;
+  height: 17px;
 }
 
 .filter-btn:active {
   transform: scale(0.9);
 }
 
-/* v3.5.0: 处于筛选条件中 → 标橙示意（琥珀橙；替代原上方筛选标签块） */
 .filter-btn.active {
-  background: var(--color-accent-subtle);
-  color: var(--color-accent-primary);
-  border: 1px solid var(--color-border-accent);
+  background: var(--color-accent-primary);
+  color: var(--color-accent-ink);
+  box-shadow: 0 6px 22px rgba(255, 122, 85, 0.26);
 }
 
-/* === 筛选面板 === */
+/* 筛选面板 */
 .filter-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.6);
+  z-index: 120;
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  z-index: 300;
+  background: rgba(0, 0, 0, 0.62);
+  backdrop-filter: blur(3px);
   animation: fadeIn var(--duration-fast) var(--ease-out);
 }
 
 .filter-panel {
   width: 100%;
-  max-width: 400px;
-  max-height: 80vh;
+  max-width: 560px;
+  max-height: 82dvh;
+  overflow: auto;
+  padding: 20px 20px calc(20px + var(--safe-bottom));
   border-radius: var(--radius-xl) var(--radius-xl) 0 0;
-  padding: var(--space-5);
-  padding-bottom: calc(var(--space-5) + var(--safe-bottom));
-  animation: slideUp var(--duration-normal) var(--ease-out);
-  overflow-y: auto;
+  background: var(--color-bg-secondary);
+  box-shadow: var(--edge-top), 0 -20px 60px rgba(0, 0, 0, 0.7);
+  animation: riseIn var(--duration-normal) var(--ease-out);
 }
 
 .panel-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: var(--space-5);
+  padding-bottom: 14px;
 }
 
 .panel-header h3 {
-  font-size: var(--text-lg);
+  font-size: 16px;
   font-weight: 600;
-  color: var(--color-text-primary);
-  font-family: inherit;
+  letter-spacing: 0.01em;
 }
 
 .panel-header button {
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
-  background: var(--color-bg-elevated);
+  background: var(--color-bg-tertiary);
   color: var(--color-text-secondary);
+  font-size: 16px;
   cursor: pointer;
+  transition: transform var(--duration-fast) var(--ease-spring);
+}
+
+.panel-header button:active {
+  transform: scale(0.88);
 }
 
 .filter-section {
-  margin-bottom: var(--space-5);
+  padding: 14px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .filter-label {
   display: block;
-  font-size: var(--text-sm);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
   color: var(--color-text-tertiary);
-  margin-bottom: var(--space-3);
+  margin-bottom: 10px;
 }
 
-/* 标签筛选标题行：左边标签名、右边「反选」按钮 */
 .filter-label-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: var(--space-3);
 }
 
 .filter-label-row .filter-label {
@@ -349,195 +448,232 @@
 }
 
 .filter-invert-btn {
-  padding: 4px 12px;
-  font-size: var(--text-xs);
-  color: var(--color-accent-primary);
-  background: color-mix(in srgb, var(--color-accent-primary) 12%, transparent);
-  border: 1px solid color-mix(in srgb, var(--color-accent-primary) 35%, transparent);
+  padding: 4px 10px;
   border-radius: var(--radius-full);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-tertiary);
+  font-size: 11px;
   cursor: pointer;
-  transition: all var(--duration-fast) var(--ease-out);
+  transition: transform var(--duration-fast) var(--ease-spring), color var(--duration-fast);
 }
 
 .filter-invert-btn:active {
-  transform: scale(0.95);
-  background: color-mix(in srgb, var(--color-accent-primary) 22%, transparent);
+  transform: scale(0.94);
 }
 
 .star-filter {
   display: flex;
-  gap: var(--space-2);
+  gap: 6px;
 }
 
 .star-filter button {
   flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-1);
-  padding: var(--space-3);
-  border-radius: var(--radius-md);
-  font-size: var(--text-sm);
+  height: 38px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-tertiary);
   color: var(--color-text-secondary);
-  background: var(--color-bg-elevated);
-  border: 1px solid var(--color-border-primary);
+  font-size: 12.5px;
   cursor: pointer;
-  transition: all var(--duration-fast) var(--ease-out);
+  transition:
+    background var(--duration-fast),
+    color var(--duration-fast),
+    transform var(--duration-fast) var(--ease-spring);
+}
+
+.star-filter button:active {
+  transform: scale(0.96);
 }
 
 .star-filter button.active {
-  color: var(--color-accent-primary);
-  background: var(--color-accent-subtle);
-  border-color: var(--color-border-accent);
+  background: var(--color-accent-primary);
+  color: var(--color-accent-ink);
+  font-weight: 500;
 }
 
-/* === v2.10.0: 时间范围筛选（修改时间） === */
 .time-range-row {
   display: flex;
+  gap: 6px;
   flex-wrap: wrap;
-  gap: var(--space-2);
 }
 
 .time-range-row button {
-  flex: 1 1 calc(25% - var(--space-2));
-  min-width: 64px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: var(--space-3) var(--space-2);
-  border-radius: var(--radius-md);
-  font-size: var(--text-sm);
+  padding: 7px 12px;
+  border-radius: var(--radius-full);
+  background: var(--color-bg-tertiary);
   color: var(--color-text-secondary);
-  background: var(--color-bg-elevated);
-  border: 1px solid var(--color-border-primary);
+  font-size: 12px;
   cursor: pointer;
-  transition: all var(--duration-fast) var(--ease-out);
-}
-
-.time-range-row button.active {
-  color: var(--color-accent-primary);
-  background: var(--color-accent-subtle);
-  border-color: var(--color-border-accent);
+  transition:
+    background var(--duration-fast),
+    color var(--duration-fast),
+    transform var(--duration-fast) var(--ease-spring);
 }
 
 .time-range-row button:active {
-  transform: scale(0.96);
+  transform: scale(0.95);
+}
+
+.time-range-row button.active {
+  background: var(--color-accent-primary);
+  color: var(--color-accent-ink);
+  font-weight: 500;
 }
 
 .time-range-custom {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  margin-top: var(--space-3);
+  gap: 8px;
+  margin-top: 12px;
 }
 
 .time-range-date {
   flex: 1;
   min-width: 0;
-  padding: var(--space-2);
+  padding: 8px 10px;
   border-radius: var(--radius-sm);
-  background: var(--color-bg-elevated);
-  border: 1px solid var(--color-border-primary);
+  background: var(--color-bg-tertiary);
   color: var(--color-text-primary);
-  font-size: var(--text-sm);
-  outline: none;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
 }
 
 .time-range-date:focus {
-  border-color: var(--color-border-accent);
+  box-shadow: 0 0 0 1px rgba(255, 122, 85, 0.4);
 }
 
 .time-range-sep {
-  font-size: var(--text-xs);
-  color: var(--color-text-tertiary);
-  flex-shrink: 0;
+  color: var(--color-text-disabled);
+  font-size: 12px;
 }
 
 .time-range-clear {
-  margin-top: var(--space-3);
-  padding: var(--space-1) var(--space-2);
-  border-radius: var(--radius-full);
-  font-size: var(--text-xs);
+  width: 100%;
+  margin-top: 10px;
+  height: 36px;
+  border-radius: var(--radius-sm);
+  background: transparent;
   color: var(--color-text-tertiary);
-  background: none;
-  border: none;
+  font-size: 12px;
   cursor: pointer;
-  text-decoration: underline;
 }
 
-/* AI �Ի���� */
+/* ============ 空状态 ============ */
+
+.empty-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 60px 20px;
+  animation: fadeIn var(--duration-slow) var(--ease-out);
+}
+
+.empty-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-tertiary);
+  margin-bottom: 6px;
+}
+
+.empty-icon svg {
+  width: 26px;
+  height: 26px;
+}
+
+.empty-text {
+  font-size: 15px;
+  color: var(--color-text-secondary);
+  letter-spacing: 0.01em;
+}
+
+.empty-hint {
+  font-size: 12.5px;
+  color: var(--color-text-disabled);
+}
+
+/* ============ 加载 ============ */
+
+.loading-card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 60px;
+  border-radius: var(--radius-xl);
+  background: #171720;
+}
+
+.loading-spinner {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.1);
+  border-top-color: var(--color-accent-primary);
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ============ AI 对话浮层 ============ */
+
 .ai-chat-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  z-index: 130;
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  z-index: 200;
+  background: rgba(0, 0, 0, 0.62);
+  backdrop-filter: blur(3px);
+  animation: fadeIn var(--duration-fast) var(--ease-out);
 }
 
 .ai-chat-container {
   width: 100%;
-  max-width: 600px;
-  max-height: 80dvh;
-  overflow: hidden;
-  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-  animation: slideUp var(--duration-normal) var(--ease-out);
+  max-width: 560px;
+  max-height: 86dvh;
+  overflow: auto;
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  background: var(--color-bg-secondary);
+  box-shadow: var(--edge-top), 0 -20px 60px rgba(0, 0, 0, 0.7);
+  animation: riseIn var(--duration-normal) var(--ease-out);
 }
 
-/* v2.6.3: 轻提示（与搜索页/录入页保持一致的视觉） */
-.toast {
+/* ============ 轻提示 ============ */
+
+.random-page .toast {
   position: fixed;
-  bottom: calc(100px + var(--safe-bottom));
   left: 50%;
+  bottom: calc(var(--nav-h) + 26px + var(--safe-bottom));
   transform: translateX(-50%);
-  padding: var(--space-3) var(--space-5);
+  padding: 9px 16px;
   border-radius: var(--radius-full);
-  font-size: var(--text-sm);
+  background: rgba(28, 28, 34, 0.94);
+  box-shadow: var(--edge-top), 0 8px 28px rgba(0, 0, 0, 0.6);
   color: var(--color-text-primary);
-  animation: fadeIn 0.3s var(--ease-out);
-  z-index: 200;
-  box-shadow: 0 4px 20px rgba(247, 103, 7, 0.15);
+  font-size: 12.5px;
+  white-space: nowrap;
+  z-index: 130;
+  animation: popIn var(--duration-normal) var(--ease-spring);
 }
 
-/* ===== v2.12.0: 记忆来信 / 卡片浏览入口 ===== */
-
-/* 卡片右下角的「浏览」右箭头 */
-.card-view-btn {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-full);
-  color: var(--color-text-tertiary);
-  background: none;
-  border: none;
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: all var(--duration-fast) var(--ease-out);
-}
-
-.card-view-btn:active {
-  background: rgba(247, 103, 7, 0.1);
-  color: var(--color-accent-primary);
-  transform: scale(0.94);
-}
-
-/* ?focus= 直达卡片：约 2.6 秒的高亮呼吸，然后自然消退 */
-.card-item.focus-highlight .entry-card {
-  animation: focusHighlight 2.6s var(--ease-out);
-}
-
-@keyframes focusHighlight {
-  0% {
-    box-shadow: 0 0 0 2px rgba(247, 103, 7, 0.55), 0 0 24px rgba(247, 103, 7, 0.25);
+@media (max-width: 360px) {
+  .random-page .page-content {
+    padding-left: 14px;
+    padding-right: 14px;
   }
-  60% {
-    box-shadow: 0 0 0 2px rgba(247, 103, 7, 0.45), 0 0 18px rgba(247, 103, 7, 0.18);
+  .entry-card {
+    padding: 17px 16px 12px;
   }
-  100% {
-    box-shadow: 0 0 0 0 rgba(247, 103, 7, 0);
+  .card-content {
+    font-size: 16px;
   }
 }

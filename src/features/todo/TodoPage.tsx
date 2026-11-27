@@ -9,7 +9,6 @@ import { useTodoStore } from '@/stores/todoStore';
 import { useTodoTagStore } from '@/stores/todoTagStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { getTodoDatabase } from '@/services/todoDatabase';
-import { BottomNav } from '@/components/BottomNav';
 import { applySortOrder, setSortOrder, extractIds, clearSortOrder } from '@/utils/todoSortOrder';
 import { parseAutoWeekdays, WEEKDAY_LABELS } from '@/utils/todoWeekdays';
 import type { Todo, TodoTemplate } from '@/types';
@@ -130,6 +129,10 @@ export function TodoPage() {
     return formatDate(today);
   });
   const [now, setNow] = useState(Date.now());
+  // 日期条平时收成一个胶囊，点开才展开
+  const [dateBarOpen, setDateBarOpen] = useState(false);
+  // 管理动作收进右上角菜单，功能一个不少
+  const [moreOpen, setMoreOpen] = useState(false);
   const [lastCreatedId, setLastCreatedId] = useState<string | null>(null);
   const [showAddInfo, setShowAddInfo] = useState(false);
   // 所有「未完成待办」对应的 folderDate 列表：用于动态生成日期选项
@@ -404,6 +407,13 @@ export function TodoPage() {
     .filter(t => (t.endTime! - now) < 60 * 60 * 1000) // < 60 分钟
     .slice(0, 3);
 
+  // 当前选中日的真实日期，用来做页头那张"脸"
+  const selDate = dateOptions.find(d => d.folderDate === selectedDate)?.date ?? new Date();
+  const selLabel = dateOptions.find(d => d.folderDate === selectedDate)?.label || '今天';
+  const totalCount = sortedTodos.length;
+  const doneCount = sortedTodos.filter(t => t.status === 'done').length;
+  const donePct = totalCount > 0 ? (doneCount / totalCount) * 100 : 0;
+
   return (
     <div
       className="todo-page"
@@ -412,46 +422,85 @@ export function TodoPage() {
       onTouchEnd={handleTouchEnd}
     >
       <main className="page-content">
-        {/* 日期选择器：「选择」按钮（固定） + 「上次查看」槽 + 今天 + 所有有未完成待办的日期 */}
-        <div className="date-selector-wrap">
-          <button
-            type="button"
-            className="date-pick-btn"
-            onClick={() => {
-              if (sortMode) return;
-              setPickerValue(selectedDate);
-              setDatePickerOpen(true);
-            }}
-            disabled={sortMode}
-          >
-            选择
-          </button>
-          {lastPickedVisible && lastPicked && (
+        {/* ══ 页头：今天是一张脸，不是一排选择器 ══ */}
+        <header className="todo-mast">
+          <div className="mast-date">
+            <span className="mast-num">{selDate.getDate()}</span>
+            <span className="mast-sub">
+              <span className="mast-ym">
+                {selDate.getMonth() + 1} 月 · 周{'日一二三四五六'[selDate.getDay()]}
+                {selLabel !== '今天' && selLabel !== '明天' && selLabel !== '昨天' ? ` · ${selLabel}` : ''}
+              </span>
+              <span className="mast-count">
+                {totalCount > 0 ? `${doneCount} / ${totalCount} 完成` : '空着的一天'}
+              </span>
+            </span>
+          </div>
+
+          <div className="mast-more-wrap">
             <button
               type="button"
-              className={`date-chip date-chip-picked ${selectedDate === lastPicked ? 'active' : ''}`}
-              onClick={() => { if (!sortMode) setSelectedDate(lastPicked); }}
-              disabled={sortMode}
-              title="上次查看的日期"
+              className={`mast-more${moreOpen ? ' on' : ''}`}
+              onClick={() => setMoreOpen(v => !v)}
+              aria-label="更多操作"
+              aria-expanded={moreOpen}
             >
-              <span className="date-label">{dateChipLabel(lastPicked)}</span>
-              <span className="date-day">{dateChipDay(lastPicked)}</span>
+              <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                <circle cx="3" cy="8" r="1.35" /><circle cx="8" cy="8" r="1.35" /><circle cx="13" cy="8" r="1.35" />
+              </svg>
             </button>
-          )}
-          <div className="date-selector">
-            {dateOptions.map(d => (
-              <button
-                key={d.folderDate}
-                className={`date-chip ${selectedDate === d.folderDate ? 'active' : ''}`}
-                onClick={() => { if (!sortMode) setSelectedDate(d.folderDate); }}
-                disabled={sortMode}
-              >
-                <span className="date-label">{d.label}</span>
-                <span className="date-day">{d.date.getDate()}</span>
-              </button>
-            ))}
+
+            {/* 菜单从按钮下沿长出来，不是从屏幕底部飘上来 */}
+            {moreOpen && (
+              <>
+                <div className="mast-scrim" onClick={() => setMoreOpen(false)} />
+                <div className="mast-menu" role="menu">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMoreOpen(false);
+                      if (sortMode) {
+                        setSortMode(false);
+                        setSortOrder(selectedDate, sortOrder);
+                      } else if (sortedTodos.length > 1) {
+                        initSortOrderOnEnter();
+                        setSortMode(true);
+                      } else {
+                        clearSortOrder(selectedDate);
+                      }
+                    }}
+                  >
+                    {sortMode ? '完成排序' : '调整顺序'}
+                  </button>
+                  {isTodayView && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => { setMoreOpen(false); void handleOpenApplyTemplate(); }}
+                      disabled={sortMode}
+                    >
+                      应用模板
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => { setMoreOpen(false); handleImportTemplate(); }}
+                    disabled={sortMode}
+                  >
+                    从模板导入
+                  </button>
+                </div>
+              </>
+            )}
           </div>
-        </div>
+
+          {/* 完成度：页头底部一条头发丝，不是进度条组件 */}
+          <span className="mast-bar" aria-hidden="true">
+            <i style={{ width: `${donePct}%` }} />
+          </span>
+        </header>
 
         {/* 排序模式提示条 */}
         {sortMode && (
@@ -500,50 +549,122 @@ export function TodoPage() {
         </div>
       </main>
 
-      {/* 底部固定操作栏 */}
-      <div className="todo-bottom-actions glass">
+      {/* ══ 底部：左边选哪天，右边新建。都在拇指能摸到的地方 ══ */}
+      <div className="tdock">
         <button
-          className={`todo-import-btn glass ${sortMode ? 'sort-mode-active' : ''}`}
-          onClick={() => {
-            if (sortMode) {
-              // 退出排序模式：保持当前顺序已保存
-              setSortMode(false);
-              setSortOrder(selectedDate, sortOrder);
-            } else if (sortedTodos.length > 1) {
-              initSortOrderOnEnter();
-              setSortMode(true);
-            } else {
-              clearSortOrder(selectedDate);
-            }
-          }}
-          disabled={sortMode ? false : sortedTodos.length <= 1}
-        >
-          <span>{sortMode ? '完成排序' : '调整顺序'}</span>
-        </button>
-        {isTodayView && (
-          <button
-            className="todo-import-btn glass"
-            onClick={() => void handleOpenApplyTemplate()}
-            disabled={sortMode}
-          >
-            <span>应用模板</span>
-          </button>
-        )}
-        <button
-          className="todo-import-btn glass"
-          onClick={handleImportTemplate}
+          type="button"
+          className="tdock-date"
+          onClick={() => setDateBarOpen(true)}
           disabled={sortMode}
         >
-          <span>从模板导入</span>
+          <span className="tdock-date-num">{selDate.getDate()}</span>
+          <span className="tdock-date-label">{selLabel}</span>
+          <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M2.5 7.5 6 4l3.5 3.5" />
+          </svg>
         </button>
+
         <button
-          className="todo-import-btn glass todo-new-btn"
+          type="button"
+          className="tdock-add"
           onClick={() => navigate('/todo/new')}
           disabled={sortMode}
+          aria-label="新建待办"
         >
-          <span>新建待办</span>
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden="true">
+            <path d="M10 4.5v11M4.5 10h11" />
+          </svg>
         </button>
       </div>
+
+      {/* ══ 选日期：从底部抽上来的一张，不再占着页面顶端 ══ */}
+      {dateBarOpen && (
+        <>
+          <div className="dsheet-scrim" onClick={() => setDateBarOpen(false)} />
+          <div className="dsheet">
+            <span className="dsheet-grip" aria-hidden="true" />
+            <div className="dsheet-head">
+              <span className="dsheet-title">选一天</span>
+              <button
+                type="button"
+                className="dsheet-cal"
+                onClick={() => {
+                  setDateBarOpen(false);
+                  setPickerValue(selectedDate);
+                  setDatePickerOpen(true);
+                }}
+              >
+                打开日历
+              </button>
+            </div>
+            <div className="dsheet-strip">
+              {lastPickedVisible && lastPicked && (
+                <button
+                  type="button"
+                  className={`dchip${selectedDate === lastPicked ? ' on' : ''}`}
+                  onClick={() => { setSelectedDate(lastPicked); setDateBarOpen(false); }}
+                >
+                  <span className="dchip-label">{dateChipLabel(lastPicked)}</span>
+                  <span className="dchip-num">{dateChipDay(lastPicked)}</span>
+                </button>
+              )}
+              {dateOptions.map(d => (
+                <button
+                  key={d.folderDate}
+                  type="button"
+                  className={`dchip${selectedDate === d.folderDate ? ' on' : ''}`}
+                  onClick={() => { setSelectedDate(d.folderDate); setDateBarOpen(false); }}
+                >
+                  <span className="dchip-label">{d.label}</span>
+                  <span className="dchip-num">{d.date.getDate()}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* 更多菜单：调整顺序 / 应用模板 / 从模板导入，一个都没少 */}
+      {moreOpen && (
+        <>
+          <div className="more-scrim" onClick={() => setMoreOpen(false)} />
+          <div className="more-menu">
+            <button
+              type="button"
+              onClick={() => {
+                setMoreOpen(false);
+                if (sortMode) {
+                  setSortMode(false);
+                  setSortOrder(selectedDate, sortOrder);
+                } else if (sortedTodos.length > 1) {
+                  initSortOrderOnEnter();
+                  setSortMode(true);
+                } else {
+                  clearSortOrder(selectedDate);
+                }
+              }}
+            >
+              {sortMode ? '完成排序' : '调整顺序'}
+            </button>
+            {isTodayView && (
+              <button
+                type="button"
+                onClick={() => { setMoreOpen(false); void handleOpenApplyTemplate(); }}
+                disabled={sortMode}
+              >
+                应用模板
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => { setMoreOpen(false); handleImportTemplate(); }}
+              disabled={sortMode}
+            >
+              从模板导入
+            </button>
+          </div>
+        </>
+      )}
 
       {/* 底部倒计时条 */}
       {settings.todo.showCountdown && countdownTodos.length > 0 && (
@@ -634,8 +755,6 @@ export function TodoPage() {
         </div>,
         document.body,
       )}
-
-      <BottomNav />
     </div>
   );
 }
@@ -831,26 +950,30 @@ function TodoItem({
       onClick={handleCardClick}
       onContextMenu={e => e.preventDefault()}
       style={(() => {
-        // 进行中：颜色背景从右往左缩短，右侧露出暗色底
+        // 颜色不再铺满整张卡，只作为左侧一道 2px 的记号
         const isOngoing = todo.startTime && todo.endTime && todo.status === 'pending' && now >= todo.startTime && now < todo.endTime;
-        const baseTransform = sortMode ? undefined : `translateX(${swipeOffset}px)`;
-        if (isOngoing) {
-          const pct = ((todo.endTime! - now) / (todo.endTime! - todo.startTime!)) * 100;
-          return {
-            transform: baseTransform,
-            background: `linear-gradient(to right, ${cardColor}88 ${pct}%, var(--color-bg-elevated) ${pct}%)`,
-            borderLeft: `3px solid ${cardColor}`,
-          };
-        }
-        return {
-          transform: baseTransform,
-          background: `${cardColor}44`,
-          borderLeft: `3px solid ${cardColor}`,
+        const vars: Record<string, string | undefined> = {
+          transform: sortMode ? undefined : `translateX(${swipeOffset}px)`,
+          '--todo-color': cardColor,
         };
+        if (isOngoing) {
+          vars['--todo-pct'] = `${((todo.endTime! - now) / (todo.endTime! - todo.startTime!)) * 100}%`;
+        }
+        return vars as React.CSSProperties;
       })()}
     >
-      {/* 半透明隔膜层，确保文字可读 */}
-      <div className="todo-item-overlay" />
+      {/* 一次点击就能划掉：不用长按，也不用滑 */}
+      <button
+        type="button"
+        className="todo-tick"
+        onClick={e => { e.stopPropagation(); onToggleDone(); }}
+        aria-label={isDone ? '标记未完成' : '标记完成'}
+        aria-pressed={isDone}
+      >
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M3.4 8.4 6.5 11.5 12.6 4.6" />
+        </svg>
+      </button>
 
       {/* 排序模式：左侧拖拽把手 */}
       {sortMode && (

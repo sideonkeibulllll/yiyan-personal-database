@@ -7,7 +7,7 @@
  * 流式期间父组件高频更新 messages 时，只有「正在写入的最后一条」消息重渲染，
  * 历史消息（引用未变）全部跳过 —— 修复长对话下流式卡顿的主因之一。
  */
-import { memo, useMemo, useState, useEffect } from 'react';
+import { memo, useMemo, useState, useEffect, useRef } from 'react';
 import type { RefObject } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { renderMarkdown } from '@/utils/markdown';
@@ -35,27 +35,76 @@ interface ChatMessageListProps {
   onDeleteTurn?: (msgId: string) => void;
 }
 
-/** v3.8.1：思考提示旁的「删除 → 确认删除？」两段式按钮（点一下待确认，再点一下真删） */
+/** v4.3.0：长按 600ms 删除这一轮；松手即取消，删后由输入区给 5 秒撤销 */
+const HOLD_DELETE_MS = 600;
+
 function TurnDeleteButton({ onDelete }: { onDelete: () => void }) {
-  const [armed, setArmed] = useState(false);
-  useEffect(() => {
-    if (!armed) return;
-    const t = window.setTimeout(() => setArmed(false), 3000);
-    return () => window.clearTimeout(t);
-  }, [armed]);
+  const [holding, setHolding] = useState(false);
+  const activeRef = useRef(false);
+  const rafRef = useRef(0);
+  const timerRef = useRef(0);
+  const startRef = useRef(0);
+
+  const stop = () => {
+    activeRef.current = false;
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    rafRef.current = 0;
+    timerRef.current = 0;
+    setHolding(false);
+  };
+
+  const begin = (el: HTMLButtonElement) => {
+    if (activeRef.current) return;
+    activeRef.current = true;
+    setHolding(true);
+    startRef.current = performance.now();
+    el.style.setProperty('--p', '0');
+    const tick = () => {
+      const p = Math.min(100, ((performance.now() - startRef.current) / HOLD_DELETE_MS) * 100);
+      el.style.setProperty('--p', String(p));
+      if (p < 100) rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    timerRef.current = window.setTimeout(() => {
+      stop();
+      onDelete();
+    }, HOLD_DELETE_MS);
+  };
+
   return (
     <button
       type="button"
-      className={`turn-delete-btn ${armed ? 'armed' : ''}`}
-      title="删除这一轮对话（我的和 AI 的这次发送）"
+      className={`turn-delete-btn ${holding ? 'holding' : ''}`}
+      title="按住 0.6 秒删除这一轮"
       onClick={(e) => {
         e.preventDefault();
         e.stopPropagation();
-        if (armed) onDelete();
-        else setArmed(true);
+        // 键盘 / 读屏激活的 click detail 为 0：直接删，靠 5 秒撤销兜底
+        if (e.detail === 0) onDelete();
+      }}
+      onPointerDown={(e) => {
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        begin(e.currentTarget);
+      }}
+      onPointerUp={stop}
+      onPointerLeave={stop}
+      onPointerCancel={stop}
+      onContextMenu={(e) => e.preventDefault()}
+      onKeyDown={(e) => {
+        if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) {
+          e.preventDefault();
+          e.stopPropagation();
+          begin(e.currentTarget);
+        }
+      }}
+      onKeyUp={(e) => {
+        if (e.key === ' ' || e.key === 'Enter') stop();
       }}
     >
-      {armed ? '确认删除？' : '删除'}
+      {holding ? '松手取消' : '长按删除'}
     </button>
   );
 }
@@ -308,6 +357,10 @@ const ChatMessageItem = memo(function ChatMessageItem({
         {confirm ? '⚠️' : msg.role === 'user' ? '我' : msg.role === 'tool' ? '🔧' : 'AI'}
       </div>
       <div className="message-body">
+        {/* v4.3.0：assistant 的时间提到正文上方，默认可见；用户/工具消息仍留在底部 */}
+        {msg.role === 'assistant' && !confirm && (
+          <span className="message-time message-time-top">{formatTime(msg.timestamp)}</span>
+        )}
         {/* 思维链内容（可折叠） */}
         {msg.reasoningContent && (
           <details className="reasoning-block" open={streamingActive}>
@@ -444,7 +497,9 @@ const ChatMessageItem = memo(function ChatMessageItem({
         {msg.model && msg.role === 'assistant' && !confirm && (
           <span className="message-model-tag">{msg.model}</span>
         )}
-        <span className="message-time">{formatTime(msg.timestamp)}</span>
+        {(msg.role !== 'assistant' || confirm) && (
+          <span className="message-time">{formatTime(msg.timestamp)}</span>
+        )}
       </div>
     </div>
   );

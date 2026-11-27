@@ -1,81 +1,99 @@
 /**
- * Ember 暗色设计系统
- * 配色：深炭灰底色 + 暖橙强调 + 纯白文字
- * 风格：扁平化、锐角微圆角、视觉纯粹的控件
+ * 记忆库 · 触感系统 v5
+ *
+ * 设计前提（2026-11-27 定）：
+ * - 这个 App 只给一个人用，不需要"专业感/商务感"
+ * - 个性不靠"氛围色"，靠三件事：响应的速度、动作的弹性、排版的胆量
+ * - 底色中性到近乎无色，唯一的强调色是荧光黄绿，只出现在"动作/完成/进度"上
+ * - 暗色层级靠明度差，不靠边框和阴影
+ *
+ * 兼容：保留 v4 的全部变量名，只换值，老页面自动跟随。
  */
 
-/* 字体策略（v2.3.0）：不再引入任何 Web 字体，全部交给系统/手机主题决定。
-   曾引入 Google Fonts（Sora/Inter/Noto Sans SC/JetBrains Mono），
-   导致 APK 内置了字体、手机主题商店配置的默认字体永远不生效。 */
-
 :root {
-  /* === 主色调 — 深炭灰基底 === */
-  --color-bg-primary: #131416;
-  --color-bg-secondary: #1a1b1e;
-  --color-bg-tertiary: #212228;
-  --color-bg-elevated: #28292f;
-  --color-bg-float: #32333a;
+  /* === 底色：深蓝黑，比纯黑亮一档，黑得有余温 === */
+  --color-bg-primary: #0f0f14;
+  --color-bg-secondary: #15151c;
+  --color-bg-tertiary: #1b1b24;
+  --color-bg-elevated: #22222c;
+  --color-bg-float: #2b2b37;
 
-  /* === 暖橙强调 — 主交互色 === */
-  --color-accent-primary: #f76707;
-  --color-accent-secondary: #fb7a3b;
-  --color-accent-tertiary: #fda972;
-  --color-accent-glow: rgba(247, 103, 7, 0.15);
-  --color-accent-subtle: rgba(247, 103, 7, 0.08);
+  /* === 强调：珊瑚橙。暖，是唯一"敢亮"的颜色，只给主动作 === */
+  --color-accent-primary: #ff7a55;
+  --color-accent-secondary: #ff9576;
+  --color-accent-tertiary: #ffb9a3;
+  --color-accent-glow: rgba(255, 122, 85, 0.18);
+  --color-accent-subtle: rgba(255, 122, 85, 0.09);
+  --color-accent-ink: #1a0a04; /* 主色上的文字，永远用这个 */
 
-  /* === 深橙辅助 — 按钮/渐变 === */
-  --color-copper-primary: #e8590c;
-  --color-copper-secondary: #c04509;
-  --color-copper-glow: rgba(232, 89, 12, 0.18);
-  --color-ochre-primary: #f76707;
-  --color-ochre-glow: rgba(247, 103, 7, 0.10);
+  /* === 兼容旧别名（若干页面仍在引用） === */
+  --color-copper-primary: #e8663f;
+  --color-copper-secondary: #c9502c;
+  --color-copper-glow: rgba(232, 102, 63, 0.18);
+  --color-ochre-primary: #ffc14d;
+  --color-ochre-glow: rgba(255, 193, 77, 0.10);
 
-  /* === 次要色 — 中性灰 === */
-  --color-secondary-primary: #495057;
-  --color-secondary-secondary: #868e96;
-  --color-secondary-tertiary: #adb5bd;
-  --color-secondary-glow: rgba(73, 80, 87, 0.15);
+  /* === 次要色 === */
+  --color-secondary-primary: #3a3a44;
+  --color-secondary-secondary: #55555f;
+  --color-secondary-tertiary: #7d7d88;
+  --color-secondary-glow: rgba(85, 85, 95, 0.18);
 
-  /* === 文字层次 — 纯白/米白 === */
-  --color-text-primary: #f8f9fa;
-  --color-text-secondary: #adb5bd;
-  --color-text-tertiary: #868e96;
-  --color-text-disabled: #495057;
-  --color-text-inverse: #131416;
+  /* === 文字：三档，暖白不刺眼 === */
+  --color-text-primary: #f4f2ee;
+  --color-text-secondary: #a8a5b0;
+  --color-text-tertiary: #726f7d;
+  --color-text-disabled: #4c4957;
+  --color-text-inverse: #0b0b10;
 
-  /* === 边框与分隔 === */
-  --color-border-primary: rgba(255, 255, 255, 0.08);
-  --color-border-secondary: rgba(255, 255, 255, 0.04);
-  --color-border-accent: rgba(247, 103, 7, 0.30);
+  /* === 边框：几乎不用，留着给需要的地方 === */
+  --color-border-primary: rgba(255, 255, 255, 0.07);
+  --color-border-secondary: rgba(255, 255, 255, 0.035);
+  --color-border-accent: rgba(255, 122, 85, 0.34);
 
-  /* === 功能色 === */
-  --color-success: #40c057;
-  --color-warning: #fab005;
-  --color-error: #fa5252;
-  --color-info: #228be6;
+  /* === 功能色：四个语义色，各管一段，画面才有层次 === */
+  --color-success: #46e0a5;
+  --color-warning: #ffc14d;
+  --color-error: #ff5a6e;
+  --color-info: #6aa8ff;
 
-  /* === 状态色 === */
-  --color-star: #f76707;
-  --color-star-glow: rgba(247, 103, 7, 0.20);
-  --color-star-primary: #f76707;
+  /* === 收藏 === */
+  --color-star: #ffc14d;
+  --color-star-glow: rgba(255, 193, 77, 0.22);
+  --color-star-primary: #ffc14d;
 
-  /* === 兼容别名 === */
-  --color-accent: #f76707;
-  --color-bg-base: #131416;
+  /* === 纸片：暗底上唯一"亮"的东西。
+     不是白色，是带一点米/黄/粉的纸，眼睛在上面写字不刺 === */
+  --paper-cream: #f6f1e6;
+  --paper-yellow: #ffe9a3;
+  --paper-pink: #ffd9cf;
+  --paper-blue: #d3e6ff;
+  --paper-green: #d9f0cf;
+  --paper-ink: #1d1a16;
+  --paper-ink-soft: #6f6a60;
 
-  /* === 阴影 — 扁平克制 === */
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.45);
-  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.55);
-  --shadow-glow: 0 0 20px rgba(247, 103, 7, 0.10);
-  --shadow-gold: 0 0 16px rgba(247, 103, 7, 0.08);
+  /* === 兼容 === */
+  --color-accent: #ff7a55;
+  --color-bg-base: #0f0f14;
 
-  /* === 圆角 — 锐利微圆角 === */
-  --radius-xs: 4px;
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 10px;
-  --radius-xl: 12px;
+  /* === 阴影：暗色里只做边缘定义，不做漂浮感 === */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.55);
+  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.55);
+  --shadow-lg: 0 14px 40px rgba(0, 0, 0, 0.65);
+  --shadow-glow: 0 0 24px rgba(255, 122, 85, 0.12);
+  --shadow-gold: 0 0 18px rgba(255, 122, 85, 0.10);
+
+  /* 顶部内高光：让"面"有材质，而不是一块贴纸 */
+  --edge-top: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --edge-top-strong: inset 0 1px 0 rgba(255, 255, 255, 0.10);
+
+  /* === 圆角：软，但不软塌 === */
+  --radius-xs: 6px;
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
+  --radius-2xl: 30px;
   --radius-full: 9999px;
 
   /* === 间距 === */
@@ -89,26 +107,26 @@
   --space-10: 40px;
   --space-12: 48px;
 
-  /* === 字体 — 全部放空，跟随系统/手机主题字体 === */
-  /* 注意：值留空即代表"不指定字体"，浏览器/WebView 会回退到系统默认字体 */
+  /* === 字体：不引入 Web 字体，跟随系统/手机主题 === */
   --font-sans: system-ui, sans-serif;
   --font-mono: ui-monospace, monospace;
   --font-display: var(--font-sans);
   --font-serif: var(--font-sans);
 
-  /* === 字号 === */
+  /* === 字号：正文提到 16，读起来松一口 === */
   --text-xs: 11px;
   --text-sm: 13px;
-  --text-base: 15px;
-  --text-lg: 17px;
-  --text-xl: 20px;
-  --text-2xl: 24px;
-  --text-3xl: 30px;
+  --text-base: 16px;
+  --text-lg: 18px;
+  --text-xl: 21px;
+  --text-2xl: 26px;
+  --text-3xl: 34px;
+  --text-4xl: 44px;
 
   /* === 动效 === */
-  --duration-fast: 180ms;
-  --duration-normal: 280ms;
-  --duration-slow: 420ms;
+  --duration-fast: 140ms;
+  --duration-normal: 240ms;
+  --duration-slow: 360ms;
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -116,9 +134,12 @@
   /* === 安全区域 === */
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
+
+  /* 底栏占位高度，页面统一引用，避免各页自算 */
+  --nav-h: 62px;
 }
 
-/* === 全局基础样式 === */
+/* === 全局基础 === */
 * {
   margin: 0;
   padding: 0;
@@ -134,17 +155,18 @@ html {
 }
 
 body {
-  /* 不指定具体字体名 → 使用系统默认字体（Android 上即手机主题字体） */
   font-family: system-ui, -apple-system, sans-serif;
   background-color: var(--color-bg-primary);
   color: var(--color-text-primary);
   line-height: 1.6;
   overflow-x: hidden;
   min-height: 100dvh;
-  /* 微妙渐变背景增加深度 */
+  /* 只在顶部留一层几乎看不见的光，不做彩色氛围 */
+  /* 两团极淡的光：一团暖的从天上来，一团冷的从侧面来。
+     不是为了营造气氛，是为了让黑不死。 */
   background-image:
-    radial-gradient(ellipse 80% 50% at 50% -20%, rgba(247, 103, 7, 0.04), transparent),
-    linear-gradient(180deg, var(--color-bg-primary), var(--color-bg-secondary));
+    radial-gradient(680px 380px at 50% -200px, rgba(255, 122, 85, 0.075), transparent 72%),
+    radial-gradient(520px 340px at 92% 6%, rgba(106, 168, 255, 0.045), transparent 70%);
   background-attachment: fixed;
 }
 
@@ -154,33 +176,29 @@ body {
   flex-direction: column;
 }
 
-/* === 滚动条美化 === */
+/* === 滚动条 === */
 ::-webkit-scrollbar {
-  width: 4px;
-  height: 4px;
+  width: 3px;
+  height: 3px;
 }
-
 ::-webkit-scrollbar-track {
   background: transparent;
 }
-
 ::-webkit-scrollbar-thumb {
-  background: var(--color-text-disabled);
+  background: rgba(255, 255, 255, 0.12);
   border-radius: var(--radius-full);
 }
 
-::-webkit-scrollbar-thumb:hover {
-  background: var(--color-text-tertiary);
-}
-
-/* === 选中文字 === */
+/* === 选中 === */
 ::selection {
-  background: rgba(247, 103, 7, 0.25);
-  color: var(--color-text-primary);
+  background: rgba(255, 122, 85, 0.3);
+  color: #fff;
 }
 
-/* === 输入框重置 === */
-input, textarea, button {
+/* === 表单重置 === */
+input,
+textarea,
+button {
   font-family: inherit;
   font-size: inherit;
   color: inherit;
@@ -191,47 +209,32 @@ input, textarea, button {
 
 /* === 链接 === */
 a {
-  color: var(--color-accent-secondary);
+  color: var(--color-accent-primary);
   text-decoration: none;
   transition: color var(--duration-fast) var(--ease-out);
 }
 
-a:hover {
-  color: var(--color-accent-primary);
-}
-
-/* === 通用动画 === */
+/* === 动画工具 === */
 @keyframes fadeIn {
   from { opacity: 0; }
   to { opacity: 1; }
 }
 
-@keyframes slideUp {
+@keyframes riseIn {
   from {
     opacity: 0;
-    transform: translateY(10px);
+    transform: translate3d(0, 14px, 0);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: none;
   }
 }
 
-@keyframes slideDown {
+@keyframes popIn {
   from {
     opacity: 0;
-    transform: translateY(-10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes scaleIn {
-  from {
-    opacity: 0;
-    transform: scale(0.96);
+    transform: scale(0.94);
   }
   to {
     opacity: 1;
@@ -239,32 +242,28 @@ a:hover {
   }
 }
 
+@keyframes pressOut {
+  0% { transform: scale(0.96); }
+  100% { transform: scale(1); }
+}
+
 @keyframes pulse {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+  50% { opacity: 0.45; }
 }
 
-@keyframes shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
+/* === 材质：一张"面" === */
+.plane {
+  background: var(--color-bg-tertiary);
+  box-shadow: var(--edge-top);
 }
 
-@keyframes glowPulse {
-  0%, 100% { box-shadow: 0 0 12px rgba(247, 103, 7, 0.06); }
-  50% { box-shadow: 0 0 24px rgba(247, 103, 7, 0.14); }
-}
-
-@keyframes gentleFloat {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-3px); }
-}
-
-/* === 工具类 — 玻璃质感 === */
+/* === 玻璃：只在浮层用，页面里不用 === */
 .glass {
-  background: rgba(40, 41, 47, 0.80);
-  backdrop-filter: blur(20px) saturate(140%);
-  -webkit-backdrop-filter: blur(20px) saturate(140%);
-  border: 1px solid var(--color-border-primary);
+  background: rgba(20, 20, 26, 0.86);
+  backdrop-filter: blur(24px) saturate(150%);
+  -webkit-backdrop-filter: blur(24px) saturate(150%);
+  box-shadow: var(--edge-top), var(--shadow-md);
 }
 
 .glow {
@@ -272,101 +271,89 @@ a:hover {
 }
 
 .text-gradient {
-  background: linear-gradient(135deg, var(--color-accent-tertiary), var(--color-accent-primary));
+  background: linear-gradient(120deg, #ebffab, #c9f24d);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
 
-/* === 图标按钮基础 === */
+/* === 图标按钮 === */
 .icon-btn {
   width: 40px;
   height: 40px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-full);
   color: var(--color-text-secondary);
   cursor: pointer;
-  transition: all var(--duration-fast) var(--ease-out);
+  transition: color var(--duration-fast) var(--ease-out),
+    background var(--duration-fast) var(--ease-out),
+    transform var(--duration-fast) var(--ease-spring);
 }
-
 .icon-btn:hover {
   color: var(--color-text-primary);
   background: var(--color-bg-elevated);
 }
-
 .icon-btn:active {
-  transform: scale(0.92);
-  color: var(--color-text-primary);
-  background: var(--color-bg-float);
+  transform: scale(0.9);
 }
-
 .icon-btn svg {
   width: 20px;
   height: 20px;
   stroke: currentColor;
-  stroke-width: 1.5;
+  stroke-width: 1.6;
   fill: none;
 }
 
-/* === 标签芯片基础 === */
+/* === 芯片 === */
 .chip {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  padding: var(--space-1) var(--space-3);
+  padding: 6px 12px;
   border-radius: var(--radius-full);
   font-size: var(--text-xs);
   color: var(--color-text-secondary);
-  background: var(--color-bg-elevated);
-  border: 1px solid var(--color-border-primary);
+  background: var(--color-bg-tertiary);
   cursor: pointer;
   transition: all var(--duration-fast) var(--ease-out);
   white-space: nowrap;
 }
-
-.chip:hover {
-  border-color: var(--color-border-accent);
-  color: var(--color-text-primary);
-}
-
 .chip:active {
-  transform: scale(0.96);
+  transform: scale(0.95);
 }
-
 .chip.active {
-  color: var(--color-accent-primary);
-  background: var(--color-accent-subtle);
-  border-color: var(--color-border-accent);
+  color: var(--color-accent-ink);
+  background: var(--color-accent-primary);
 }
 
-/* === 全局禁用长按选中文本（移动端） === */
+/* === 触摸优化 === */
 * {
   -webkit-touch-callout: none;
   -webkit-user-select: none;
   user-select: none;
 }
-
-/* 允许输入框文本选择 */
-input, textarea, [contenteditable="true"] {
+input,
+textarea,
+[contenteditable="true"] {
   -webkit-user-select: text;
   user-select: text;
   -webkit-touch-callout: default;
 }
 
-/* === Focus 可见性 === */
+/* === 焦点 === */
 :focus-visible {
   outline: 2px solid var(--color-accent-primary);
-  outline-offset: 2px;
+  outline-offset: 3px;
+  border-radius: var(--radius-xs);
 }
 
-/* === 日期/时间选择器暗色适配 === */
+/* === 日期选择器暗色适配 === */
 input[type="datetime-local"]::-webkit-calendar-picker-indicator {
-  filter: invert(0.6) sepia(1) saturate(5) hue-rotate(0deg);
+  filter: invert(0.7);
   cursor: pointer;
 }
-
 input[type="checkbox"] {
   accent-color: var(--color-accent-primary);
 }

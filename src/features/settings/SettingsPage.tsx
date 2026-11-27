@@ -5,7 +5,6 @@
  */
 import { useState, useRef, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { BottomNav } from '@/components/BottomNav';
 import { incrementalImport } from '@/utils/import';
 import { IconSave, IconChevronRight } from '@/components/icons';
 import type { ImportResult } from '@/features/datamanager/types';
@@ -1054,7 +1053,7 @@ export function SettingsPage() {
                     </div>
                   )
                 ) : (
-                  <div className="settings-nav-list">
+                  <div className="settings-nav-list is-tiles">
                     {NAV_GROUPS.map(g => (
                       <button
                         key={g.key}
@@ -1130,8 +1129,6 @@ export function SettingsPage() {
           )}
         </footer>
       )}
-
-      <BottomNav />
     </div>
   );
 }

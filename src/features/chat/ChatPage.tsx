@@ -98,6 +98,9 @@ export function ChatPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
+  /** v4.3.0: 删除轮次后的 5 秒撤销快照（含删除前的完整 messages） */
+  const [turnUndo, setTurnUndo] = useState<{ sessionId: string; prev: ChatMessage[]; count: number } | null>(null);
+  const undoTimerRef = useRef<number | null>(null);
 
   // 思考模式
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
@@ -728,9 +731,46 @@ export function ChatPage() {
     let start = idx;
     while (start > 0 && messages[start].role !== 'user') start -= 1;
     if (messages[start]?.role !== 'user') start = idx; // 异常数据：只删这一条
+    const prev = messages;
+    const count = idx - start + 1;
     const next = messages.filter((_, i) => i < start || i > idx);
     updateSessionMessages(currentSessionId, next);
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    setTurnUndo({ sessionId: currentSessionId, prev, count });
+    undoTimerRef.current = window.setTimeout(() => setTurnUndo(null), 5000);
   }, [messages, currentSessionId, updateSessionMessages]);
+
+  const handleUndoTurnDelete = useCallback(() => {
+    if (!turnUndo || !currentSessionId) return;
+    if (undoTimerRef.current) {
+      clearTimeout(undoTimerRef.current);
+      undoTimerRef.current = null;
+    }
+    if (turnUndo.sessionId !== currentSessionId) {
+      setTurnUndo(null);
+      return;
+    }
+    // 删除后又发了新消息 / 又删了别的轮次时长度会变，拒绝恢复，避免覆盖新内容
+    if (messages.length !== turnUndo.prev.length - turnUndo.count) {
+      setTurnUndo(null);
+      return;
+    }
+    updateSessionMessages(currentSessionId, turnUndo.prev);
+    setTurnUndo(null);
+  }, [turnUndo, currentSessionId, messages.length, updateSessionMessages]);
+
+  // 切会话 / 卸载时清掉撤销条，避免把上一会话的 messages 恢复进来
+  useEffect(() => {
+    setTurnUndo(null);
+    if (undoTimerRef.current) {
+      clearTimeout(undoTimerRef.current);
+      undoTimerRef.current = null;
+    }
+  }, [currentSessionId]);
+
+  useEffect(() => () => {
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+  }, []);
 
   /* === MCP 工具激活：对话级持久化 ===
    * 把当前启用的工具列表同时写到 state（即时 UI 反馈）与 session.mcpEnabledTools（持久化）。
@@ -1036,6 +1076,13 @@ export function ChatPage() {
       alert('请先在设置页面配置 AI API Key');
       return;
     }
+
+    // v4.3.0：新消息一发出，上一次删除的撤销条立即失效，避免恢复时覆盖新内容
+    if (undoTimerRef.current) {
+      clearTimeout(undoTimerRef.current);
+      undoTimerRef.current = null;
+    }
+    setTurnUndo(null);
 
 
     // v4.2.0: 文本文件块在「图片落盘」之后构建（要先落地拿 chat-files 路径，见下方）
@@ -1748,15 +1795,6 @@ export function ChatPage() {
     }
   }, [input, isLoading, settings, currentSessionId, sessions, persistSessions, updateSessionMessages, thinkingEnabled, thinkingEffort, mcpEnabled, mcpActiveTools, currentModel, pickerSelectedIds, pendingImages, pendingFiles, externalBusy]);
 
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    // 手机端/桌面端统一：裸 Enter 换行（不拦截），仅 Ctrl/Cmd+Enter 发送；
-    // 发送也可以直接点右侧发送按钮。Shift+Enter 仍是系统默认换行。
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-      e.preventDefault();
-      handleSend();
-    }
-  }, [handleSend]);
-
   /* === 输入框撤销 / 重做（模拟 Ctrl+Z / Ctrl+Y，供手机端点击）===
    * 浏览器原生撤销栈在受控 textarea 下会被 React 重渲染打断，
    * 这里自己维护快照栈：记录「上一次 input 变化前的值」。
@@ -2051,16 +2089,15 @@ export function ChatPage() {
           onDetachPrompt={handleDetachPrompt}
           input={input}
           onInputChange={setInput}
-          onKeyDown={handleKeyDown}
           canUndo={canUndo}
           canRedo={canRedo}
           onUndo={handleUndo}
           onRedo={handleRedo}
-          isMobile={isMobile}
           isLoading={isLoading}
           onSend={handleSend}
           onStop={handleStop}
           textareaRef={textareaRef}
+          undo={turnUndo ? { onUndo: handleUndoTurnDelete } : null}
           pendingImages={pendingImages}
           showCameraButton={showCameraButton}
           onPickImages={handlePickImages}

@@ -5,7 +5,7 @@
  * 状态与业务逻辑由父组件 ChatPage 持有，本组件只负责展示。
  * MCP 分组与提示词条目都来自 settings（v3.6.0 起不再硬编码分组）。
  */
-import type { ClipboardEvent, KeyboardEvent, RefObject } from 'react';
+import type { ClipboardEvent, RefObject } from 'react';
 import { IconUpload, IconBrain, IconTool, IconClose, IconBack, IconSendAlt, IconCheck, IconUndo, IconRedo, IconImage, IconCamera, IconClipboard, IconFile } from '@/components/icons';
 import { PromptPickerPanel } from './PromptPickerPanel';
 import type { McpGroupConfig } from '@/types';
@@ -49,18 +49,17 @@ interface ChatInputAreaProps {
 
   input: string;
   onInputChange: (value: string) => void;
-  onKeyDown: (e: KeyboardEvent) => void;
   /** 撤销 / 重做（模拟 Ctrl+Z / Ctrl+Y，供手机端点击） */
   canUndo: boolean;
   canRedo: boolean;
   onUndo: () => void;
   onRedo: () => void;
-  /** 是否移动端（决定输入框提示文案：手机没有 Ctrl 键） */
-  isMobile: boolean;
   isLoading: boolean;
   onSend: () => void;
   onStop: () => void;
   textareaRef: RefObject<HTMLTextAreaElement>;
+  /** v4.3.0：删除轮次后的 5 秒撤销条 */
+  undo?: { onUndo: () => void } | null;
 
   /* === 图片输入（v3.5.3） === */
   /** 尚未发送的图片（预览条） */
@@ -106,16 +105,15 @@ export function ChatInputArea({
   onDetachPrompt,
   input,
   onInputChange,
-  onKeyDown,
   canUndo,
   canRedo,
   onUndo,
   onRedo,
-  isMobile,
   isLoading,
   onSend,
   onStop,
   textareaRef,
+  undo,
   pendingImages,
   showCameraButton,
   onPickImages,
@@ -153,6 +151,13 @@ export function ChatInputArea({
 
   return (
     <footer className="chat-input-area glass">
+      {undo && (
+        <div className="chat-undo" role="status" aria-live="polite">
+          <span>已删除这一轮</span>
+          <button type="button" onClick={undo.onUndo}>撤销</button>
+          <i className="chat-undo-bar" aria-hidden="true" />
+        </div>
+      )}
       <div className="input-toolbar">
         {/* 上传按钮：打开条目选择器 */}
         <button
@@ -427,10 +432,9 @@ export function ChatInputArea({
         <textarea
           ref={textareaRef}
           className="chat-input"
-          placeholder={isMobile ? '输入消息…' : '输入消息… (Enter 换行, Ctrl+Enter 发送)'}
+          placeholder="输入消息…"
           value={input}
           onChange={e => onInputChange(e.target.value)}
-          onKeyDown={onKeyDown}
           onPaste={handlePaste}
           rows={1}
           disabled={isLoading}

@@ -109,7 +109,7 @@
 /* === 底部保存按钮 === */
 .settings-footer {
   position: fixed;
-  bottom: calc(72px + var(--safe-bottom, 0px));
+  bottom: calc(var(--nav-h) + 20px + var(--safe-bottom, 0px));
   left: 0;
   right: 0;
   display: flex;
@@ -894,7 +894,7 @@ select.form-input option {
 
   /* 底部保存按钮在移动端的位置调整 */
   .settings-footer {
-    bottom: calc(72px + var(--safe-bottom, 0px));
+    bottom: calc(var(--nav-h) + 20px + var(--safe-bottom, 0px));
   }
 }
 
@@ -1392,4 +1392,304 @@ select.form-input option {
   word-break: break-word;
   max-height: 220px;
   overflow-y: auto;
+}
+
+/* ════════════════════════════════════════════════════════════
+   设置控制台（重写）
+   ────────────────────────────────────────────────────────────
+   旧版是「文章式长列表 + 底部常驻保存」：标题、说明、控件一层层往下排，
+   读起来像在改一份文档。这里改成控制台：
+   · 面板标题是一行小字引导，不是大标题
+   · 每个设置项是一条横向的控制行，说明缩小到次要位置
+   · 保存按钮只在真的改了东西时才浮出来
+   ════════════════════════════════════════════════════════════ */
+
+.settings-page {
+  padding-bottom: calc(var(--nav-h) + var(--safe-bottom));
+}
+
+.settings-page .settings-header {
+  padding: 22px 20px 8px;
+}
+
+.settings-page .settings-title {
+  font-size: 27px;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+}
+
+/* 面板：把"标题 + 一堆卡"换成"引导 + 控制行" */
+.settings-page .settings-panel-content {
+  gap: 2px;
+}
+
+.settings-page .panel-title {
+  margin: 0 0 12px;
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+}
+
+.settings-page .settings-subsection-title {
+  margin: 26px 0 4px;
+  font-size: 11.5px;
+  letter-spacing: 0.12em;
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+}
+
+/* 一条设置 = 一行。左说明，右控件，中间一条头发丝 */
+.settings-page .settings-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 15px 0;
+  border: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 0;
+  background: transparent;
+  text-align: left;
+  color: var(--color-text-primary);
+  transition: background 120ms var(--ease-out);
+}
+
+.settings-page .settings-item:first-of-type {
+  border-top: 0;
+}
+
+.settings-page .settings-item:active {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.settings-page .item-left {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settings-page .item-title {
+  font-size: 14.5px;
+  font-weight: 450;
+  line-height: 1.45;
+  letter-spacing: 0.005em;
+  color: var(--color-text-primary);
+}
+
+.settings-page .item-desc {
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--color-text-tertiary);
+}
+
+.settings-page .item-icon {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--color-text-secondary);
+}
+
+.settings-page .item-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.settings-page .item-arrow {
+  flex: 0 0 auto;
+  color: var(--color-text-disabled);
+}
+
+/* 开关：荧光色带一点拖影，按下去有实体感 */
+.settings-page input[type='checkbox'] {
+  accent-color: var(--color-accent-primary);
+}
+
+.settings-page .form-group {
+  padding: 14px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.settings-page .form-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  margin-bottom: 8px;
+}
+
+.settings-page .form-hint {
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--color-text-disabled);
+}
+
+.settings-page .form-input {
+  height: 42px;
+  border: 0;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--color-text-primary);
+  font-family: inherit;
+  font-size: 13.5px;
+  padding: 0 13px;
+  outline: none;
+}
+
+.settings-page .form-input:focus {
+  background: rgba(255, 255, 255, 0.075);
+  box-shadow: inset 0 0 0 1px rgba(255, 122, 85, 0.4);
+}
+
+/* 单选卡：两列方块，不是长条 */
+.settings-page .form-radio-group {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.settings-page .form-radio-card {
+  padding: 13px;
+  border: 0;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+  transition: background 140ms, box-shadow 140ms;
+}
+
+.settings-page .form-radio-card:has(input:checked) {
+  background: rgba(255, 122, 85, 0.13);
+  box-shadow: inset 0 0 0 1px rgba(255, 122, 85, 0.45);
+}
+
+.settings-page .form-radio-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+
+.settings-page .form-radio-desc {
+  margin-top: 4px;
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--color-text-tertiary);
+}
+
+/* 保存：只有脏了才出现的一枚浮钮 */
+.settings-page .settings-footer {
+  bottom: calc(var(--nav-h) + 14px + var(--safe-bottom));
+  padding: 0 20px;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(8px);
+  transition:
+    opacity 200ms var(--ease-out),
+    transform 260ms var(--ease-spring);
+}
+
+.settings-page .settings-footer:has(.settings-save-btn.has-changes) {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+
+.settings-page .settings-save-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 48px;
+  padding: 0 26px;
+  border-radius: 999px;
+  border: 0;
+  background: var(--color-accent-primary);
+  color: #1a0a04;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 550;
+  cursor: pointer;
+  box-shadow: 0 12px 30px -12px rgba(255, 122, 85, 0.75);
+  transition: transform 200ms var(--ease-spring), box-shadow 200ms;
+}
+
+.settings-page .settings-save-btn:active {
+  transform: scale(0.96);
+}
+
+.settings-page .settings-save-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* 桌面端保持左栏 + 右面板，只是换成同一套语言 */
+@media (min-width: 769px) {
+  .settings-page .settings-layout {
+    padding-bottom: 72px;
+  }
+  .settings-page .settings-sidebar {
+    width: 196px;
+    padding: 8px 10px;
+    gap: 1px;
+    border-right: 1px solid rgba(255, 255, 255, 0.05);
+  }
+  .settings-page .settings-nav-item {
+    height: 38px;
+    padding: 0 12px;
+    border-radius: 10px;
+    font-size: 13px;
+    color: var(--color-text-secondary);
+  }
+  .settings-page .settings-nav-item:hover {
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--color-text-primary);
+  }
+  .settings-page .settings-nav-item.active {
+    background: rgba(255, 122, 85, 0.14);
+    color: var(--color-text-primary);
+    font-weight: 500;
+  }
+  .settings-page .settings-nav-item.active::before {
+    display: none;
+  }
+  .settings-page .settings-content {
+    padding: 8px 28px 24px;
+  }
+}
+
+/* 单纯的输入型设置：标签在左，控件在右 —— 一眼扫过去是参数表，不是文章 */
+.settings-page .form-group:has(> .form-input) {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  align-items: center;
+  gap: 4px 12px;
+  padding: 11px 0;
+}
+
+.settings-page .form-group:has(> .form-input) > .form-label {
+  grid-column: 1;
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 400;
+  color: var(--color-text-tertiary);
+  letter-spacing: 0.01em;
+}
+
+.settings-page .form-group:has(> .form-input) > .form-input {
+  grid-column: 2;
+  width: 100%;
+}
+
+.settings-page .form-group:has(> .form-input) > .form-hint {
+  grid-column: 1 / -1;
+  margin-top: 2px;
+  font-size: 10.5px;
+  color: var(--color-text-disabled);
+  opacity: 0.85;
 }

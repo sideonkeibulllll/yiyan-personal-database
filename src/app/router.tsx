@@ -4,12 +4,10 @@
 import { lazy, Suspense } from 'react';
 import { createHashRouter, RouterProvider } from 'react-router-dom';
 import { Loading } from '@/components/Loading';
+import { TabShell } from '@/components/TabShell';
 
 // 懒加载页面
-const HomePage = lazy(() => import('@/features/input/HomePage').then(m => ({ default: m.HomePage })));
-const RandomPage = lazy(() => import('@/features/random/RandomPage').then(m => ({ default: m.RandomPage })));
 const SearchPage = lazy(() => import('@/features/search/SearchPage').then(m => ({ default: m.SearchPage })));
-const SettingsPage = lazy(() => import('@/features/settings/SettingsPage').then(m => ({ default: m.SettingsPage })));
 const TagManagePage = lazy(() => import('@/features/tags/TagManagePage').then(m => ({ default: m.TagManagePage })));
 const LinkPage = lazy(() => import('@/features/links/LinkPage').then(m => ({ default: m.LinkPage })));
 const ExportPage = lazy(() => import('@/features/settings/ExportPage').then(m => ({ default: m.ExportPage })));
@@ -20,7 +18,6 @@ const ChatPage = lazy(() => import('@/features/chat/ChatPage').then(m => ({ defa
 const ChatFilePage = lazy(() => import('@/features/chat/ChatFilePage').then(m => ({ default: m.ChatFilePage })));
 const FileManagerPage = lazy(() => import('@/features/files/FileManagerPage').then(m => ({ default: m.FileManagerPage })));
 const FileViewPage = lazy(() => import('@/features/files/FileViewPage').then(m => ({ default: m.FileViewPage })));
-const TodoPage = lazy(() => import('@/features/todo/TodoPage').then(m => ({ default: m.TodoPage })));
 const TodoEditPage = lazy(() => import('@/features/todo/TodoEditPage').then(m => ({ default: m.TodoEditPage })));
 const TodoTemplatePage = lazy(() => import('@/features/todo/TodoTemplatePage').then(m => ({ default: m.TodoTemplatePage })));
 const TodoRecycleBinPage = lazy(() => import('@/features/todo/TodoRecycleBinPage').then(m => ({ default: m.TodoRecycleBinPage })));
@@ -30,22 +27,8 @@ const WorryPage = lazy(() => import('@/features/worry/WorryPage').then(m => ({ d
 const WorryFlowPage = lazy(() => import('@/features/worry/WorryFlowPage').then(m => ({ default: m.WorryFlowPage })));
 
 const router = createHashRouter([
-  {
-    path: '/',
-    element: (
-      <Suspense fallback={<Loading />}>
-        <HomePage />
-      </Suspense>
-    ),
-  },
-  {
-    path: '/random',
-    element: (
-      <Suspense fallback={<Loading />}>
-        <RandomPage />
-      </Suspense>
-    ),
-  },
+  { path: '/', element: <TabShell /> },
+  { path: '/random', element: <TabShell /> },
   {
     path: '/search',
     element: (
@@ -54,14 +37,7 @@ const router = createHashRouter([
       </Suspense>
     ),
   },
-  {
-    path: '/settings',
-    element: (
-      <Suspense fallback={<Loading />}>
-        <SettingsPage />
-      </Suspense>
-    ),
-  },
+  { path: '/settings', element: <TabShell /> },
   {
     path: '/tags',
     element: (
@@ -158,14 +134,7 @@ const router = createHashRouter([
       </Suspense>
     ),
   },
-  {
-    path: '/todo',
-    element: (
-      <Suspense fallback={<Loading />}>
-        <TodoPage />
-      </Suspense>
-    ),
-  },
+  { path: '/todo', element: <TabShell /> },
   {
     path: '/todo/new',
     element: (
