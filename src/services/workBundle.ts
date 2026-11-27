@@ -15,13 +15,18 @@
  * 与电脑端 `pack.py` 保持同一套限制：2000 文件 / 单文件 20 MB / 总量 200 MB。
  */
 import JSZip from 'jszip';
+import { Capacitor } from '@capacitor/core';
 import {
   deleteWorkFile,
   listWorkFiles,
+  pickEntry,
+  readWorkBinary,
+  readWorkManifest,
   sanitizeWorkName,
   uniqueWorkName,
   writeWorkBinary,
 } from './workLibrary';
+import { Filesystem, Directory } from './filesystemAdapter';
 import { getWorkIdMap, setWorkId } from './workIds';
 
 type ZipEntry = JSZip.JSZipObject;
@@ -393,5 +398,123 @@ export async function looksLikeZip(file: File): Promise<boolean> {
     return head[0] === 0x50 && head[1] === 0x4b && head[2] === 0x03 && head[3] === 0x04;
   } catch {
     return false;
+  }
+}
+
+/* ============================================================
+ *  导出（v4.2.5）—— 和导入严格对称
+ *
+ *  为什么补这一半：作品是全库唯一「只能进不能出」的数据。
+ *  导入有 .mod.zip，导出没有对应的门，换个设备/清个数据就全没了；
+ *  想用电脑上的 pack.py 复用也不可能。这半边补上，闭环才成立。
+ * ============================================================ */
+
+export interface BundleExportResult {
+  ok: boolean;
+  blob?: Blob;
+  fileName?: string;
+  files?: number;
+  bytes?: number;
+  error?: string;
+}
+
+/** 生成 `.mod.zip`（不落盘，交给调用方决定存哪） */
+export async function exportWorkBundle(rawWork: string): Promise<BundleExportResult> {
+  const work = sanitizeWorkName(rawWork);
+  const files = await listWorkFiles(work);
+  if (files.length === 0) return { ok: false, error: '作品是空的，没什么可导出的' };
+  if (files.length > BUNDLE_MAX_FILES) {
+    return { ok: false, error: `文件太多（${files.length}），超过上限 ${BUNDLE_MAX_FILES}` };
+  }
+  const total = files.reduce((sum, file) => sum + file.size, 0);
+  if (total > BUNDLE_MAX_TOTAL_BYTES) {
+    return { ok: false, error: `体积太大（${Math.round(total / 1024 / 1024)}MB），超过 200MB 上限` };
+  }
+
+  const zip = new JSZip();
+  const paths = files.map(file => file.path);
+  for (const file of files) {
+    if (file.size > BUNDLE_MAX_FILE_BYTES) continue;
+    const base64 = await readWorkBinary(work, file.path);
+    if (base64 === null) continue;
+    // 一律走 base64：文本/图片/字体同一套管道，不猜编码
+    zip.file(file.path, base64, { base64: true });
+  }
+
+  // 没有清单就补一份最小的——导入端强制要求 mod.json，缺了等于白导
+  if (!paths.includes('mod.json')) {
+    const manifest = await readWorkManifest(work);
+    const entry = pickEntry(paths, manifest?.entry) ?? 'index.html';
+    zip.file('mod.json', JSON.stringify({
+      spec: BUNDLE_SPEC,
+      id: work,
+      name: manifest?.name || work,
+      version: manifest?.version || '1.0',
+      entry,
+      generated_entry: false,
+    }, null, 2));
+  }
+
+  const blob = await zip.generateAsync({
+    type: 'blob',
+    compression: 'DEFLATE',
+    compressionOptions: { level: 6 },
+  });
+  return { ok: true, blob, fileName: `${work}.mod.zip`, files: files.length, bytes: blob.size };
+}
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = typeof reader.result === 'string' ? reader.result : '';
+      const comma = text.indexOf(',');
+      resolve(comma >= 0 ? text.slice(comma + 1) : '');
+    };
+    reader.onerror = () => reject(reader.error ?? new Error('读取失败'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+/**
+ * 导出到用户找得到的地方：
+ * - 原生：`Documents/yiyan-works/<作品名>.mod.zip`
+ * - Web / Electron：浏览器下载
+ */
+export async function exportWorkToDevice(rawWork: string): Promise<{ ok: boolean; where?: string; error?: string; files?: number }> {
+  const result = await exportWorkBundle(rawWork);
+  if (!result.ok || !result.blob || !result.fileName) {
+    return { ok: false, error: result.error || '打包失败' };
+  }
+  const fileName = result.fileName;
+
+  if (!Capacitor.isNativePlatform()) {
+    try {
+      const url = URL.createObjectURL(result.blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.setTimeout(() => URL.revokeObjectURL(url), 4000);
+      return { ok: true, where: `浏览器下载目录（${fileName}）`, files: result.files };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : '下载失败' };
+    }
+  }
+
+  const dir = 'yiyan-works';
+  try {
+    const base64 = await blobToBase64(result.blob);
+    await Filesystem.writeFile({
+      path: `${dir}/${fileName}`,
+      data: base64,
+      directory: Directory.Documents,
+      recursive: true,
+    });
+    return { ok: true, where: `Documents/${dir}/${fileName}`, files: result.files };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : '保存失败' };
   }
 }

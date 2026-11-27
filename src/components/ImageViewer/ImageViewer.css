@@ -112,3 +112,49 @@
     background: rgba(0, 0, 0, 0.6);
   }
 }
+
+/* 保存到设备（v4.2.5）：贴在关闭按钮左边 */
+.image-viewer-save {
+  position: absolute;
+  top: 16px;
+  right: 64px;
+  z-index: 3;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.5);
+  color: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.image-viewer-save:hover {
+  background: rgba(0, 0, 0, 0.75);
+}
+
+.image-viewer-save:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.image-viewer-toast {
+  position: absolute;
+  left: 50%;
+  bottom: 48px;
+  transform: translateX(-50%);
+  max-width: 86vw;
+  padding: 9px 14px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.78);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 12.5px;
+  line-height: 1.5;
+  text-align: center;
+  word-break: break-all;
+  z-index: 4;
+  pointer-events: none;
+}

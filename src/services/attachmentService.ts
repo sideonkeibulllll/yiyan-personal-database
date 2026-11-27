@@ -16,6 +16,7 @@
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from './filesystemAdapter';
 import { isElectron } from './electronAdapter';
+import { mirrorChatImageToDocuments } from './chatMediaExport';
 import type { Attachment } from '@/types';
 
 /** 选中的图片（未压缩的原始 base64，不含 data: 前缀） */
@@ -671,6 +672,10 @@ export async function saveChatImage(
     directory: Directory.Data,
     recursive: true,
   });
+
+  // v4.2.6：顺手镜像一份到公共 Documents（MT / 文件管理器里能直接找到）。
+  // 不 await——私有目录那份才是功能依赖，公共目录只是出口，失败也不能拖慢发消息。
+  void mirrorChatImageToDocuments(`${fileName}_orig.jpg`, orig.base64);
 
   return { path: origPath, thumbPath, mimeType: orig.mimeType };
 }

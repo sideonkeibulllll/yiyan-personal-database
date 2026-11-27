@@ -14,6 +14,7 @@ import {
   isHtmlPath,
   listWorkFiles,
   readWorkManifest,
+  readWorkManifestObject,
   readWorkText,
   sanitizeWorkName,
   writeWorkText,
@@ -147,16 +148,27 @@ export async function buildWorkCatalog(
   await writeWorkText(work, entry, html, { reason: 'ai' });
 
   const description = opts.description ?? manifest?.description;
-  const modJson = {
-    spec: 1,
+  // v4.2.5：在**原对象**上改键，不再白名单重建。
+  // 旧实现在这里新建 `{spec,id,name,version,entry,...}`，打包器写进来的自定义字段
+  // 会被整段洗掉（主人遇到的「mod.json 只剩 36 字节、cover 没了」就是这类）。
+  const previous = (await readWorkManifestObject(work)) ?? {};
+  const modJson: Record<string, unknown> = {
+    ...previous,
+    spec: typeof previous.spec === 'number' ? previous.spec : 1,
     id,
     name: manifest?.name || work,
     version: manifest?.version || '1.0',
     entry,
     generated_entry: true,
-    ...(cover ? { cover } : {}),
-    ...(description ? { description } : {}),
   };
+  if (cover) {
+    modJson.cover = cover;
+  } else {
+    delete modJson.cover;
+  }
+  if (description) {
+    modJson.description = description;
+  }
   await writeWorkText(work, 'mod.json', `${JSON.stringify(modJson, null, 2)}\n`, { reason: 'ai' });
 
   return {

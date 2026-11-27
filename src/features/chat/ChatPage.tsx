@@ -39,6 +39,7 @@ import { composePromptText, touchPromptUse } from '@/services/promptLibrary';
 import { visibleMcpGroups } from '@/services/mcpGroups';
 import { renderSoulPortrait } from '@/services/soulFacts';
 import { localDateKey } from '@/utils/localDate';
+import { supportsVision } from '@/utils/modelCapability';
 import { getDatabase } from '@/services/database';
 import { getTodoDatabase } from '@/services/todoDatabase';
 import { EntryPickerPanel } from '@/components/EntryPickerPanel';
@@ -1532,6 +1533,8 @@ export function ChatPage() {
         // 执行所有 tool_calls
         const toolCallResults: NonNullable<ChatMessage['toolCallResults']> = [];
         const apiToolMessages: Array<{ role: 'tool'; tool_call_id: string; content: string }> = [];
+        /** view_image 的图片附件（v4.2.5）：不塞进 tool content，单独走一条 user 消息 */
+        const toolMedia: Array<{ kind: 'image'; dataUrl: string; label?: string }> = [];
 
         for (const tc of resolvedToolCalls) {
           // v3.6.6：白名单校验 —— 未在本轮启用列表里的工具一律不执行。
@@ -1583,6 +1586,7 @@ export function ChatPage() {
           }
 
           const result = await executeToolCall(tc.function.name, args);
+          if (result.media && result.media.length > 0) toolMedia.push(...result.media);
           apiToolMessages.push(formatToolResultMessage(result, tc.id));
           toolCallResults.push({
             name: tc.function.name,
@@ -1627,6 +1631,31 @@ export function ChatPage() {
           },
           ...apiToolMessages,
         ];
+
+        // v4.2.5：view_image 的图不进 tool 消息（tool content 只能是字符串，
+        // 塞 base64 会把上下文撑爆），改成紧随其后的一条 user 多模态消息。
+        // 只活在本次 agent loop 里，不写进会话，下一轮不会重发。
+        if (toolMedia.length > 0) {
+          const canSee = supportsVision(effectiveProviderId, effectiveModel, settings.ai.visionModels);
+          if (canSee) {
+            const label = toolMedia.map(item => item.label).filter(Boolean).join('、');
+            loopMessages.push({
+              role: 'user',
+              content: [
+                {
+                  type: 'text',
+                  text: `（这是刚读取的图片${label ? `：${label}` : ''}。看完直接回答，不要复述这句说明。）`,
+                },
+                ...toolMedia.map(item => ({ type: 'image_url' as const, image_url: { url: item.dataUrl } })),
+              ],
+            });
+          } else {
+            loopMessages.push({
+              role: 'user',
+              content: '（说明：刚才 view_image 读到的图片没能附上——当前模型不支持图片输入。只能依据上面的文件信息回答，不要编造图里的内容；需要看图请让用户换一个支持视觉的模型。）',
+            });
+          }
+        }
 
         // 工具预算耗尽：结束循环，让用户决定是否继续
         if (toolCallBudget <= 0) {

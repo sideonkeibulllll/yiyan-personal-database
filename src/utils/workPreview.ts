@@ -20,6 +20,7 @@ import type { RecentPage } from '@/services/workRecent';
 import { buildStorageShimScript, injectScripts } from '@/utils/htmlStorageShim';
 import { buildWorkAiBridgeScript, type WorkAiBridgeConfig } from '@/utils/workAiBridge';
 import { buildNavGuardScript } from '@/utils/workNavGuard';
+import { buildResourceShimScript } from '@/utils/workResourceShim';
 
 const MIME: Record<string, string> = {
   png: 'image/png',
@@ -121,11 +122,22 @@ async function replaceAsync(
   return out + input.slice(last);
 }
 
-async function dataUrlOf(work: string, path: string): Promise<string | null> {
+/**
+ * 读一个资源并转 data URL。
+ * v4.2.5：读不到 / 太大都在这里记账（以前 skipped 从来没被 push 过，
+ * 超 6MB 的图静默保留原路径 → 必然裂图且查不出原因）。
+ */
+async function dataUrlOf(work: string, path: string, report: PreviewReport): Promise<string | null> {
   const base64 = await readWorkBinary(work, path);
-  if (!base64) return null;
+  if (!base64) {
+    if (!report.missing.includes(path)) report.missing.push(path);
+    return null;
+  }
   // base64 长度 ≈ 字节数 * 4/3，粗略挡一下超大资源
-  if (base64.length * 0.75 > MAX_INLINE_BYTES) return null;
+  if (base64.length * 0.75 > MAX_INLINE_BYTES) {
+    if (!report.skipped.includes(path)) report.skipped.push(path);
+    return null;
+  }
   const mime = MIME[extOf(path)] ?? 'application/octet-stream';
   return `data:${mime};base64,${base64}`;
 }
@@ -144,11 +156,8 @@ async function inlineCssUrls(
       if (!refText || refText.startsWith('#')) return full;
       const path = resolveAssetPath(baseDir, refText);
       if (!path) return full;
-      const dataUrl = await dataUrlOf(work, path);
-      if (!dataUrl) {
-        report.missing.push(path);
-        return full;
-      }
+      const dataUrl = await dataUrlOf(work, path, report);
+      if (!dataUrl) return full;
       report.inlined += 1;
       return `url(${dataUrl})`;
     },
@@ -296,11 +305,8 @@ export async function buildWorkPreview(
       return `<style data-yiyan-src="${path.replace(/"/g, '&quot;')}">\n${body}\n</style>`;
     }
 
-    const dataUrl = await dataUrlOf(work, path);
-    if (!dataUrl) {
-      report.missing.push(path);
-      return tag;
-    }
+    const dataUrl = await dataUrlOf(work, path, report);
+    if (!dataUrl) return tag;
     report.inlined += 1;
     return tag.replace(/(\bhref\s*=\s*["'])[^"']*(["'])/i, `$1${dataUrl}$2`);
   });
@@ -336,11 +342,8 @@ export async function buildWorkPreview(
       if (!path) return full;
       // 包内的 html 不内联（多半是 iframe），保留原样避免嵌套文档踩坑
       if (/\.html?$/i.test(path)) return full;
-      const dataUrl = await dataUrlOf(work, path);
-      if (!dataUrl) {
-        report.missing.push(path);
-        return full;
-      }
+      const dataUrl = await dataUrlOf(work, path, report);
+      if (!dataUrl) return full;
       report.inlined += 1;
       return `${pre}${dataUrl}${post}`;
     },
@@ -361,9 +364,8 @@ export async function buildWorkPreview(
           out.push(item);
           continue;
         }
-        const dataUrl = await dataUrlOf(work, path);
+        const dataUrl = await dataUrlOf(work, path, report);
         if (!dataUrl) {
-          report.missing.push(path);
           out.push(item);
           continue;
         }
@@ -378,7 +380,9 @@ export async function buildWorkPreview(
     html = await injectResumeBlock(html, work, pagePath, options.recent);
   }
 
-  const scripts = [buildStorageShimScript(appData), buildNavGuardScript()];
+  // v4.2.5：资源垫片放最前——它要在正文解析出 <img> 之前就装上观察器，
+  // 把「JS 拼出来的相对路径」也接住（静态内联只能覆盖写死的引用）。
+  const scripts = [buildResourceShimScript(), buildStorageShimScript(appData), buildNavGuardScript()];
   if (options.ai) scripts.push(buildWorkAiBridgeScript(options.ai));
   report.html = injectScripts(html, scripts);
   return report;

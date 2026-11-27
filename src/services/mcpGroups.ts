@@ -71,8 +71,9 @@ export const DEFAULT_MCP_GROUPS: McpGroupConfig[] = [
     icon: '📁',
     desc: '作品/文件两级读写（写入免确认） / 删除（需你确认）',
     tools: [...FILE_TOOLS],
-    /** v4.2.0：新增 edit_file / search_in_work / read_upload / copy_file / set_cover */
-    toolsEpoch: 2,
+    /** v4.2.0：新增 edit_file / search_in_work / read_upload / copy_file / set_cover
+     *  v4.2.5：新增 view_image / check_work_assets（bump 后老配置会自动补上，只补不删） */
+    toolsEpoch: 3,
     builtin: true,
     visible: true,
   },

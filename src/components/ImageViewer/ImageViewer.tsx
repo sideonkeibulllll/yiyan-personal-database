@@ -10,6 +10,7 @@
  */
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Capacitor } from '@capacitor/core';
+import { saveImageToDevice } from '@/utils/saveImage';
 import './ImageViewer.css';
 
 interface ImageViewerProps {
@@ -48,6 +49,9 @@ export function ImageViewer({ images, startIndex = 0, onClose }: ImageViewerProp
   /** 已放大时：图片的平移量（用于查看边缘） */
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
+  /** 保存到设备的状态（v4.2.5）：提示「存到哪了」比转圈更重要 */
+  const [saveHint, setSaveHint] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
@@ -78,6 +82,19 @@ export function ImageViewer({ images, startIndex = 0, onClose }: ImageViewerProp
 
   const goNext = useCallback(() => goTo(index + 1), [goTo, index]);
   const goPrev = useCallback(() => goTo(index - 1), [goTo, index]);
+
+  /** 把当前这张存到用户找得到的地方（公共 Documents / 浏览器下载） */
+  const handleSave = useCallback(async () => {
+    if (saving) return;
+    const src = images[index];
+    if (!src) return;
+    setSaving(true);
+    setSaveHint('');
+    const result = await saveImageToDevice(src, 'yiyan');
+    setSaving(false);
+    setSaveHint(result.ok ? `已保存 → ${result.where ?? ''}` : (result.error || '保存失败'));
+    window.setTimeout(() => setSaveHint(''), 4000);
+  }, [images, index, saving]);
 
   /**
    * 把平移量限制在「图片放大后超出容器的范围」内，
@@ -249,6 +266,26 @@ export function ImageViewer({ images, startIndex = 0, onClose }: ImageViewerProp
       <div className="image-viewer-counter">
         {index + 1} / {images.length}
       </div>
+
+      {/* 保存到设备（v4.2.5）：私有目录里的图终于有出口了 */}
+      <button
+        className="image-viewer-save"
+        onClick={(e) => {
+          e.stopPropagation();
+          void handleSave();
+        }}
+        disabled={saving}
+        aria-label="保存到设备"
+        title="保存到设备"
+      >
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 3v12" />
+          <path d="m7 11 5 5 5-5" />
+          <path d="M5 21h14" />
+        </svg>
+      </button>
+
+      {saveHint && <div className="image-viewer-toast">{saveHint}</div>}
 
       {/* 关闭按钮 */}
       <button

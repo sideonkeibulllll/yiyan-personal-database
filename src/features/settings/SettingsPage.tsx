@@ -67,6 +67,7 @@ import { FileManagerPage } from '@/features/files/FileManagerPage';
 import { ImportPanel } from './panels/ImportPanel';
 import { ExportPanel } from './panels/ExportPanel';
 import { BackupPanel } from './panels/BackupPanel';
+import { ChatMediaPanel } from './panels/ChatMediaPanel';
 import { RestorePanel } from './panels/RestorePanel';
 import { CloudPanel } from './panels/CloudPanel';
 import { SyncPanel } from './panels/SyncPanel';
@@ -94,6 +95,7 @@ type SettingsTab =
   | 'import'
   | 'export'
   | 'backup'
+  | 'chatMedia'
   | 'restore'
   | 'cloud'
   | 'sync'
@@ -148,6 +150,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { key: 'dataManager', label: '数据管理', alias: '标签 组' },
       { key: 'backup', label: '本地备份', alias: 'zip 导出' },
+      { key: 'chatMedia', label: '聊天图片', alias: '缓存图片 相册 导出 文件管理器' },
       { key: 'cloud', label: '云端备份', alias: 'r2 d1 中转站' },
       { key: 'sync', label: '设备互通', alias: '局域网 互传' },
     ],
@@ -896,6 +899,9 @@ export function SettingsPage() {
 
       case 'export':
         return <ExportPanel />;
+
+      case 'chatMedia':
+        return <ChatMediaPanel />;
 
       case 'backup':
         return (

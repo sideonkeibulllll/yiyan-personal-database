@@ -61,13 +61,15 @@ import {
   type FileVersion,
 } from '@/services/fileAssets';
 import { buildWorkPreview, parseNavTarget } from '@/utils/workPreview';
+import { resolveWorkResourceDataUrl, resourceBaseDirOf } from '@/utils/workResourceShim';
+import { exportWorkToDevice } from '@/services/workBundle';
 import { bytesToBase64 } from '@/services/traeImage';
 import { IconBack, IconCopy, IconCheck, IconEdit, IconTrash, IconRename, IconPlus } from '@/components/icons';
 import { goBack } from '@/utils/navBack';
 import './Files.css';
 
 type Mode = 'preview' | 'source';
-type Panel = null | 'pages' | 'actions' | 'ai' | 'versions' | 'appdata' | 'newfile' | 'cover';
+type Panel = null | 'pages' | 'actions' | 'ai' | 'versions' | 'appdata' | 'newfile' | 'cover' | 'assets';
 
 interface PendingAiAsk {
   id: string;
@@ -170,6 +172,8 @@ export function FileViewPage() {
   // 文档和它的来源页绑在一起：只有 ready 的才拿去渲染 iframe。
   // （iframe 先挂载再改 srcDoc，部分内核不会重新加载文档，会白屏）
   const [previewDoc, setPreviewDoc] = useState<{ path: string; html: string } | null>(null);
+  /** 预览资源自检（v4.2.5）：包里根本找不到的引用 / 太大没预载的引用 */
+  const [assetReport, setAssetReport] = useState<{ missing: string[]; skipped: string[] } | null>(null);
   const [previewToken, setPreviewToken] = useState(0);
   /** iframe 首帧是否已画出（v4.2.4：暗色主题下避免白闪，见 Files.css .file-view-frame） */
   const [frameReady, setFrameReady] = useState(false);
@@ -363,6 +367,7 @@ export function FileViewPage() {
       });
       if (cancelled) return;
       setPreviewDoc({ path: currentPath, html: report?.html ?? '' });
+      setAssetReport(report ? { missing: report.missing, skipped: report.skipped } : null);
     })();
     return () => { cancelled = true; };
   }, [work, currentPath, previewData, previewToken, canPreview, loaded, missing, isCatalogPage]);
@@ -379,13 +384,27 @@ export function FileViewPage() {
     return () => window.clearTimeout(timer);
   }, [previewReady, frameReady, currentPath, previewToken]);
 
-  // iframe 消息桥：应用数据回写
+  // iframe 消息桥：应用数据回写 + 运行时资源按需加载（v4.2.5）
   useEffect(() => {
     const onMessage = (ev: MessageEvent) => {
       const win = iframeRef.current?.contentWindow;
       if (!win || ev.source !== win) return;
       const data = ev.data as Record<string, unknown> | null;
       if (!data || typeof data !== 'object') return;
+      // 垫片发现相对路径资源（多半是 JS 拼出来的图）→ 读文件回 data URL
+      if (data.__yiyanRes && typeof data.__yiyanRes === 'object') {
+        const req = data.__yiyanRes as { id?: unknown; ref?: unknown };
+        const id = typeof req.id === 'string' ? req.id : '';
+        const ref = typeof req.ref === 'string' ? req.ref : '';
+        if (!id || !ref) return;
+        const baseDir = resourceBaseDirOf(currentPath);
+        void resolveWorkResourceDataUrl(work, baseDir, ref).then(dataUrl => {
+          const target = iframeRef.current?.contentWindow;
+          if (!target) return;
+          target.postMessage({ __yiyanResResult: { id, ref, dataUrl: dataUrl ?? undefined } }, '*');
+        });
+        return;
+      }
       if (data.__yiyanAppData && typeof data.__yiyanAppData === 'object') {
         const next = data.__yiyanAppData as Record<string, string>;
         appDataRef.current = next;
@@ -398,9 +417,14 @@ export function FileViewPage() {
     window.addEventListener('message', onMessage);
     return () => {
       window.removeEventListener('message', onMessage);
-      if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
     };
-  }, [work]);
+  }, [work, currentPath]);
+
+  // 未落盘的应用数据只能在**卸载时**丢——切页（currentPath 变化）不能清，
+  // 否则刚要保存的 localStorage 会跟着旧 effect 一起被清掉（v4.2.5 修）
+  useEffect(() => () => {
+    if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+  }, []);
 
   // iframe 消息桥：包内链接跳转（目录页点卡片 → 切到那一页继续预览）
   useEffect(() => {
@@ -522,6 +546,16 @@ export function FileViewPage() {
     }
   };
 
+  /** 复制某条资源路径（资源自检面板用，v4.2.5） */
+  const handleCopyPath = async (path: string) => {
+    try {
+      await navigator.clipboard.writeText(path);
+      flash(`已复制路径：${path}`);
+    } catch {
+      flash(path);
+    }
+  };
+
   const handleRenameWork = async () => {
     const next = renameValue.trim();
     if (!next || next === work) { setRenaming(false); return; }
@@ -544,6 +578,20 @@ export function FileViewPage() {
       });
     } catch {
       window.alert('复制失败，请重试');
+    }
+  };
+
+  /** 导出成 .mod.zip（v4.2.5）：和「导入作品包」对称，作品终于有出口了 */
+  const handleExportBundle = async () => {
+    try {
+      const result = await exportWorkToDevice(work);
+      if (!result.ok) {
+        window.alert(result.error || '导出失败');
+        return;
+      }
+      flash(`已导出 ${result.files ?? 0} 个文件 → ${result.where ?? ''}`);
+    } catch {
+      window.alert('导出失败，请重试');
     }
   };
 
@@ -877,6 +925,18 @@ export function FileViewPage() {
         </>
       )}
 
+      {/* 资源自检角标（v4.2.5）：引用了但包里没有的文件，直接在页面上认账 */}
+      {!editing && canPreview && assetReport && assetReport.missing.length > 0 && (
+        <button
+          type="button"
+          className="asset-badge"
+          onClick={() => setPanel('assets')}
+          title="html 里引用了、但作品文件夹里找不到的文件"
+        >
+          {assetReport.missing.length} 个资源缺失
+        </button>
+      )}
+
       {/* 编辑态：底部一条保存栏，不跟悬浮球抢位置 */}
       {editing && (
         <div className="file-edit-bar">
@@ -1029,6 +1089,14 @@ export function FileViewPage() {
               <button type="button" className="sheet-action" onClick={() => importInputRef.current?.click()}>
                 <span className="sheet-action-icon">↧</span>
                 <span>导入文件</span>
+              </button>
+              <button
+                type="button"
+                className="sheet-action"
+                onClick={() => { setPanel(null); void handleExportBundle(); }}
+              >
+                <span className="sheet-action-icon">↥</span>
+                <span>导出作品包</span>
               </button>
               <button
                 type="button"
@@ -1208,6 +1276,61 @@ export function FileViewPage() {
             <div className="files-modal-actions">
               <button type="button" className="files-create-btn ghost" onClick={handleDenyAi}>先不用</button>
               <button type="button" className="files-create-btn" onClick={() => void handleAllowAi()}>允许</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 资源自检面板 */}
+      {panel === 'assets' && (
+        <div className="files-modal-mask" onClick={() => setPanel(null)}>
+          <div className="files-modal wide" onClick={e => e.stopPropagation()}>
+            <h3>资源自检 · {currentPath}</h3>
+            {(!assetReport || (assetReport.missing.length === 0 && assetReport.skipped.length === 0)) && (
+              <p className="files-empty-hint">这一页没有发现缺失的引用喵。</p>
+            )}
+            {assetReport && assetReport.missing.length > 0 && (
+              <>
+                <p className="files-empty-hint">
+                  下面这些路径是「html 里写了、但作品文件夹里没有」，会显示成裂图。
+                  把文件放进去，或者让 AI 用 check_work_assets 查同一份清单再改引用。
+                </p>
+                <div className="version-list">
+                  {assetReport.missing.map(path => (
+                    <div key={path} className="version-row">
+                      <div className="version-info">
+                        <span className="version-time">{path}</span>
+                      </div>
+                      <div className="version-acts">
+                        <button
+                          type="button"
+                          className="files-chip"
+                          onClick={() => { setPanel(null); void handleCopyPath(path); }}
+                        >
+                          复制路径
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+            {assetReport && assetReport.skipped.length > 0 && (
+              <>
+                <p className="files-empty-hint">
+                  这些文件太大，没在打开时预载（预览时会按需加载，速度慢一点，但不会裂）：
+                </p>
+                <div className="version-list">
+                  {assetReport.skipped.slice(0, 40).map(path => (
+                    <div key={path} className="version-row">
+                      <div className="version-info"><span className="version-time">{path}</span></div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+            <div className="files-modal-actions">
+              <button type="button" className="files-create-btn" onClick={() => setPanel(null)}>关闭</button>
             </div>
           </div>
         </div>

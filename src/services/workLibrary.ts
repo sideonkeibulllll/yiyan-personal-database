@@ -121,6 +121,25 @@ export interface WorkManifest {
   generatedEntry?: boolean;
 }
 
+/**
+ * 读 mod.json 的**原始对象**（v4.2.5）
+ *
+ * readWorkManifest 是白名单视图，只给读的人用；写回时必须拿原对象，
+ * 否则「不认识就丢掉」——`build_catalog` 之前就是这样把 cover 洗没的。
+ * 打包器/插件写进来的自定义字段（配色、作者、tags…）同理要保住。
+ */
+export async function readWorkManifestObject(rawName: string): Promise<Record<string, unknown> | null> {
+  const raw = await readRaw(sanitizeWorkName(rawName), 'mod.json');
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(base64ToText(raw)) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    return parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
 /** 读作品内的 mod.json（没有或不合法就返回 null，不影响老作品） */
 export async function readWorkManifest(rawName: string): Promise<WorkManifest | null> {
   const raw = await readRaw(sanitizeWorkName(rawName), 'mod.json');

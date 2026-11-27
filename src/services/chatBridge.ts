@@ -29,13 +29,15 @@
  */
 
 import {
-  listWorks, listWorkFiles, readWorkText, writeWorkText, writeWorkBinary,
+  listWorks, listWorkFiles, readWorkText, writeWorkText, writeWorkBinary, readWorkBinary,
   deleteWorkFile, createWork, renameWork, deleteWork, workExists, entryNameFor,
   readWorkTextRange, copyWorkFile, setWorkCover, sanitizeRelPath,
 } from './workLibrary';
 import { applyEdits, describeEditFailure, EDIT_MAX_PER_FILE } from './workPatch';
 import { parseCoverMeta } from '@/utils/workCover';
 import { includesWholeWord, isAsciiWordQuery } from '@/utils/workSearch';
+import { auditWorkAssets, describeAssetAudit } from '@/utils/workAssetAudit';
+import { compressImageDataUrl, imageMimeOf } from '@/utils/imageCompress';
 import { isUploadPath, readUploadBase64, readUploadText } from './chatUploads';
 import { bytesToBase64, drawTraeImage } from './traeImage';
 import { buildWorkCatalog } from './workCatalog';
@@ -134,6 +136,12 @@ export interface ToolResult {
   success: boolean;
   data?: unknown;
   error?: string;
+  /**
+   * 工具产出的图片（v4.2.5，`view_image` 用）。
+   * **刻意不放进 data**：data 会被 JSON.stringify 塞进 tool 消息和 UI 摘要，
+   * base64 一进去就是几十万 token。由调用方转成多模态附件单独发。
+   */
+  media?: Array<{ kind: 'image'; dataUrl: string; label?: string }>;
 }
 
 /**
@@ -887,6 +895,30 @@ export const BRIDGE_TOOLS: BridgeTool[] = [
     },
   },
   {
+    name: 'check_work_assets',
+    description: '资源自检：把作品 html 里写的引用（src / href / poster / srcset / css url()）和文件夹里**真实存在**的文件对一遍，列出「引用了但不存在」「只有大小写对不上」的路径。\n什么时候用：图裂、样式没加载、页面点不开、用户说「图片显示不出来」——**先跑它，别靠读 html 猜路径**，一次就能知道是路径写错还是文件真没有。\n它还会把 JS 里动态拼的路径（`pages/p${n}.jpg` 这种）单独列出来：静态查不到内容，只能提醒你核对目录名和扩展名。',
+    parameters: {
+      type: 'object',
+      properties: {
+        work: { type: 'string', description: '作品名' },
+        path: { type: 'string', description: '可选：只查这一页（相对路径）。不传就查全部 html' },
+      },
+      required: ['work'],
+    },
+  },
+  {
+    name: 'view_image',
+    description: '**真的看一张图**（作品里的图片：封面、截图、设计稿、用户上传后 copy_file 进来的照片）。需要判断图里画了什么、封面合不合适、截图哪里不对时用它——不要用 read_file 读图片，那只会拿到乱码。\n限制：一次一张；大图会自动缩到长边 1024；当前模型不支持图片输入时，只会返回文件信息（尺寸/大小），看不到内容。',
+    parameters: {
+      type: 'object',
+      properties: {
+        work: { type: 'string', description: '作品名' },
+        path: { type: 'string', description: '图片相对路径，如 cover.jpg、pages/p01.jpg' },
+      },
+      required: ['work', 'path'],
+    },
+  },
+  {
     name: 'build_catalog',
     description: '给作品生成 / 更新目录页（入口页）。扫描作品内全部 html，按目录分组列成「卡片 + 搜索框」的页面，写成 index.html（这个名字被占用时退到 _index.html），同时写入 mod.json。\n写完多个页面后调它一次，散页面就变成结构完整的作品包；重复调用会原地更新同一张目录页，不会越堆越多。页面少于 2 个时不需要调。',
     parameters: {
@@ -975,7 +1007,7 @@ export const PROMPT_TOOLS = [
   'get_prompt',
   'save_prompt',
 ];
-/** 文件与作品工具（v3.8.0，v4.2.0 加局部编辑/搜索/复制/封面声明）：删除类需确认 */
+/** 文件与作品工具（v3.8.0，v4.2.0 加局部编辑/搜索/复制/封面声明，v4.2.5 加资源自检/看图） */
 export const FILE_TOOLS = [
   'list_works',
   'create_work',
@@ -992,6 +1024,8 @@ export const FILE_TOOLS = [
   'set_cover',
   'build_catalog',
   'write_image',
+  'view_image',
+  'check_work_assets',
   'delete_file',
 ];
 /** 画图工具（v3.8.0）：TRAE 文生图落盘（花积分，走账号倾向） */
@@ -1032,6 +1066,7 @@ export const TOOL_DISPLAY_NAMES: Record<string, string> = {
   edit_file: '局部修改文件', search_in_work: '作品内搜索', read_upload: '读取上传文件',
   copy_file: '复制文件进作品', set_cover: '设置作品封面',
   build_catalog: '生成目录页', write_image: '写入图片',
+  view_image: '查看图片', check_work_assets: '作品资源自检',
   delete_file: '删除文件', draw_image: '绘制图片',
   web_search: '联网搜索', web_fetch: '读取网页',
 };
@@ -2709,6 +2744,58 @@ export async function executeToolCall(
         base64 = base64.replace(/^data:[^,]*,/, '');
         const saved = await writeWorkBinary(work, path, base64);
         return { success: true, data: { name: work, path: saved, message: `图片已写入「${saved}」` } };
+      }
+      /* === v4.2.5: 看图 + 资源自检 === */
+      case 'view_image': {
+        const work = typeof args.work === 'string' ? args.work.trim() : '';
+        const path = typeof args.path === 'string' ? args.path.trim() : '';
+        if (!work || !path) return { success: false, error: 'work / path 必填' };
+        const base64 = await readWorkBinary(work, path);
+        if (!base64) return { success: false, error: `图片不存在：${work}/${path}` };
+        const mime = imageMimeOf(path);
+        if (!mime) return { success: false, error: `不是图片：${path}（支持 png/jpg/webp/gif/svg/bmp）` };
+        const bytes = Math.floor((base64.length * 3) / 4);
+        let dataUrl = `data:${mime};base64,${base64}`;
+        let shrunk = false;
+        try {
+          const compressed = await compressImageDataUrl(dataUrl, 1024, 0.82);
+          if (compressed && compressed.length < dataUrl.length) {
+            dataUrl = compressed;
+            shrunk = true;
+          }
+        } catch {
+          /* 压缩失败就用原图 */
+        }
+        return {
+          success: true,
+          data: {
+            name: work,
+            path,
+            bytes,
+            shrunk,
+            note: '图片已随下一条消息附上，可以直接看；这条回执里没有图片数据。',
+          },
+          media: [{ kind: 'image', dataUrl, label: `${work}/${path}` }],
+        };
+      }
+      case 'check_work_assets': {
+        const work = typeof args.work === 'string' ? args.work.trim() : '';
+        const path = typeof args.path === 'string' ? args.path.trim() : '';
+        if (!work) return { success: false, error: 'work 必填' };
+        const audit = await auditWorkAssets(work, path || undefined);
+        return {
+          success: true,
+          data: {
+            name: work,
+            pages: audit.pages,
+            refs: audit.refs,
+            issues: audit.issues.slice(0, 60),
+            issueCount: audit.issues.length,
+            images: audit.images,
+            dynamicHints: audit.dynamicHints,
+            report: describeAssetAudit(audit),
+          },
+        };
       }
       case 'delete_file': {
         const work = typeof args.work === 'string' ? args.work.trim() : '';
